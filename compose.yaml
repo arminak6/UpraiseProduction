@@ -1,0 +1,164 @@
+name: upraise
+
+x-ingestion-environment: &ingestion-environment
+  UPRAISE_JOBS_DSN: ${UPRAISE_JOBS_DSN:-postgresql://upraise_jobs:${JOBS_PASSWORD:-upraise_jobs_password}@postgres:5432/upraise_jobs}
+  UPRAISE_AUDIT_DSN: ${UPRAISE_AUDIT_DSN:-postgresql://upraise_audit_app:${AUDIT_PASSWORD:-upraise_audit_password}@postgres:5432/${POSTGRES_DB:-upraise_audit}}
+  UPRAISE_DATA_DIR: /data/ingestion
+  UPRAISE_AWS_CREDENTIALS_FILE: /run/secrets/aws_credentials.json
+  UPRAISE_AWS_REGION: ${UPRAISE_AWS_REGION:-eu-central-1}
+  UPRAISE_OAUTH_ISSUER: ${UPRAISE_OAUTH_ISSUER:-}
+  UPRAISE_OAUTH_AUDIENCE: ${UPRAISE_OAUTH_AUDIENCE:-}
+  UPRAISE_OAUTH_JWKS_URL: ${UPRAISE_OAUTH_JWKS_URL:-}
+  UPRAISE_OAUTH_CLIENTS: ${UPRAISE_OAUTH_CLIENTS:-[]}
+  UPRAISE_TRUSTED_PROXY_CIDRS: ${UPRAISE_TRUSTED_PROXY_CIDRS:-[]}
+  UPRAISE_MTLS_ALLOWED_FINGERPRINTS: ${UPRAISE_MTLS_ALLOWED_FINGERPRINTS:-[]}
+  UPRAISE_MOODLE_ALLOWED_CIDRS: ${UPRAISE_MOODLE_ALLOWED_CIDRS:-[]}
+  UPRAISE_ARTIFACT_RETENTION_DAYS: ${UPRAISE_ARTIFACT_RETENTION_DAYS:-0}
+
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    environment:
+      <<: *ingestion-environment
+      UPRAISE_ENVIRONMENT: ${UPRAISE_ENVIRONMENT:-production}
+      UPRAISE_LOCAL_TEST_MODE: ${UPRAISE_LOCAL_TEST_MODE:-false}
+      UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
+    volumes:
+      - ingestion_data:/data/ingestion
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); assert response.status == 200"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  migrate:
+    image: upraise-backend
+    build:
+      context: ./backend
+    command: ["python", "-m", "upraise_ai.storage.migrate"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-upraise_dev}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-upraise_dev_password}
+      JOBS_DB: upraise_jobs
+      JOBS_USER: upraise_jobs
+      JOBS_PASSWORD: ${JOBS_PASSWORD:-upraise_jobs_password}
+      AUDIT_DB: ${POSTGRES_DB:-upraise_audit}
+      AUDIT_USER: upraise_audit_app
+      AUDIT_PASSWORD: ${AUDIT_PASSWORD:-upraise_audit_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  worker:
+    image: upraise-backend
+    build:
+      context: ./backend
+    command: ["python", "-m", "upraise_ai.workers.ingestion"]
+    environment:
+      <<: *ingestion-environment
+    volumes:
+      - ingestion_data:/data/ingestion
+      - model_cache:/cache
+      - type: bind
+        source: ./aws_credentials.json
+        target: /run/secrets/aws_credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib, time; p=pathlib.Path('/tmp/upraise-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime < 150"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    profiles: ["tools"]
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8501}:8501"
+    environment:
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://backend:8000}
+      UPRAISE_LOCAL_TEST_MODE: ${UPRAISE_LOCAL_TEST_MODE:-false}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3); assert response.status == 200"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The official image has Bash, but does not promise curl or wget.
+      # Send an HTTP request using Bash builtins and check the status line.
+      test:
+        - CMD
+        - /bin/bash
+        - -ec
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/6333
+          printf 'GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+          IFS= read -r status <&3
+          [[ "$$status" == *" 200 "* ]]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-upraise_audit}
+      POSTGRES_USER: ${POSTGRES_USER:-upraise_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-upraise_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  qdrant_data:
+  postgres_data:
+  ingestion_data:
+  model_cache:

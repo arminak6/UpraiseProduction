@@ -1,0 +1,11 @@
+.env
+**/.env
+aws_credentials.json
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/codex_helper/
+/backend/codex_helper/*
+!/backend/codex_helper/.gitkeep

@@ -1,0 +1,192 @@
+# UPRAISE AI Module
+
+A1 PDF ingestion, A2 list/delete, A4 job status and A6 cancellation/receipt are implemented.
+The API accepts teaching material from authenticated Middleware, stages it
+persistently, and returns HTTP 202 with document_id only. The Location header
+identifies the original A4 job-status URL; durable internal jobs remain. A separate
+worker runs the reviewed Uprise/v2 extraction method and stores course chunks
+and Titan embeddings in Qdrant. PostgreSQL stores operational job state and
+separate audit records; document text is not duplicated there.
+
+The original Word draft remains the API baseline, with the user-approved
+extensions recorded in [api-baseline.md](backend/docs/api-baseline.md).
+The Word file is currently absent from its recorded root path. The supplied
+architecture diagram is retained as conversation context. A/B/C grouping and
+all reserved endpoints remain unchanged. This work implements A1, A2, A4 and A6.
+See [A2's contract and deletion recovery](backend/docs/a2.md).
+See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
+On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
+from its response body. A1 retains processor readability/resource limits and
+OAuth/mTLS INGRESS. content_hash is unverified source metadata; actual SHA-256
+is computed internally as source_hash. Current pipeline: pdf-ingestion-v1.3.
+
+## Start
+
+Docker Desktop/Linux containers and Compose are required. The ignored root
+aws_credentials.json is mounted read-only into the worker, never baked into
+images. It already contains the user-provided AWS settings. A normal AWS
+credential chain is supported by the Python adapter when no credential file
+is configured; adjust the deployment mount when using an IAM role.
+
+```sh
+docker compose config --quiet
+docker compose up --build -d --wait --wait-timeout 180
+docker compose ps
+docker compose logs -f backend worker
+```
+
+Startup creates the durable job/audit schemas through a repeatable migrate
+service. Backend/worker use separate non-superuser database roles. The
+bootstrap service alone receives PostgreSQL administrative credentials.
+The Compose password defaults are for local infrastructure; replace them for
+deployment. .env.example describes the settings, including connection-string
+overrides for passwords that need URI encoding.
+
+- API docs: http://localhost:8000/docs
+- Liveness: http://localhost:8000/health
+- Optional Streamlit API Testbench: http://localhost:8501
+
+Streamlit is a testing tool in frontend/, separate from the final product.
+Start it with docker compose --profile tools up --build -d --wait.
+It provides A1 PDF/URL submission, A2 course lists/deletion, A4 status polling,
+A6 job actions, health and a general API
+request panel. Enter the real OAuth token and HTTPS mTLS gateway credentials
+in its sidebar for authenticated requests. See [frontend/README.md](frontend/README.md).
+
+Local Streamlit testing is enabled on this workstation through the ignored root
+.env (environment=development, local_test_mode=true). Leave token/certificate
+fields empty. [Local testing setup](backend/docs/local-testing.md) explains the
+testing identity and how to switch back. Code/Compose defaults remain production
+with local mode disabled; real deployment requires the OAuth/mTLS settings in
+[the A1 integration guide](backend/docs/a1.md).
+First conversion downloads Docling/EasyOCR models into the persistent cache;
+allow extra time and prewarm that cache before deployment.
+
+## Storage and recovery
+
+- upraise_qdrant_data: source chunks, vectors and provenance.
+- upraise_postgres_data: upraise_jobs and upraise_audit databases.
+- upraise_ingestion_data: accepted PDFs, crops, native Docling JSON and prepared
+  extraction/embedding checkpoints needed for recovery and inspection.
+- upraise_model_cache: local extraction/OCR/formula model weights.
+
+Job leases recover abandoned work after a worker restart. Successful preparation
+is checkpointed, avoiding repeated model calls when publishing must be retried.
+Middleware should supply Idempotency-Key and reuse it for a network retry.
+A new intentional submission receives a new document ID, matching the old
+pipeline. Processing is at-least-once; external model calls are not guaranteed
+exactly once. Only DONE jobs and their active_attempt may be used by future
+retrieval code, and documents with a deletion request must be excluded.
+Raw unfiltered Qdrant points are not the activation authority.
+
+A2 deletes all document vectors by course/document filter, fences active ingestion,
+and records deletion audit before 204. Durable deletion requests recover after
+dependency failures. Lists combine operational status/version with active Qdrant
+chunk counts. Deleted operational records and processing artifacts follow the
+existing retention policy; deletion does not remove Moodle files or audit history.
+
+A6 takes a required reason query parameter, CANCEL or RECEIVED, and returns 204
+after temporary-output cleanup and audit. Cancellation immediately fences queued/
+running work. A busy worker returns recoverable 503 until it stops writing files;
+durable cleanup resumes automatically. Receipt acknowledgment retains terminal
+results and active vectors. Both actions preserve source PDFs and history.
+
+Source/artifact cleanup is disabled until an operational retention period is
+agreed, preserving the old pipeline's evidence. A positive
+UPRAISE_ARTIFACT_RETENTION_DAYS enables cleanup for terminal jobs/completed deletions. It does
+not erase Qdrant course material, job records or audit history. Disk capacity,
+backups, replication and retention are deployment responsibilities. Shared
+volume storage supports the current single-host Compose deployment; multiple
+hosts need shared storage or an object-storage adapter.
+
+```sh
+docker compose --profile tools down
+docker compose up -d --wait --wait-timeout 180
+```
+
+Normal down retains all named volumes. down --volumes is a deliberate data
+reset and is never part of validation. Existing other-project data are untouched.
+Before changing the pipeline version/model settings, drain pending jobs or
+retain workers for their recorded version: workers claim compatible jobs only.
+
+## Layout
+
+```text
+UpraiseProduction/
+  compose.yaml
+  .env.example
+  .gitignore
+  aws_credentials.json          # local and ignored
+  PROJECT_KNOWLEDGE.md
+  README.md
+  codex_helper/                 # ignored verification evidence/fixtures
+  backend/
+    Dockerfile
+    .dockerignore
+    .env.example
+    pyproject.toml
+    uv.lock
+    README.md
+    docs/
+      api-baseline.md
+      a1-design.md
+      a1.md
+      a2.md
+      a6.md
+      local-testing.md
+    tests/
+      test_a1.py
+      test_a1_integration.py
+      test_a2_integration.py
+      test_a6_integration.py
+      test_local_testing.py
+      test_ingress.py
+      test_moodle.py
+    codex_helper/.gitkeep
+    src/upraise_ai/
+      main.py
+      api/
+        authoring/{__init__.py,documents.py}
+        runtime/__init__.py
+        operations/__init__.py
+      core/{config.py,errors.py,utils.py}
+      schemas/{documents.py,jobs.py}
+      guards/{ingress.py,body_limit.py}
+      services/
+        formats.py
+        chunking.py
+        embeddings.py
+        aws.py
+        moodle.py
+        pdf/{input.py,parser.py,languages.py,inline_math.py,vision.py,enrichment.py,processor.py}
+      storage/{jobs.py,audit.py,files.py,vectors.py,migrate.py}
+      workflows/{submission.py,documents.py,jobs.py}
+      workers/ingestion.py
+  frontend/
+    Dockerfile
+    .dockerignore
+    .env.example
+    app.py
+    api_client.py
+    tests/
+    requirements.txt
+    README.md
+```
+
+Package __init__.py files and original placeholders are omitted from the
+compact tree. Only services/pdf adds nesting beyond the original API groups;
+that format boundary was approved for later DOCX/CSV processors.
+
+## Checks
+
+```sh
+docker compose run --rm --no-deps --user root -e UPRAISE_ENVIRONMENT=production -e UPRAISE_LOCAL_TEST_MODE=false -v ./backend/src:/app/src:ro -v ./backend/tests:/tests:ro backend uv run --group dev pytest /tests -q -p no:cacheprovider
+docker compose run --rm --no-deps --user root -v ./backend:/workspace backend uv run --group dev ruff check --config /workspace/pyproject.toml /workspace/src /workspace/tests
+docker compose run --rm --no-deps -v ./backend:/app backend uv lock --check
+```
+
+Tests use an isolated PostgreSQL job schema and Qdrant collection and remove
+only their own records. Provider doubles are limited to automated tests; runtime
+always uses the configured Docling/Nova/Titan pipeline. Live validation also
+used synthetic PDFs, real OCR/model calls, PostgreSQL and Qdrant. Results are
+recorded in codex_helper/a1-validation.md.
