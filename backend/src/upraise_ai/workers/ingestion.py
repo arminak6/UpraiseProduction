@@ -15,6 +15,7 @@ from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
 from upraise_ai.storage.vectors import VectorStore
+from upraise_ai.workers.supervision import ChildTerminationError, JobSupervisor, run_recovery_child
 from upraise_ai.workflows.documents import DocumentService
 from upraise_ai.workflows.jobs import JobService
 
@@ -48,7 +49,7 @@ def classify_error(error):
 
 
 class IngestionWorker:
-    def __init__(self, settings, jobs=None, audit=None, vectors=None, processor=None):
+    def __init__(self, settings, jobs=None, audit=None, vectors=None, processor=None, *, notify=None):
         self.settings = settings
         self.jobs = jobs or JobRepository(settings.jobs_dsn.get_secret_value())
         self.audit = audit or AuditRepository(settings.audit_dsn.get_secret_value())
@@ -58,8 +59,67 @@ class IngestionWorker:
         self.processor = processor or get_processor("application/pdf", settings)
         self.staging = StagingStore(settings.data_dir)
         self.stop = threading.Event()
+        self.notify = notify
+        self.supervisor = JobSupervisor(settings)
         self.documents = DocumentService(self.jobs, self.vectors, self.audit)
         self.job_control = JobService(self.jobs, self.vectors, self.audit, self.staging)
+
+    def _notify(self, *event):
+        if self.notify is not None:
+            self.notify(*event)
+
+    def _record_failure(self, job, error):
+        """Persist an outcome only while this attempt still owns the job row.
+
+        The caller holds the artifact lock and any supervised writer has exited.
+        A concurrent cancellation, publication or reclaim always takes precedence.
+        """
+        job_id, token = str(job["job_id"]), str(job["lease_token"])
+        code, retryable = classify_error(error)
+        retry = retryable and job["attempts"] < self.settings.max_attempts
+        try:
+            with self.jobs.owned_transaction(job_id, token) as conn:
+                self.vectors.remove_attempt(str(job["document_id"]), token)
+                self.audit.record(job, "RETRY" if retry else "FAILED", {"code": code}, attempt=True)
+                self.jobs.fail(
+                    conn, job_id, token, code, retry, min(300, 10 * 2 ** min(8, job["attempts"] - 1))
+                )
+        except LeaseLost:
+            return
+        except Exception:
+            # A failed/uncertain commit remains recoverable through the lease.
+            log.error("Job %s outcome persistence unavailable; lease recovery required", job_id)
+            return
+        log.warning("Job %s %s: %s", job_id, "retrying" if retry else "failed", code)
+
+    def supervise(self, job):
+        """The service path: every claimed job runs in a fresh, bounded process."""
+        job_id = str(job["job_id"])
+        if job["attempts"] > self.settings.max_attempts:
+            code = "RETRY_LIMIT_REACHED"
+        else:
+            result = self.supervisor.run(
+                job, self.stop, heartbeat=lambda: Path("/tmp/upraise-worker-heartbeat").touch()
+            )
+            if result.reason == "WORKER_STOPPED":
+                return  # Durable lease recovery resumes this job after restart.
+            # Even exit code zero may follow an unavailable outcome commit. The
+            # fenced transaction preserves DONE/FAILED/retry/cancelled/reclaimed jobs.
+            code = None if result.reason == "LEASE_LOST" else result.reason or "WORKER_PROCESS_EXITED"
+        # Finalization uses external stores too. Bound it in a second process so a
+        # database/vector outage cannot freeze the watchdog after stopping a parser.
+        limit = min(self.settings.worker_phase_timeout_seconds, self.settings.lease_seconds)
+        recovery_settings = self.settings.model_copy(update={
+            "job_timeout_seconds": limit, "worker_startup_timeout_seconds": limit,
+        })
+        outcome = JobSupervisor(
+            recovery_settings, child_target=run_recovery_child, check_ownership=False,
+        ).run(
+            {**job, "supervision_error": code}, self.stop,
+            heartbeat=lambda: Path("/tmp/upraise-worker-heartbeat").touch(),
+        )
+        if outcome.reason:
+            log.warning("Job %s outcome recovery deferred; durable state retained", job_id)
 
     def process(self, job):
         job_id = str(job["job_id"])
@@ -82,19 +142,24 @@ class IngestionWorker:
 
         def heartbeat():
             while not finished.wait(self.settings.lease_seconds / 3):
-                Path("/tmp/upraise-worker-heartbeat").touch()
+                if self.notify is None:
+                    Path("/tmp/upraise-worker-heartbeat").touch()
                 try:
                     if not self.jobs.renew(job_id, token, self.settings.lease_seconds):
                         lost.set()
+                        self._notify("lease_lost")
                         return
                 except Exception:
                     lost.set()
+                    self._notify("lease_lost")
                     return
 
         def progress(step, value, message):
             if lost.is_set():
                 raise LeaseLost()
             self.jobs.progress(job_id, token, step, value)
+
+        progress.set_workload = lambda phase, units: self._notify("workload", phase, units)
 
         thread = threading.Thread(target=heartbeat, daemon=True)
         thread.start()
@@ -115,6 +180,7 @@ class IngestionWorker:
                 token,
                 progress,
             )
+            progress.set_workload("store", len(processed.chunks))
             progress("store", 0.93, "Publishing vectors.")
             with self.jobs.owned_transaction(job_id, token) as conn:
                 count = self.vectors.write(processed, embeddings, token)
@@ -136,21 +202,7 @@ class IngestionWorker:
         except LeaseLost:
             log.info("Job %s lease transferred; stale worker stopped", job_id)
         except Exception as error:
-            code, retryable = classify_error(error)
-            retry = retryable and job["attempts"] < self.settings.max_attempts
-            try:
-                with self.jobs.owned_transaction(job_id, token) as conn:
-                    self.vectors.remove_attempt(document_id, token)
-                    self.audit.record(job, "RETRY" if retry else "FAILED", {"code": code}, attempt=True)
-                    self.jobs.fail(
-                        conn, job_id, token, code, retry, min(300, 10 * 2 ** min(8, job["attempts"] - 1))
-                    )
-            except LeaseLost:
-                pass
-            except Exception:
-                # Leave the lease recoverable; never lose accepted work during a DB outage.
-                log.error("Job %s outcome persistence unavailable; lease recovery required", job_id)
-            log.warning("Job %s %s: %s", job_id, "retrying" if retry else "failed", code)
+            self._record_failure(job, error)
         finally:
             finished.set()
             thread.join(timeout=6)
@@ -166,12 +218,15 @@ class IngestionWorker:
                 self.job_control.recover_cleanup()
                 job = self.jobs.claim(self.settings.lease_seconds, self.settings.pipeline_signature)
                 if job:
-                    self.process(job)
+                    self.supervise(job)
                     continue
                 if self.settings.artifact_retention_days:
                     for row in self.jobs.completed_before(self.settings.artifact_retention_days):
                         with self.staging.artifact_lock(str(row["job_id"])):
                             self.staging.remove(str(row["job_id"]))
+            except ChildTerminationError:
+                log.critical("Job writer survived termination; stopping worker")
+                raise
             except Exception:
                 log.error("Worker dependency unavailable; waiting to retry")
             self.stop.wait(self.settings.worker_poll_seconds)

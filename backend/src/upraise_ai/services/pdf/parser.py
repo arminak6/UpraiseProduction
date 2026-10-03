@@ -12,8 +12,10 @@ from upraise_ai.core.errors import IngestionError
 from upraise_ai.core.utils import deterministic_uuid, project_relative
 from upraise_ai.schemas.documents import BoundingBox, DocumentElement, ElementType
 from upraise_ai.services.formats import ParseResult, ProgressCallback
+from upraise_ai.workers.budgets import phase_timeout_seconds
 
 from .inline_math import looks_like_inline_math
+from .input import validate_pdf_input
 from .languages import ocr_languages
 
 LABEL_MAP: dict[str, ElementType] = {
@@ -43,9 +45,11 @@ INLINE_MATH_TEXT_TYPES = {
 class DoclingPdfParser:
     name = "docling"
 
-    def __init__(self, settings: Settings, language: str):
+    def __init__(self, settings: Settings, language: str, *, page_count: int | None = None):
         self.language = language
         self.settings = settings
+        self.page_count = page_count
+        self._page_count_hint = page_count
         try:
             self.version = version("docling")
         except PackageNotFoundError:
@@ -67,6 +71,9 @@ class DoclingPdfParser:
             ) from exc
 
         options = PdfPipelineOptions()
+        options.document_timeout = phase_timeout_seconds(
+            self.settings, "parse", self.page_count if self.page_count is not None else self.settings.max_pdf_pages
+        )
         options.do_ocr = self.settings.enable_ocr
         options.ocr_options = EasyOcrOptions(lang=ocr_languages(self.language), use_gpu=False)
         options.do_table_structure = True
@@ -97,6 +104,15 @@ class DoclingPdfParser:
         artifact_dir: Path,
         progress: ProgressCallback | None = None,
     ) -> ParseResult:
+        page_count = self._page_count_hint
+        self._page_count_hint = None
+        if page_count is None:
+            page_count = validate_pdf_input(
+                pdf_path, self.settings.max_pdf_size_mb * 1024**2, self.settings.max_pdf_pages
+            )
+        if self.page_count != page_count:
+            self.page_count = page_count
+            self._converter = None
         if progress:
             progress("parse", 0.12, "Docling is analysing document layout.")
 
@@ -111,6 +127,9 @@ class DoclingPdfParser:
         inline_math_dir.mkdir(parents=True, exist_ok=True)
 
         conversion = self.converter.convert(pdf_path)
+        has_timeout_errors = getattr(conversion, "has_timeout_errors", None)
+        if callable(has_timeout_errors) and has_timeout_errors():
+            raise IngestionError("PROCESSING_TIMEOUT", retryable=True)
         if str(getattr(conversion.status, "value", conversion.status)) != "success":
             raise IngestionError("PDF_CONVERSION_INCOMPLETE")
         document = conversion.document

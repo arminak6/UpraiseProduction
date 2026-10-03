@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     max_attempts: int = Field(3, ge=1, le=10)
     lease_seconds: int = Field(120, ge=30)
     worker_poll_seconds: float = Field(2, ge=0.1)
+    # Runtime budgets limit a complete attempt; they never skip source regions.
+    job_timeout_seconds: float = Field(43_200, ge=1, allow_inf_nan=False)
+    parse_timeout_base_seconds: float = Field(180, ge=0, allow_inf_nan=False)
+    parse_timeout_per_page_seconds: float = Field(10, gt=0, allow_inf_nan=False)
+    parse_timeout_per_ocr_page_seconds: float = Field(30, gt=0, allow_inf_nan=False)
+    enrich_timeout_base_seconds: float = Field(180, ge=0, allow_inf_nan=False)
+    enrich_timeout_per_region_seconds: float = Field(180, gt=0, allow_inf_nan=False)
+    embed_timeout_base_seconds: float = Field(120, ge=0, allow_inf_nan=False)
+    embed_timeout_per_chunk_seconds: float = Field(90, gt=0, allow_inf_nan=False)
+    worker_startup_timeout_seconds: float = Field(300, gt=0, allow_inf_nan=False)
+    worker_phase_timeout_seconds: float = Field(300, gt=0, allow_inf_nan=False)
+    worker_supervisor_poll_seconds: float = Field(1, ge=0.01, allow_inf_nan=False)
+    worker_status_timeout_seconds: float = Field(2, gt=0, allow_inf_nan=False)
+    worker_terminate_grace_seconds: float = Field(5, gt=0, allow_inf_nan=False)
     # Zero retains evidence until an operator sets an agreed retention period.
     artifact_retention_days: int = Field(0, ge=0)
 

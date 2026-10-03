@@ -2,10 +2,10 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 AI Module. Scaffold, A1 PDF ingestion, A2 list/delete, A4 monitoring
-and A6 cancellation/receipt are implemented with durable jobs, a separate worker,
-Docling/Nova/Titan extraction and Qdrant. frontend/ is a separate testing interface.
-Local API testing is enabled here; production authentication remains the default.
+UPRAISE WP7 AI: A1 PDF ingestion, A2 list/delete, A4 monitoring and A6 job control.
+Durable jobs, Docling/Nova/Titan, Qdrant and separate frontend testbench.
+Local testing is enabled; authentication defaults remain production.
+Supervised worker source awaits Docker deployment/verification (engine unavailable 2026-10-03).
 
 ## Architecture and data flow
 
@@ -16,16 +16,17 @@ Local API testing is enabled here; production authentication remains the default
 - Middleware owns Moodle source identity/permissions, lesson pace/storage and
   human approval. It uploads PDF bytes/metadata or supplies an HTTPS Moodle URL.
   source_ref is the Moodle file ID; language is the document source language.
-- Production INGRESS validates OAuth JWT/client/course/scopes and trusted mTLS
-  gateway assertions; missing settings return 503. Proxy headers are disabled.
-  Development/local_test_mode uses local-test-client, entered courses and authoring
-  scopes for actual loopback/private peers. Production + local mode refuses startup.
-  Ignored root .env enables local mode here; defaults remain production/false.
+- INGRESS validates OAuth JWT/client/course/scopes and trusted mTLS assertions;
+  missing settings return 503, proxy headers disabled. Explicit development/local
+  mode grants local-test-client authoring scopes to actual private/loopback peers;
+  production + local mode refuses startup. Ignored .env enables local mode here.
 - Acceptance validates PDF support/limits and stages bytes with fsync before job
   commit and 202 {document_id}. Location identifies A4; optional Idempotency-Key
   protects retries. Intentional new uploads get fresh document/job UUIDs.
 - Worker claims compatible queued/expired jobs using row locks, leases and
-  heartbeats. Docling/OCR -> Nova math/figure enrichment -> structure-aware chunks
+  heartbeats. Service execution uses fresh spawned job processes; the supervisor
+  enforces phase/total deadlines and stops revoked writers before bounded recovery.
+  Docling/OCR -> Nova math/figure enrichment -> structure-aware chunks
   -> Titan embeddings -> Qdrant count verification -> audit -> DONE commit.
 - PostgreSQL has upraise_jobs operational state and separate upraise_audit
   lifecycle records. Neither stores source text, lessons or learner checkpoints.
@@ -35,12 +36,10 @@ Local API testing is enabled here; production authentication remains the default
   counts. Deletion commits a marker, fences workers, removes all attempts by
   course/document filter, verifies zero, audits and completes before 204.
   Worker recovers interrupted deletion; repeated deletes do not duplicate audit.
-- A6 requires reason=CANCEL|RECEIVED in the query and jobs:write. CANCEL fences
-  QUEUED/RUNNING and commits CANCELLED; RECEIVED acknowledges DONE/FAILED while
-  retaining result/error and active vectors. Both purge temporary artifacts and
-  inactive vectors, preserve source.pdf/history, and audit before 204. Durable
-  cleanup survives dependency failures; per-job file locks prevent stale file writes.
-  Worker resumes cleanup after process/restart. A4 adds cleanup_pending/acknowledged.
+- A6 reason=CANCEL|RECEIVED + jobs:write: CANCEL fences queued/running work;
+  RECEIVED acknowledges DONE/FAILED and retains results/active vectors. Both
+  purge temporary/inactive output, preserve source/history and audit before 204.
+  File locks and durable requests coordinate cleanup/restart. A4 reports pending/receipt.
 - Checkpoints and isolated vector attempts support replay, not cross-store atomic
   commits or exactly-once provider calls. Learner chat/telemetry remain in memory.
 
@@ -60,15 +59,15 @@ Local API testing is enabled here; production authentication remains the default
   Shared services handle formats, chunking, Titan/AWS and HTTPS downloading.
 - workflows/{submission,documents,jobs}.py: durable acceptance, A2 deletion and
   A6 cancellation/receipt. workers/ingestion.py: leases, retries, publication,
-  artifact locking and deletion/job cleanup recovery.
+  artifact locking and deletion/job cleanup recovery. workers/{supervision,budgets}.py:
+  process/group termination, nonblocking ownership checks and workload allowances.
 - storage/{jobs,audit,files,vectors,migrate}.py: durable queue, minimal audit,
   staged sources/artifacts/locks, per-attempt vectors and repeatable bootstrap.
 - backend/tests/: extraction, JWT/mTLS, real isolated DB/vector lifecycle and
   A2/A6 races/recovery. Tests clean only their own schemas, collections and audit.
-- frontend/app.py: A1 PDF/URL, A2 list/delete, A4 polling/A6 actions, health and API
-  explorer. api_client.py: HTTP, same-origin status URLs, bearer/mTLS/private CA,
-  safe errors. No backend imports, AWS or DB access. frontend/tests/: 15 checks;
-  frontend/README.md: tools profile, credentials and commands.
+- frontend/{app,api_client}.py: authoring/job forms, polling, HTTP testbench,
+  same-origin status URLs, bearer/mTLS/private CA and safe errors; no backend/AWS/DB
+  access. frontend/tests/ and README.md contain checks/setup.
 - aws_credentials.json: ignored credentials mounted read-only only into worker;
   never included in images/logs/evidence. codex_helper/: ignored one-off artifacts.
 
@@ -116,6 +115,13 @@ production needs configured gateway/OAuth. Frontend requires tools profile/targe
   minimum figure size. Unresolved visuals retain evidence/warnings. Embedding or
   publication failure prevents DONE. HTTPS/TLS/DNS pinning, address policy and
   download limits remain separate from the removed Ingestion Guard.
+- Timeout settings do not change pipeline signatures or skip content. Defaults:
+  total attempt 12h; parse 180s + 30s/page with OCR (10s without); enrichment
+  180s + 180s/region; embedding 120s + 90s/chunk. See a1.md for all settings.
+  Budgets start at phase entry, not last progress. Timeout/crash retries are bounded.
+  Child owns the artifact lock; Linux parent death and group shutdown stop writers.
+  Ownership reads never block watchdog I/O (at most one daemon reader); one lease
+  without verification stops work. Recovery is supervised for at most one lease.
 - Prepared checkpoints avoid repeated provider calls on publication retry.
   Workers claim matching signatures; drain before pipeline changes or retain
   compatible workers. Reuse a submission key for network retries across deployment.
@@ -123,14 +129,12 @@ production needs configured gateway/OAuth. Frontend requires tools profile/targe
   UPRAISE_ARTIFACT_RETENTION_DAYS removes terminal/deleted job files, not history.
   A6 explicitly purges temporary output while retaining original source.pdf.
   File locks live in data_dir/.locks and are never unlinked with working files.
-- A2 scopes: documents:read list, documents:write delete. Unknown/inaccessible IDs
-  return 404; deletions disappear from A2/A4. Deleted A1 keys return 409.
-- A6 uses jobs:write, A4 jobs:read; local mode grants both. Unknown/inaccessible/
-  deleted jobs return 404. State/action conflicts return 409; malformed input 422.
-  Same action resumes cleanup/returns 204. Cancelled A1 keys return 409 JOB_CANCELLED. A2 lists
-  CANCELLED submissions with zero active chunks; A6 never deletes the registry.
-- A6 may return 503 JOB_CLEANUP_PENDING + Retry-After:2 while a parser/provider
-  call finishes. CANCELLED is committed immediately; publication stays fenced.
+- Scopes: A2 documents:read/write, A4 jobs:read, A6 jobs:write. Inaccessible/deleted
+  IDs return 404; conflicts 409, malformed input 422. Same A6 action resumes cleanup.
+  Deleted/cancelled A1 keys return 409 (JOB_CANCELLED for cancellation). A2 lists
+  CANCELLED with zero active chunks; A6 preserves registry/history.
+- A6 may return 503 JOB_CLEANUP_PENDING + Retry-After:2 until the supervised
+  child stops. CANCELLED is committed immediately; publication stays fenced.
   No 204 precedes artifact cleanup and audit. Receipt keeps DONE/FAILED visible.
 - Testbench credentials/results are session-only; TLS temporary files are deleted.
   Writes require submission; navigation never repeats them. Polling stops at
@@ -139,15 +143,15 @@ production needs configured gateway/OAuth. Frontend requires tools profile/targe
 ## Known limitations and next work
 
 - Moodle identity/gateway/signed URLs remain unverified. Local testing works.
-- Shared volumes/one PostgreSQL server support single-host Compose; multi-host/HA
-  requires shared/object storage and replication. Retention, audit erasure/export,
-  orphan reconciliation, backups and disk operations remain deployment decisions.
+- Single-host Compose; HA needs shared/object storage and replication. Retention,
+  audit erasure/export, orphan reconciliation, backups and disk operations remain open.
 - Future retrieval must enforce undeleted + DONE/active_attempt. Crashes can leave
   inactive points or INDEX_VERIFIED without DONE. Global audit policy beyond A1
   lifecycle/A2 delete/A6 actions is deferred, including A4 reads/INGRESS rejections.
 - A6 currently operates on A1 ingestion jobs. Future lesson/audio jobs need their
   own output adapters. A synchronous external provider request already sent may
-  finish after cancellation; stopping later work happens at ownership checks.
+  finish or bill after the local child is stopped. Deadline defaults need tuning
+  with representative large PDFs; they are not measured throughput limits.
 - Other APIs, learner guards, RAG/lessons, speech, telemetry and operations are deferred.
 - Inline-math detection can mistake prose accents for math. DONE confirms
   processing/publication, not extraction accuracy. Real source comparison found
@@ -156,31 +160,33 @@ production needs configured gateway/OAuth. Frontend requires tools profile/targe
 
 ## Recent decisions
 
-- 2026-10-02: User approved source language, Moodle source_ref, PDF/old extraction,
-  durable jobs/separate audit/A4, Streamlit and explicit local mode. User removed
-  document Ingestion Guard and A1 JSON job_id; Location/internal jobs remain.
+- 2026-10-03: User approved supervised worker fix, with generous workload-aware
+  budgets for large PDFs. No schema/signature change; no live deployment/provider calls.
+- 2026-10-02: User approved PDF extraction/source language/Moodle source_ref,
+  durable jobs/audit/A4/Streamlit/local mode; removed Ingestion Guard and A1 JSON
+  job_id, retaining Location/internal jobs.
 - 2026-10-02: User requested A2 list/delete and removal of visual count/size limits.
   v1.3 rerun improves coverage but retains content errors; originals enable reprocessing.
-- 2026-10-02: User requested A6 after agreeing cancellation and receipt are separate.
-  Implemented/deployed durable cancellation, scoped receipt, source preservation,
-  output cleanup/recovery/audit and explicit testbench controls.
+- 2026-10-02: A6 approved/deployed with distinct cancel/receipt, durable cleanup,
+  source preservation, audit and testbench controls.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-02: A6 routes/main/guards/schemas, workflows/jobs.py, storage/{jobs,files,
-vectors}.py, workers/ingestion.py, services/pdf/processor.py, A6/local tests,
-frontend/app.py/api_client.py/tests, API docs/readmes checked. Backend 70 pass,
-frontend 15 pass, lint passes. Crash-lock, publication race, failure recovery,
-active-vector/source preservation and old-schema upgrade tested. Migration applied;
-backend/worker/frontend healthy. Live reason/OpenAPI/access errors verified;
-all six existing jobs stay DONE and both compared ingestions retain 94/98 vectors.
-No real-job cancellation/receipt or provider calls during validation. Evidence:
-codex_helper/a6-validation.md and a6-deployment-check.json.
-Earlier 55-page comparison: first 94 chunks, 59/84 inline math, 11/13 figures,
-four warnings; rerun 98, 84/84, 13/13, zero warnings. Source/vector/audit integrity
-verified, six PDF pages checked; page 30 formula/figure errors persist. Evidence:
-codex_helper/ingestion-1-vs-2-report.md and comparison JSON/text. Earlier provider/
-A2/local-mode evidence remains in helper reports. Real Moodle unconfigured,
-Word absent, no Git repository; frontend verified by AppTest, no browser visual QA.
+2026-10-03: Current config, workers/{ingestion,supervision,budgets}.py,
+services/pdf/{parser,processor}.py, new workload/supervision tests, Compose,
+examples and A1/A6/readme documentation verified. Host Python 3.10: 80 passed,
+39 skipped (37 DB integrations unavailable; two POSIX-only checks). Ruff and
+Compose config pass. Real spawned hang/next-job, locks, ownership revocation,
+blocked status reader, timeout/retry limits and terminal-state preservation tested.
+Production Python 3.12/Docling and Linux/PostgreSQL/Qdrant checks remain unrun:
+Docker engine unavailable. Source changes not deployed. No credentials, existing
+job data or providers touched. Git now exists. Details: codex_helper/worker-supervision-validation.md.
+
+2026-10-02 historical evidence: deployed A6 passed backend 70/frontend 15 tests;
+six jobs remained DONE, compared vectors 94/98. See a6-validation.md and
+a6-deployment-check.json in codex_helper. The 55-page comparison checked six source
+pages and found page-30 formula/diagram errors despite zero warnings; see
+codex_helper/ingestion-1-vs-2-report.md. Real Moodle remains unconfigured, Word
+absent; earlier frontend QA used AppTest rather than browser inspection.

@@ -72,6 +72,14 @@ allow extra time and prewarm that cache before deployment.
 
 Job leases recover abandoned work after a worker restart. Successful preparation
 is checkpointed, avoiding repeated model calls when publishing must be retried.
+The worker service runs each attempt in a fresh child process. Its supervisor
+enforces workload-based processing deadlines and a 12-hour total attempt limit,
+and stops local processing when cancellation or lost ownership is observed.
+Repeated progress and lease heartbeats do not extend those deadlines. A timed-out
+attempt reports PROCESSING_TIMEOUT and retries within the existing attempt limit;
+the source PDF and completed checkpoint remain available. [Worker budgets and
+recovery](backend/docs/a1.md#recovery-and-limits) describes configuration and tuning.
+
 Middleware should supply Idempotency-Key and reuse it for a network retry.
 A new intentional submission receives a new document ID, matching the old
 pipeline. Processing is at-least-once; external model calls are not guaranteed
@@ -88,8 +96,9 @@ existing retention policy; deletion does not remove Moodle files or audit histor
 A6 takes a required reason query parameter, CANCEL or RECEIVED, and returns 204
 after temporary-output cleanup and audit. Cancellation immediately fences queued/
 running work. A busy worker returns recoverable 503 until it stops writing files;
-durable cleanup resumes automatically. Receipt acknowledgment retains terminal
-results and active vectors. Both actions preserve source PDFs and history.
+the supervisor stops and reaps its child before cleanup resumes. Receipt
+acknowledgment retains terminal results and active vectors. Both actions preserve
+source PDFs and history.
 
 Source/artifact cleanup is disabled until an operational retention period is
 agreed, preserving the old pipeline's evidence. A positive
@@ -108,6 +117,11 @@ Normal down retains all named volumes. down --volumes is a deliberate data
 reset and is never part of validation. Existing other-project data are untouched.
 Before changing the pipeline version/model settings, drain pending jobs or
 retain workers for their recorded version: workers claim compatible jobs only.
+When installing the supervised worker, stop the old worker before rebuilding and
+restarting it so all attempts use the new execution path. This change requires no
+database schema migration and does not change the pipeline signature. Timeout
+defaults are starting values rather than performance benchmarks; prewarm model
+weights and tune budgets with representative large PDFs before deployment.
 
 ## Layout
 
@@ -161,7 +175,7 @@ UpraiseProduction/
         pdf/{input.py,parser.py,languages.py,inline_math.py,vision.py,enrichment.py,processor.py}
       storage/{jobs.py,audit.py,files.py,vectors.py,migrate.py}
       workflows/{submission.py,documents.py,jobs.py}
-      workers/ingestion.py
+      workers/{ingestion.py,supervision.py,budgets.py}
   frontend/
     Dockerfile
     .dockerignore

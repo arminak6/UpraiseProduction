@@ -8,6 +8,7 @@ from upraise_ai.schemas.documents import ProcessedDocument
 from upraise_ai.services.aws import aws_session
 from upraise_ai.services.chunking import StructureAwareChunker
 from upraise_ai.services.embeddings import BedrockTitanEmbeddingProvider
+from upraise_ai.workers.budgets import enrichment_workload, notify_workload
 
 from .enrichment import PdfEnricher
 from .input import validate_pdf_input
@@ -24,7 +25,8 @@ class PdfProcessor:
 
     def prepare(self, source: Path, metadata, document_id, job_dir, token, progress):
         settings = self.settings
-        validate_pdf_input(source, settings.max_pdf_size_mb * 1024**2, settings.max_pdf_pages)
+        page_count = validate_pdf_input(source, settings.max_pdf_size_mb * 1024**2, settings.max_pdf_pages)
+        notify_workload(progress, "parse", page_count)
         source_hash = sha256_file(source)
         checkpoint = job_dir / "prepared.json"
         if checkpoint.is_file():
@@ -42,7 +44,7 @@ class PdfProcessor:
                 pass
         artifact_dir = job_dir / "attempts" / str(token)
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        parser = self.parser or DoclingPdfParser(settings, metadata.language)
+        parser = self.parser or DoclingPdfParser(settings, metadata.language, page_count=page_count)
         progress("parse", 0.1, "Extracting PDF.")
         parsed = parser.parse(
             source, source_hash=source_hash, artifact_dir=artifact_dir, progress=progress
@@ -59,7 +61,13 @@ class PdfProcessor:
                 session=session, model_id=settings.math_vision_model_id, cache_dir=artifact_dir / "cache"
             ),
         )
+        notify_workload(
+            progress,
+            "enrich",
+            enrichment_workload(parsed.elements, describe_images=settings.describe_images),
+        )
         warnings = enricher.enrich(parsed, progress)
+        notify_workload(progress, "chunk", parsed.page_count)
         progress("chunk", 0.64, "Creating structure-aware chunks.")
         version_id = deterministic_uuid(
             f"{document_id}:version:{source_hash}:{settings.pipeline_signature}"
@@ -75,6 +83,7 @@ class PdfProcessor:
         )
         if not chunks:
             raise IngestionError("NO_RETRIEVABLE_CONTENT")
+        notify_workload(progress, "embed", len(chunks))
         embedder = self.embedder or BedrockTitanEmbeddingProvider(
             session=session, model_id=settings.embedding_model_id, dimension=settings.embedding_dimension
         )
