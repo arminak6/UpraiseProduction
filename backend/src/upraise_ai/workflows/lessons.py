@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
+import psycopg
 from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
@@ -111,3 +112,14 @@ class LessonService:
             if hashlib.file_digest(stream, "sha256").hexdigest() != chunk.audio_sha256:
                 raise IngestionError("LESSON_AUDIO_INTEGRITY_FAILURE", status=503)
         return path, chunk
+
+    def audit_download(self, row, *, chunk=None, byte_count=None):
+        details = {"mode": "pull", "result_sha256": row["result"]["result_sha256"]}
+        event = "RESULT_ACCESSED"
+        if chunk is not None:
+            event = "AUDIO_ACCESSED"
+            details.update(chunk_id=chunk.chunk_id, audio_sha256=chunk.audio_sha256, bytes=byte_count)
+        try:
+            self.audit.lesson_access(row, event, details)
+        except psycopg.Error:
+            raise IngestionError("AUDIT_STORAGE_UNAVAILABLE", status=503, retryable=True) from None

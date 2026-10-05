@@ -6,7 +6,7 @@ UPRAISE WP7 AI provides A1 ingestion, A2 material management, A3 draft lessons,
 A4 status, A5 result/audio and A6 cancellation/receipt. Local A3 is reachable;
 native V3 teacher/speech implementation is restored as lesson-v3-a3-4.
 A live V3 job completed first attempt:30 audio chunks verified. Content still
-requires human approval; concurrent A5 reads can return temporary lock503.
+requires human approval. A5 pull downloads support audit, TTL and parallel reads.
 
 ## Architecture and data flow
 
@@ -50,6 +50,10 @@ requires human approval; concurrent A5 reads can return temporary lock503.
 - MW callbacks use allowlisted pinned HTTPS, mTLS and short-lived OAuth tokens.
   Basic/POST/certificate client auth supported. Callback2xx is not receipt;
   MW stores A5 output then sends A6 RECEIVED. Secrets remain deployment-only.
+- A5 uses jobs:read ingress, client/course isolation and source/hash checks.
+  Shared artifact locks allow parallel reads; generation/cleanup stay exclusive.
+  Every prepared JSON/WAV request records a content-free access audit; audit
+  outages block delivery. Responses use no-store. Pull does not acknowledge A6.
 - Output TTL defaults24h from completion. A5 denies expiry immediately; independent
   delivery recovers deletion/callback retries. RECEIVED/CANCEL purge lesson output
   only, preserving sources/vectors. Durable markers/audit IDs recover cleanup.
@@ -58,7 +62,7 @@ requires human approval; concurrent A5 reads can return temporary lock503.
 
 ## Important paths
 
-- README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a6,
+- README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,
   local-testing}.md: maintained contracts; api-baseline.md preserves draft decisions.
 - backend/src/upraise_ai/: api/authoring/{documents,lessons}.py and schemas/ expose
   APIs; main.py wires services. guards/{ingress,body_limit}.py controls access.
@@ -75,14 +79,14 @@ requires human approval; concurrent A5 reads can return temporary lock503.
 - frontend/{app,api_client}.py: API-only A1-A6 testbench; frontend/tests/: AppTest/fake HTTP.
 - backend/{pyproject.toml,uv.lock,Dockerfile}, math_runtime/{math_speech.mjs,
   package.json,package-lock.json}: pinned builds and local math runtime.
-- callback_tls/README.md: secret mounts. TLS files and aws_credentials.json are
-  ignored/read-only mounted, never logged/built. Real callback secrets not supplied.
+- callback_tls/README.md: ignored read-only secret mounts; real callback
+  credentials not supplied or logged/built.
 - Legacy V3: ../Uprise/v2/backend/learning/v1/.
-- backend/tests/test_a3*.py: V3 request parity, lifecycle, speech, callbacks/workers;
-  test_v3_original_*.py: original regressions, including local MathJax; AWS mocked.
+- backend/tests/test_a3*.py: V3/lifecycle/speech/callbacks; test_a5_integration.py:
+  pull/audit/concurrency/TTL, test_artifact_locks.py: Windows/Linux process locks.
+  test_v3_original_*.py keeps original regressions; AWS mocked.
 - codex_helper/: ignored comparison reports/checkpoints and validation scripts/logs.
-  validate-a3*.ps1 uses disposable services without touching live data/ports.
-  a3-v3-native-*.log/runtime-check.json record validation.
+  validate-a3/a5.ps1 uses disposable services; a5-*.log/runtime-check.json records A5.
 
 ## Commands
 
@@ -91,20 +95,17 @@ From root, Docker Desktop Linux containers:
 - docker compose config --quiet
 - docker compose build backend
 - docker compose up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
-- docker compose --profile tools up --build -d --wait --wait-timeout 180
 - docker compose logs -f backend worker lesson-worker lesson-delivery
-- docker compose --profile tools down (preserves volumes)
-- docker compose run --rm --no-deps -v ./frontend:/workspace:ro frontend python -m unittest discover -s /workspace/tests -v
+- Frontend tests: see README.md; optional Streamlit uses Compose profile tools.
 
-Migration is additive/repeatable. Drain old jobs before changing model/pipeline/
-lock identity. Never reset live volumes for tests. A3 is active locally; existing
-sources need no re-ingestion. localhost:8000/{health,docs}, localhost:8501.
+Migration is additive. Drain old jobs before changing pipeline identity; never
+reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501.
 
 ## Dependencies and environment
 
 - Production Python3.12.14 slim Bookworm/uv0.9.5; Docling2.115.0,
   docling-core2.99.0/EasyOCR/CPU Torch. Host Python3.10.8 differs: use pinned Docker.
-  Runtime UID10001. Exact Python dependency versions are in uv.lock.
+  UID10001; exact dependencies in uv.lock.
 - Nova Lite figures and Nova Pro math/fidelity for A1; normalized TitanV2 1024D.
   A3 GPT OSS120B generator/Qwen235B reviewer; explicit EU region (eu-central-1 default).
 - Node22 image digest, MathJax4.1.3/SRE5.0.0-rc.4 npm lock. EN/IT/FR/DE local math
@@ -158,9 +159,9 @@ sources need no re-ingestion. localhost:8000/{health,docs}, localhost:8501.
 - Live V3 job241c4bda completed first attempt; all30 audio hashes/durations/
   visemes verified. Its259 findings comprise94UNVERIFIED source flags and165
   pre-edit review findings; final content is not re-reviewed. A sampled final
-  explanation adds claims unsupported by cited pages4-5. Parallel A5 reads
-  return temporary503 JOB_CLEANUP_PENDING from exclusive artifact locking;
-  sequential downloads pass. MW callbacks/other workloads remain unverified.
+  explanation adds claims unsupported by cited pages4-5. A5 parallel lock503
+  was fixed with shared readers; writer conflicts still return retryable503.
+  MW callbacks/other workloads remain unverified.
 - Production gateway/Moodle, HA/backups, retention/audit erasure, orphan cleanup
   and cross-host artifact storage remain open; other APIs/learner RAG are reserved.
 
@@ -173,13 +174,13 @@ sources need no re-ingestion. localhost:8000/{health,docs}, localhost:8501.
 
 ## Last verified
 
-2026-10-05: Native V3 source/JS parity; backend362/subset103 tests, Ruff/Compose
-and OpenAPI7paths/14schemas checked during port. Seven services healthy on
-lesson-v3-a3-4; capture off/max_attempts3, sources94/98/98.
-Live user job241c4bda-3cc8-4ffd-a029-48bed27070a1 DONE/attempt1:30chunks,
-39.16min; all WAV hashes/formats/durations and26335visemes valid, pages1-55.
-All11sections revised once. Review259 findings (94source/165pre-edit); sampled
-final text adds unsupported explanation. Parallel audio503 reproduced; all30
-sequential reads pass. No app changes or new paid jobs during this verification.
-Evidence: codex_helper/a3-completed-lesson-{result,verification}.json and
-a3-v3-native-*.log/runtime-check.json.
+2026-10-05: A5 routes/workflow/audit/shared locks/docs checked. Backend371 tests
+passed with disposable DBs/fake providers; A5 subset9 and native Windows locks3
+passed. Ruff/Compose/whitespace pass. Four services rebuilt/restarted; all seven
+healthy. Live existing job241c4bda JSON unchanged and all30 WAV hashes/durations
+valid with8concurrent readers (32requests/200);33unique access audits recorded.
+OpenAPI7paths/14schemas unchanged. Registry5FAILED/1DONE lessons; no new generation
+submitted. V3 lesson-v3-a3-4/capture off; sources retained. TTL/A6/source integrity
+covered in tests; human content approval and MW callbacks remain outstanding.
+Evidence: codex_helper/a5-{validation,focused-validation,lint,build}.log and
+a5-runtime-check.json; earlier lesson QA: a3-completed-lesson-verification.json.

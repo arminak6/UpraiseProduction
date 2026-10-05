@@ -13,7 +13,8 @@ extensions recorded in [api-baseline.md](backend/docs/api-baseline.md).
 The Word file is currently absent from its recorded root path. The supplied
 architecture diagram is retained as conversation context. A/B/C grouping and
 all reserved endpoints remain unchanged. This work implements A1 through A6.
-See [A3/A5's contract, Version 3 workflow and callback setup](backend/docs/a3.md).
+See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
+[A5 pull downloads, auditing and TTL](backend/docs/a5.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id

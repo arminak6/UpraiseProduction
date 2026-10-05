@@ -1,4 +1,4 @@
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -51,4 +51,14 @@ class AuditRepository:
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details) VALUES (%s,%s,%s,%s)
                 ON CONFLICT(event_id) DO NOTHING""",
                 (uuid5(NAMESPACE_URL, identity), job["job_id"], event_type, Jsonb(details)),
+            )
+
+    def lesson_access(self, job, event_type, details):
+        # Access is per request, unlike idempotent lifecycle events. Only artifact
+        # IDs/hashes/counts are recorded; no lesson content or credentials.
+        with psycopg.connect(self.dsn, connect_timeout=5) as conn:
+            conn.execute(
+                """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
+                VALUES (%s,%s,%s,%s)""",
+                (uuid4(), job["job_id"], event_type, Jsonb(details)),
             )
