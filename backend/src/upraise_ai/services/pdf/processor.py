@@ -8,6 +8,7 @@ from upraise_ai.schemas.documents import ProcessedDocument
 from upraise_ai.services.aws import aws_session
 from upraise_ai.services.chunking import StructureAwareChunker
 from upraise_ai.services.embeddings import BedrockTitanEmbeddingProvider
+from upraise_ai.services.quality import aggregate_quality, quality_summary
 from upraise_ai.workers.budgets import enrichment_workload, notify_workload
 
 from .enrichment import PdfEnricher
@@ -37,6 +38,7 @@ class PdfProcessor:
                     processed.document_id == document_id
                     and processed.metadata == metadata
                     and processed.pipeline_version == settings.pipeline_signature
+                    and processed.source_hash == source_hash
                 ):
                     progress("store", 0.93, "Resuming prepared document.")
                     return processed, payload["vectors"]
@@ -59,6 +61,9 @@ class PdfProcessor:
             ),
             BedrockImageDescriber(
                 session=session, model_id=settings.math_vision_model_id, cache_dir=artifact_dir / "cache"
+            ),
+            verifier=BedrockImageDescriber(
+                session=session, model_id=settings.fidelity_vision_model_id, cache_dir=artifact_dir / "cache"
             ),
         )
         notify_workload(
@@ -106,6 +111,8 @@ class PdfProcessor:
             elements=parsed.elements,
             chunks=chunks,
             warnings=warnings,
+            quality=aggregate_quality(parsed.elements),
+            quality_summary=quality_summary(parsed.elements),
         )
         temporary = checkpoint.with_name(f"prepared.{token}.part")
         with temporary.open("w", encoding="utf-8") as stream:

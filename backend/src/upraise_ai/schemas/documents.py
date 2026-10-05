@@ -84,6 +84,30 @@ class BoundingBox(BaseModel):
     coordinate_origin: str | None = None
 
 
+class QualityStatus(str, Enum):
+    UNVERIFIED = "UNVERIFIED"
+    AUTO_CHECKED = "AUTO_CHECKED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
+class ContentQuality(BaseModel):
+    """Extraction checks, independent of whether ingestion completed successfully."""
+
+    status: QualityStatus = QualityStatus.UNVERIFIED
+    checks: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    evidence_complete: bool = False
+    verification_model_id: str | None = None
+    verification_prompt_version: str | None = None
+
+
+class SourceRegion(BaseModel):
+    page_number: int
+    asset_path: str | None = None
+    charspan: list[int] = Field(default_factory=list)
+    bounding_box: BoundingBox | None = None
+
+
 class DocumentElement(BaseModel):
     element_id: str
     element_index: int
@@ -91,6 +115,12 @@ class DocumentElement(BaseModel):
     original_text: str = ""
     structured_content: str | None = None
     derived_description: str | None = None
+    source_text: str | None = None
+    source_structured_content: str | None = None
+    candidate_text: str | None = None
+    candidate_description: str | None = None
+    source_regions: list[SourceRegion] = Field(default_factory=list)
+    quality: ContentQuality = Field(default_factory=ContentQuality)
     caption: str | None = None
     page_number: int | None = None
     page_numbers: list[int] = Field(default_factory=list)
@@ -127,6 +157,10 @@ class Chunk(BaseModel):
     heading_path: list[str] = Field(default_factory=list)
     element_ids: list[str] = Field(default_factory=list)
     element_types: list[ElementType] = Field(default_factory=list)
+    quality: ContentQuality = Field(default_factory=ContentQuality)
+    element_quality: dict[str, ContentQuality] = Field(default_factory=dict)
+    source_regions: list[SourceRegion] = Field(default_factory=list)
+    element_source_regions: dict[str, list[SourceRegion]] = Field(default_factory=dict)
 
 
 class ProcessedDocument(BaseModel):
@@ -143,3 +177,5 @@ class ProcessedDocument(BaseModel):
     elements: list[DocumentElement]
     chunks: list[Chunk]
     warnings: list[str]
+    quality: ContentQuality = Field(default_factory=ContentQuality)
+    quality_summary: dict[str, int] = Field(default_factory=dict)

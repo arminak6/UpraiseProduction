@@ -47,16 +47,25 @@ def phase_timeout_seconds(settings: Settings, phase: BudgetPhase, units: int) ->
 
 
 def enrichment_workload(elements: Iterable[DocumentElement], *, describe_images: bool) -> int:
-    """Count source crops eligible for the current enrichment pipeline."""
+    """Count generation/comparison requests, including complete source evidence.
+
+    This is a conservative allowance; checks may abstain before provider calls.
+    The per-region setting remains the per-request time allowance in v1.4.
+    """
     count = 0
     for element in elements:
-        if not element.asset_path:
+        crops = sum(bool(region.asset_path) for region in element.source_regions)
+        if not crops and element.asset_path:
+            crops = 1
+        if not crops:
             continue
-        if element.element_type is ElementType.FORMULA and not element.original_text.strip():
-            count += 1
+        if element.element_type is ElementType.FORMULA:
+            count += (crops if not element.original_text.strip() else 0) + 1
         elif element.metadata.get("inline_math_candidate") and element.original_text.strip():
-            count += 1
+            count += crops + 1
         elif describe_images and element.element_type is ElementType.FIGURE:
+            count += crops + 1
+        elif element.element_type is ElementType.TABLE:
             count += 1
     return count
 

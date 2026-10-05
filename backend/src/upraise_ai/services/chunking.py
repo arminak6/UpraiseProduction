@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from upraise_ai.core.utils import deterministic_uuid, sha256_text
 from upraise_ai.schemas.documents import Chunk, DocumentElement, ElementType, IngestionMetadata
+from upraise_ai.services.quality import aggregate_quality
 
 
 class TokenCodec:
@@ -227,6 +228,17 @@ class StructureAwareChunker:
                     heading_path=heading_path,
                     element_ids=[element.element_id for element in elements],
                     element_types=element_types,
+                    quality=aggregate_quality(elements),
+                    element_quality={
+                        element.element_id: element.quality.model_copy(deep=True) for element in elements
+                    },
+                    source_regions=[
+                        region.model_copy(deep=True) for element in elements for region in element.source_regions
+                    ],
+                    element_source_regions={
+                        element.element_id: [region.model_copy(deep=True) for region in element.source_regions]
+                        for element in elements
+                    },
                 )
             )
 
@@ -283,7 +295,9 @@ class StructureAwareChunker:
             elif element.original_text:
                 parts.append(element.original_text)
             if len(parts) == 1:
-                return None
+                if not (element.asset_path or element.source_regions):
+                    return None
+                parts.append("Source region requires review; consult the original PDF.")
             return _Unit(
                 text="\n".join(parts),
                 elements=[element],
@@ -292,10 +306,11 @@ class StructureAwareChunker:
             )
 
         if element.element_type is ElementType.FORMULA:
-            if not element.original_text.strip():
+            text = element.original_text.strip()
+            if not text and not (element.asset_path or element.source_regions):
                 return None
             return _Unit(
-                text=f"[Formula]\n{element.original_text.strip()}",
+                text=f"[Formula]\n{text or 'Source region requires review; consult the original PDF.'}",
                 elements=[element],
                 heading_path=element.heading_path,
                 atomic=True,

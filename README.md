@@ -18,7 +18,13 @@ See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. A1 retains processor readability/resource limits and
 OAuth/mTLS INGRESS. content_hash is unverified source metadata; actual SHA-256
-is computed internally as source_hash. Current pipeline: pdf-ingestion-v1.3.
+is computed internally as source_hash. Current pipeline: pdf-ingestion-v1.4.
+Source text/HTML and AI candidates are retained separately. Every visual source
+region has its own provenance-backed crop; AI rewrites/descriptions require
+structural checks and a separate source-comparison pass before acceptance.
+Chunks and A4 results expose UNVERIFIED, AUTO_CHECKED or NEEDS_REVIEW quality
+independently of DONE. AUTO_CHECKED records automated checks, not human approval
+or guaranteed accuracy. See [source fidelity](backend/docs/a1.md#source-fidelity).
 
 ## Start
 
@@ -86,6 +92,10 @@ pipeline. Processing is at-least-once; external model calls are not guaranteed
 exactly once. Only DONE jobs and their active_attempt may be used by future
 retrieval code, and documents with a deletion request must be excluded.
 Raw unfiltered Qdrant points are not the activation authority.
+Processing completion also does not establish teaching accuracy. Future retrieval
+must inspect per-chunk/per-element quality and source evidence; UNVERIFIED and
+NEEDS_REVIEW content must not silently become verified lesson facts. Existing
+v1.3 results are not upgraded automatically; re-ingest source PDFs with v1.4.
 
 A2 deletes all document vectors by course/document filter, fences active ingestion,
 and records deletion audit before 204. Durable deletion requests recover after

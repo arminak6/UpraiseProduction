@@ -9,7 +9,7 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
-from upraise_ai.schemas.documents import IngestionMetadata
+from upraise_ai.schemas.documents import IngestionMetadata, QualityStatus
 from upraise_ai.services.formats import get_processor
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
@@ -189,6 +189,11 @@ class IngestionWorker:
                     "chunk_count": count,
                     "warning_count": len(processed.warnings),
                     "pipeline_version": processed.pipeline_version,
+                    "quality_status": processed.quality.status.value,
+                    "quality_summary": processed.quality_summary,
+                    # False means no flagged mismatch; UNVERIFIED still requires
+                    # a consumer to decide whether the material is suitable.
+                    "requires_review": processed.quality.status is QualityStatus.NEEDS_REVIEW,
                 }
                 self.audit.record(job, "INDEX_VERIFIED", result, attempt=True)
                 self.jobs.done(conn, job_id, token, result)

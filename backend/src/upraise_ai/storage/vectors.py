@@ -29,7 +29,9 @@ class VectorStore:
             or config.distance != models.Distance.COSINE
         ):
             raise IngestionError("VECTOR_COLLECTION_CONFIGURATION_MISMATCH")
-        for key in ("document_id", "course_id", "activity_id", "ingestion_token", "language", "source_ref"):
+        for key in (
+            "document_id", "course_id", "activity_id", "ingestion_token", "language", "source_ref", "quality_status"
+        ):
             self.client.create_payload_index(
                 self.collection, key, models.PayloadSchemaType.KEYWORD, wait=True
             )
@@ -63,6 +65,9 @@ class VectorStore:
                     pipeline_version=processed.pipeline_version,
                     embedding_model_id=processed.embedding_model_id,
                     ingestion_status="INDEXED",
+                    quality_status=chunk.quality.status.value,
+                    requires_review=chunk.quality.status.value == "NEEDS_REVIEW",
+                    document_quality_status=processed.quality.status.value,
                 )
                 # Physical IDs isolate attempts; logical chunk IDs preserve old deterministic behavior.
                 points.append(

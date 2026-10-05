@@ -10,7 +10,14 @@ from reportlab.pdfgen import canvas
 from upraise_ai.core.config import Settings
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.main import app
-from upraise_ai.schemas.documents import DocumentElement, ElementType, IngestionMetadata
+from upraise_ai.schemas.documents import (
+    BoundingBox,
+    DocumentElement,
+    ElementType,
+    IngestionMetadata,
+    QualityStatus,
+    SourceRegion,
+)
 from upraise_ai.services.chunking import StructureAwareChunker, TokenCodec
 from upraise_ai.services.formats import ParseResult
 from upraise_ai.services.pdf.enrichment import PdfEnricher
@@ -139,8 +146,35 @@ def test_docling_cross_page_element_keeps_every_source_page():
     assert chunks[0].page_numbers == [1, 2]
 
 
+def source_region(directory, name, source_text, *, visible_text=None, expected_candidate=None):
+    from PIL import Image, ImageDraw, PngImagePlugin
+
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.png"
+    image = Image.new("RGB", (600, 100), "white")
+    ImageDraw.Draw(image).text((10, 10), visible_text or source_text or "Source diagram", fill="black")
+    png_metadata = PngImagePlugin.PngInfo()
+    if expected_candidate is not None:
+        png_metadata.add_text("expected_candidate", expected_candidate)
+    image.save(path, pnginfo=png_metadata)
+    return SourceRegion(
+        page_number=1, asset_path=str(path), charspan=[0, len(source_text)],
+        bounding_box=BoundingBox(left=0, top=0, right=600, bottom=100, coordinate_origin="TOPLEFT"),
+    )
+
+
 class FakeParser:
     def parse(self, source, **kwargs):
+        regions = {
+            "text": source_region(kwargs["artifact_dir"], "text", "Source lesson content"),
+            "formula": source_region(
+                kwargs["artifact_dir"], "formula", "", visible_text="x^2", expected_candidate="x^2",
+            ),
+            "figure": source_region(
+                kwargs["artifact_dir"], "figure", "", visible_text="Source diagram",
+                expected_candidate="A labelled source diagram.",
+            ),
+        }
         return ParseResult(
             1,
             [
@@ -150,22 +184,28 @@ class FakeParser:
                     element_type=ElementType.TEXT,
                     original_text="Source lesson content",
                     page_number=1,
+                    page_numbers=[1],
+                    source_regions=[regions["text"]],
                     heading_path=["Topic"],
                 ),
                 DocumentElement(
                     element_id="formula",
                     element_index=1,
                     element_type=ElementType.FORMULA,
-                    asset_path="formula.png",
+                    asset_path=regions["formula"].asset_path,
                     page_number=1,
+                    page_numbers=[1],
+                    source_regions=[regions["formula"]],
                     heading_path=["Topic"],
                 ),
                 DocumentElement(
                     element_id="figure",
                     element_index=2,
                     element_type=ElementType.FIGURE,
-                    asset_path="figure.png",
+                    asset_path=regions["figure"].asset_path,
                     page_number=1,
+                    page_numbers=[1],
+                    source_regions=[regions["figure"]],
                     heading_path=["Topic"],
                 ),
             ],
@@ -177,11 +217,38 @@ class FakeParser:
 class FakeVision:
     model_id = "fake-vision"
 
+    def __init__(self):
+        self.formula_calls = []
+        self.figure_calls = []
+        self.inline_calls = []
+
     def transcribe_formula(self, *args, **kwargs):
+        self.formula_calls.append(args[0])
         return SimpleNamespace(latex="x^2", from_cache=False, warning=None)
 
     def describe(self, *args, **kwargs):
+        self.figure_calls.append(args[0])
         return SimpleNamespace(description="A labelled source diagram.", from_cache=False, warning=None)
+
+
+class FakeVerifier:
+    model_id = "fake-independent-verifier"
+
+    def __init__(self):
+        self.calls = []
+
+    def verify_source(self, paths, *, candidate, content_type, page_numbers):
+        from PIL import Image
+
+        expected = []
+        assert len(paths) == len(page_numbers) and paths
+        for path in paths:
+            with Image.open(path) as image:
+                assert image.format == "PNG" and image.size == (600, 100)
+                expected.append(image.info["expected_candidate"])
+        assert candidate == "\n".join(expected)
+        self.calls.append((content_type, candidate, list(page_numbers)))
+        return SimpleNamespace(passed=True, issues=[], warning=None, from_cache=False)
 
 
 class FakeEmbedder:
@@ -199,7 +266,7 @@ def processor(settings):
         settings,
         parser=FakeParser(),
         embedder=FakeEmbedder(settings.embedding_dimension),
-        enricher=PdfEnricher(settings, FakeVision(), FakeVision()),
+        enricher=PdfEnricher(settings, FakeVision(), FakeVision(), verifier=FakeVerifier()),
     )
 
 
@@ -213,32 +280,81 @@ def test_old_visual_recovery_and_checkpoint_resume(tmp_path):
     assert len(vectors) == len(result.chunks) == 3
     assert result.elements[1].original_text == "x^2"
     assert result.elements[2].derived_description == "A labelled source diagram."
+    assert [element.source_text for element in result.elements] == ["Source lesson content", "", ""]
+    assert result.elements[1].candidate_text == "x^2"
+    assert result.elements[2].candidate_description == "A labelled source diagram."
+    assert result.quality.status is QualityStatus.UNVERIFIED
+    assert result.quality_summary == {"total": 3, "auto_checked": 2, "unverified": 1, "needs_review": 0}
+    assert len(p.enricher.verifier.calls) == 2
     again, _ = p.prepare(path, metadata(raw), "document", tmp_path, uuid4(), lambda *_: None)
     assert p.embedder.calls == 1 and again == result
+    assert len(p.enricher.verifier.calls) == 2
+
+
+def test_prepared_checkpoint_is_rebuilt_when_actual_source_bytes_change(tmp_path):
+    raw = pdf_bytes("First source revision.")
+    path = tmp_path / "source.pdf"
+    path.write_bytes(raw)
+    settings = Settings(data_dir=tmp_path)
+    p = processor(settings)
+    meta = metadata(raw)
+    first, _ = p.prepare(path, meta, "document", tmp_path, uuid4(), lambda *_: None)
+    changed = pdf_bytes("Different source revision with the same opaque metadata.")
+    path.write_bytes(changed)
+    second, _ = p.prepare(path, meta, "document", tmp_path, uuid4(), lambda *_: None)
+    assert p.embedder.calls == 2
+    assert first.source_hash != second.source_hash == hashlib.sha256(changed).hexdigest()
+    assert first.document_version_id != second.document_version_id
+
+
+def test_source_comparison_model_changes_pipeline_and_checkpoint_identity():
+    original = Settings()
+    changed = Settings(fidelity_vision_model_id="different-source-comparison-model")
+    assert original.pipeline_version == "pdf-ingestion-v1.4"
+    assert changed.pipeline_signature != original.pipeline_signature
 
 
 def test_visual_enrichment_processes_all_math_and_figures(tmp_path):
     elements = []
     for element_type, count in ((ElementType.FORMULA, 65), (ElementType.TEXT, 84), (ElementType.FIGURE, 35)):
         for index in range(count):
+            text = "x = 1" if element_type is ElementType.TEXT else ""
+            candidate = r"\(x = 1\)" if element_type is ElementType.TEXT else (
+                "x^2" if element_type is ElementType.FORMULA else "A labelled source diagram."
+            )
+            region = source_region(
+                tmp_path, f"{element_type.value}-{index}", text,
+                visible_text="x^2" if element_type is ElementType.FORMULA else None,
+                expected_candidate=candidate,
+            )
             elements.append(DocumentElement(
                 element_id=f"{element_type.value}-{index}",
                 element_index=len(elements),
                 element_type=element_type,
-                original_text="x = 1" if element_type is ElementType.TEXT else "",
-                asset_path=f"{element_type.value}-{index}.png",
+                original_text=text,
+                asset_path=region.asset_path,
                 page_number=1,
+                page_numbers=[1],
+                source_regions=[region],
                 metadata={"inline_math_candidate": True} if element_type is ElementType.TEXT else {},
             ))
 
     class Vision(FakeVision):
         def transcribe_inline_math(self, *args, **kwargs):
+            self.inline_calls.append(args[0])
             return SimpleNamespace(text=r"\(x = 1\)", from_cache=False, warning=None)
 
-    warnings = PdfEnricher(Settings(data_dir=tmp_path), Vision(), Vision()).enrich(
+    original_snapshots = {element.element_id: element.original_text for element in elements}
+    images, math, verifier = Vision(), Vision(), FakeVerifier()
+    warnings = PdfEnricher(Settings(data_dir=tmp_path), images, math, verifier=verifier).enrich(
         ParseResult(1, elements, "fake-layout", "1")
     )
     assert not warnings
+    assert len(math.formula_calls) == 65 and len(math.inline_calls) == 84 and len(images.figure_calls) == 35
+    assert len(verifier.calls) == 65 + 84 + 35
+    assert {element.element_id: element.source_text for element in elements} == original_snapshots
+    assert all(element.quality.status is QualityStatus.AUTO_CHECKED for element in elements)
+    assert all(element.quality.evidence_complete for element in elements)
     assert all(e.original_text == "x^2" for e in elements if e.element_type is ElementType.FORMULA)
     assert all(e.original_text == r"\(x = 1\)" for e in elements if e.element_type is ElementType.TEXT)
     assert all(e.derived_description for e in elements if e.element_type is ElementType.FIGURE)

@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     embedding_dimension: int = 1024
     vision_model_id: str = "eu.amazon.nova-lite-v1:0"
     math_vision_model_id: str = "eu.amazon.nova-pro-v1:0"
+    fidelity_vision_model_id: str = "eu.amazon.nova-pro-v1:0"
     enable_ocr: bool = True
     enable_formula_enrichment: bool = True
     describe_images: bool = True
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
     max_pdf_pages: int = Field(500, ge=1, le=5000)
     chunk_max_tokens: int = Field(600, ge=100, le=2000)
     chunk_overlap_tokens: int = Field(60, ge=0)
-    pipeline_version: str = "pdf-ingestion-v1.3"
+    pipeline_version: str = "pdf-ingestion-v1.4"
     max_attempts: int = Field(3, ge=1, le=10)
     lease_seconds: int = Field(120, ge=30)
     worker_poll_seconds: float = Field(2, ge=0.1)
@@ -82,6 +83,7 @@ class Settings(BaseSettings):
             "embedding_dimension",
             "vision_model_id",
             "math_vision_model_id",
+            "fidelity_vision_model_id",
             "enable_ocr",
             "enable_formula_enrichment",
             "describe_images",

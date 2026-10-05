@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from PIL import Image
 from upraise_ai.core.config import Settings
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.core.utils import deterministic_uuid, project_relative
-from upraise_ai.schemas.documents import BoundingBox, DocumentElement, ElementType
+from upraise_ai.schemas.documents import BoundingBox, DocumentElement, ElementType, SourceRegion
 from upraise_ai.services.formats import ParseResult, ProgressCallback
 from upraise_ai.workers.budgets import phase_timeout_seconds
 
@@ -152,37 +153,22 @@ class DoclingPdfParser:
             original_text = self._text_for_item(item, document, element_type)
             structured_content = None
             caption = self._caption_for_item(item, document)
-            asset_path = None
+            crop_destination = None
 
             if element_type is ElementType.TABLE:
                 structured_content = self._table_html(item, document)
-                asset_path = self._save_item_image(
-                    item,
-                    document,
-                    tables_dir / f"table_{index:05d}.png",
-                    warnings,
-                )
+                crop_destination = tables_dir / f"table_{index:05d}.png"
             elif element_type is ElementType.FIGURE:
-                asset_path = self._save_item_image(
-                    item,
-                    document,
-                    figures_dir / f"figure_{index:05d}.png",
-                    warnings,
-                )
+                crop_destination = figures_dir / f"figure_{index:05d}.png"
             elif element_type is ElementType.FORMULA:
-                asset_path = self._save_item_image(
-                    item,
-                    document,
-                    formulas_dir / f"formula_{index:05d}.png",
-                    warnings,
-                )
+                crop_destination = formulas_dir / f"formula_{index:05d}.png"
             elif element_type in INLINE_MATH_TEXT_TYPES and looks_like_inline_math(original_text):
-                asset_path = self._save_item_image(
-                    item,
-                    document,
-                    inline_math_dir / f"inline_math_{index:05d}.png",
-                    warnings,
-                )
+                crop_destination = inline_math_dir / f"inline_math_{index:05d}.png"
+
+            source_regions = self._source_regions(
+                item, document, crop_destination, warnings, element_index=index,
+            )
+            asset_path = next((region.asset_path for region in source_regions if region.asset_path), None)
 
             if element_type in {ElementType.TITLE, ElementType.HEADING}:
                 heading_level = max(int(level or 1), 1)
@@ -191,20 +177,26 @@ class DoclingPdfParser:
                 if original_text.strip():
                     heading_stack.append((heading_level, original_text.strip()))
 
-            provenance = self._provenance(item)
-            page_number = provenance["page_number"]
-            bbox = provenance["bounding_box"]
+            first_region = source_regions[0] if source_regions else None
+            page_number = first_region.page_number if first_region and first_region.page_number > 0 else None
+            bbox = first_region.bounding_box if first_region else None
             source_reference = self._source_reference(item)
             element_id = deterministic_uuid(f"{source_hash}:element:{index}:{source_reference or label}")
             element_metadata: dict[str, Any] = {
                 "hierarchy_level": int(level or 0),
                 "provenance": [
                     {
-                        "page": int(p.page_no),
-                        "charspan": list(getattr(p, "charspan", []) or []),
-                        "bbox": p.bbox.model_dump(mode="json") if getattr(p, "bbox", None) else None,
+                        "page": region.page_number,
+                        "charspan": region.charspan,
+                        "bbox": {
+                            "l": region.bounding_box.left,
+                            "t": region.bounding_box.top,
+                            "r": region.bounding_box.right,
+                            "b": region.bounding_box.bottom,
+                            "coord_origin": region.bounding_box.coordinate_origin,
+                        } if region.bounding_box else None,
                     }
-                    for p in (getattr(item, "prov", []) or [])
+                    for region in source_regions
                 ],
             }
             if element_type is ElementType.FORMULA:
@@ -222,19 +214,15 @@ class DoclingPdfParser:
                     element_type=element_type,
                     original_text=original_text,
                     structured_content=structured_content,
+                    source_text=original_text,
+                    source_structured_content=structured_content,
+                    source_regions=source_regions,
                     caption=caption,
                     page_number=page_number,
-                    page_numbers=sorted({int(p.page_no) for p in (getattr(item, "prov", []) or [])}),
+                    page_numbers=sorted({region.page_number for region in source_regions if region.page_number > 0}),
                     bounding_box=bbox,
                     heading_path=[entry[1] for entry in heading_stack],
-                    asset_path=(
-                        project_relative(
-                            Path(asset_path),
-                            self.settings.project_root,
-                        )
-                        if asset_path
-                        else None
-                    ),
+                    asset_path=asset_path,
                     source_reference=source_reference,
                     parser_label=label,
                     metadata=element_metadata,
@@ -310,52 +298,102 @@ class DoclingPdfParser:
                 return None
         return None
 
-    @staticmethod
-    def _provenance(item: Any) -> dict[str, Any]:
-        provenance = list(getattr(item, "prov", []) or [])
-        if not provenance:
-            return {"page_number": None, "bounding_box": None}
-
-        first = provenance[0]
-        bbox = getattr(first, "bbox", None)
-        bounding_box = None
-        if bbox is not None:
-            origin = getattr(getattr(bbox, "coord_origin", None), "value", None)
-            bounding_box = BoundingBox(
-                left=float(bbox.l),
-                top=float(bbox.t),
-                right=float(bbox.r),
-                bottom=float(bbox.b),
-                coordinate_origin=str(origin) if origin else None,
-            )
-        page_number = getattr(first, "page_no", None)
-        return {
-            "page_number": int(page_number) if page_number is not None else None,
-            "bounding_box": bounding_box,
-        }
-
-    @staticmethod
-    def _save_item_image(
+    def _source_regions(
+        self,
         item: Any,
         document: Any,
-        destination: Path,
+        destination: Path | None,
         warnings: list[str],
-    ) -> Path | None:
-        get_image = getattr(item, "get_image", None)
-        if not callable(get_image):
-            return None
-        try:
-            image = get_image(document)
-            if image is None:
-                return None
-            if not isinstance(image, Image.Image):
-                image = image.pil_image
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            image.save(destination, format="PNG")
-            return destination
-        except (AttributeError, OSError, TypeError, ValueError) as exc:
-            warnings.append(f"Could not save a visual element crop ({destination.name}): {exc}")
-            return None
+        *,
+        element_index: int,
+    ) -> list[SourceRegion]:
+        """Retain every provenance span; crop only its own page and bounding box."""
+        provenance = list(getattr(item, "prov", []) or [])
+        if not provenance and destination is not None:
+            warnings.append(f"Element {element_index} has no source provenance for visual verification.")
+        regions: list[SourceRegion] = []
+        for region_index, prov in enumerate(provenance):
+            context = f"element {element_index}, region {region_index}"
+            try:
+                page_number = int(getattr(prov, "page_no", None))
+                if page_number < 1:
+                    raise ValueError("page number is not positive")
+            except (TypeError, ValueError, OverflowError):
+                page_number = 0
+                warnings.append(f"Missing or invalid source page number ({context}).")
+
+            try:
+                charspan = [int(value) for value in (getattr(prov, "charspan", []) or [])]
+            except (TypeError, ValueError, OverflowError):
+                charspan = []
+                warnings.append(f"Invalid source character span ({context}).")
+
+            bbox = getattr(prov, "bbox", None)
+            bounding_box = None
+            if bbox is not None:
+                try:
+                    coordinates = [float(getattr(bbox, name)) for name in ("l", "t", "r", "b")]
+                    if not all(math.isfinite(value) for value in coordinates):
+                        raise ValueError("nonfinite coordinates")
+                    origin = getattr(bbox, "coord_origin", None)
+                    origin = getattr(origin, "value", origin)
+                    bounding_box = BoundingBox(
+                        left=coordinates[0], top=coordinates[1],
+                        right=coordinates[2], bottom=coordinates[3],
+                        coordinate_origin=str(origin) if origin is not None else None,
+                    )
+                except (AttributeError, TypeError, ValueError, OverflowError):
+                    warnings.append(f"Invalid source bounding box ({context}).")
+
+            region = SourceRegion(page_number=page_number, charspan=charspan, bounding_box=bounding_box)
+            if destination is not None:
+                region_destination = destination.with_name(
+                    f"{destination.stem}_region_{region_index:03d}_page_{page_number:05d}.png"
+                )
+                try:
+                    self._save_region_image(document, region, region_destination)
+                    region.asset_path = project_relative(region_destination, self.settings.project_root)
+                except (AttributeError, KeyError, OSError, TypeError, ValueError, OverflowError) as exc:
+                    warnings.append(f"Could not save complete source crop ({context}): {exc}")
+            regions.append(region)
+        return regions
+
+    @staticmethod
+    def _save_region_image(document: Any, region: SourceRegion, destination: Path) -> None:
+        # FloatingItem.get_image can return its embedded image instead of the
+        # requested provenance. Direct page cropping avoids that ambiguity.
+        page = (getattr(document, "pages", {}) or {}).get(region.page_number)
+        if page is None:
+            raise ValueError("source page is unavailable")
+        bbox = region.bounding_box
+        if bbox is None:
+            raise ValueError("source bounding box is unavailable")
+        page_size = getattr(page, "size", None)
+        width, height = float(page_size.width), float(page_size.height)
+        if not all(math.isfinite(value) and value > 0 for value in (width, height)):
+            raise ValueError("source page dimensions are invalid")
+        image_ref = getattr(page, "image", None)
+        image = image_ref if isinstance(image_ref, Image.Image) else getattr(image_ref, "pil_image", None)
+        if not isinstance(image, Image.Image):
+            raise ValueError("source page image is unavailable")
+        left, right = bbox.left, bbox.right
+        if bbox.coordinate_origin == "TOPLEFT":
+            top, bottom = bbox.top, bbox.bottom
+        elif bbox.coordinate_origin == "BOTTOMLEFT":
+            top, bottom = height - bbox.top, height - bbox.bottom
+        else:
+            raise ValueError("source bounding box has an unknown coordinate origin")
+        if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+            raise ValueError("source bounding box is empty, inverted, or outside its page")
+        # Round outwards to retain all pixels touched by the source region.
+        pixels = (
+            math.floor(left * image.width / width),
+            math.floor(top * image.height / height),
+            math.ceil(right * image.width / width),
+            math.ceil(bottom * image.height / height),
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        image.crop(pixels).save(destination, format="PNG")
 
     @staticmethod
     def _save_native_document(

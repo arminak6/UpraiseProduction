@@ -78,9 +78,9 @@ def test_enrichment_workload_counts_every_eligible_crop():
         element(ElementType.FIGURE),
         element(ElementType.FIGURE, crop=None),
     ]
-    assert enrichment_workload(elements, describe_images=True) == 3
-    assert enrichment_workload(elements, describe_images=False) == 2
-    assert enrichment_workload([element(ElementType.FIGURE) for _ in range(1_000)], describe_images=True) == 1_000
+    assert enrichment_workload(elements, describe_images=True) == 7
+    assert enrichment_workload(elements, describe_images=False) == 5
+    assert enrichment_workload([element(ElementType.FIGURE) for _ in range(1_000)], describe_images=True) == 2_000
 
 
 def test_workload_hook_preserves_three_argument_progress_callbacks():
@@ -167,7 +167,7 @@ def test_processor_announces_workload_before_each_expensive_phase(tmp_path, monk
 
     class Enricher:
         def enrich(self, parsed, progress):
-            assert events[-1] == ("enrich", 2)
+            assert events[-1] == ("enrich", 4)
             parsed.elements[1].original_text = "x^2"
             parsed.elements[2].derived_description = "Source diagram"
             return []
@@ -184,4 +184,4 @@ def test_processor_announces_workload_before_each_expensive_phase(tmp_path, monk
         content_hash="declared-hash", source_filename="teaching.pdf",
     )
     processor.prepare(source, metadata, "document", tmp_path, "token", Progress())
-    assert events == [("parse", 200), ("enrich", 2), ("chunk", 200), ("embed", 3)]
+    assert events == [("parse", 200), ("enrich", 4), ("chunk", 200), ("embed", 3)]

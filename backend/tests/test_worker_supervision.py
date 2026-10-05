@@ -48,8 +48,9 @@ def synthetic_child(settings, job, events, parent_pid):
     """Use a top-level target so these tests exercise the spawn start method."""
     prepare_child(parent_pid)
     staging = StagingStore(settings.data_dir)
-    with staging.artifact_lock(job["job_id"]):
-        folder = staging.job_dir(job["job_id"])
+    job_id = str(job["job_id"])
+    with staging.artifact_lock(job_id):
+        folder = staging.job_dir(job_id)
         (folder / "child.pid").write_text(str(os.getpid()))
         (folder / "partial-output.json").write_text("unfinished synthetic output")
         mode = job.get("synthetic_mode", "hang")

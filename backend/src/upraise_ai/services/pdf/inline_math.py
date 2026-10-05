@@ -39,7 +39,6 @@ def looks_like_inline_math(text: str) -> bool:
     math_operators = 0
     modifier_symbols = 0
     superscript_or_subscript = 0
-    decomposed_diacritics = 0
     for character in cleaned:
         category = unicodedata.category(character)
         name = unicodedata.name(character, "")
@@ -49,12 +48,6 @@ def looks_like_inline_math(text: str) -> bool:
             modifier_symbols += 1
         if "SUPERSCRIPT" in name or "SUBSCRIPT" in name:
             superscript_or_subscript += 1
-        if (
-            ord(character) > 127
-            and category.startswith("L")
-            and any(unicodedata.combining(part) for part in unicodedata.normalize("NFKD", character))
-        ):
-            decomposed_diacritics += 1
 
     score = 0
     if math_operators:
@@ -80,8 +73,6 @@ def looks_like_inline_math(text: str) -> bool:
     if standalone_count >= 4:
         score += 1
     if has_identifier_context and modifier_symbols:
-        score += 2
-    if has_identifier_context and decomposed_diacritics:
         score += 2
 
     return score >= 2
