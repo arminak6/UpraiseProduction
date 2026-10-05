@@ -1,6 +1,6 @@
 # UPRAISE AI Module
 
-A1 PDF ingestion, A2 list/delete, A4 job status and A6 cancellation/receipt are implemented.
+A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio and A6 control are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id only. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -12,7 +12,8 @@ The original Word draft remains the API baseline, with the user-approved
 extensions recorded in [api-baseline.md](backend/docs/api-baseline.md).
 The Word file is currently absent from its recorded root path. The supplied
 architecture diagram is retained as conversation context. A/B/C grouping and
-all reserved endpoints remain unchanged. This work implements A1, A2, A4 and A6.
+all reserved endpoints remain unchanged. This work implements A1 through A6.
+See [A3/A5's contract, Version 3 workflow and callback setup](backend/docs/a3.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
@@ -38,7 +39,7 @@ is configured; adjust the deployment mount when using an IAM role.
 docker compose config --quiet
 docker compose up --build -d --wait --wait-timeout 180
 docker compose ps
-docker compose logs -f backend worker
+docker compose logs -f backend worker lesson-worker lesson-delivery
 ```
 
 Startup creates the durable job/audit schemas through a repeatable migrate
@@ -69,6 +70,17 @@ First conversion downloads Docling/EasyOCR models into the persistent cache;
 allow extra time and prewarm that cache before deployment.
 
 ## Storage and recovery
+
+A3 uses a separate generation worker and a separate delivery/expiry worker.
+It accepts document IDs already submitted through A1, configurable source page
+windows and output chunk word targets. It delivers only AI-generated DRAFTs,
+with V3 source reviewer reports, WAV audio and viseme timings.
+The copied V3 teacher reviews the draft, edits once if needed and validates the final text. Learner level is
+recorded without changing generation style yet. A3 output expires after 24 hours
+by default, or is removed after A6 receipt; source PDFs/vectors remain.
+Optional push delivery requires the AI's outbound mTLS identity and a fresh
+short-lived OAuth2 token. Pull-only A5 works without callback settings. Set up
+deployment secrets and the public gateway URL as described in [a3.md](backend/docs/a3.md).
 
 - upraise_qdrant_data: source chunks, vectors and provenance.
 - upraise_postgres_data: upraise_jobs and upraise_audit databases.
@@ -110,7 +122,7 @@ the supervisor stops and reaps its child before cleanup resumes. Receipt
 acknowledgment retains terminal results and active vectors. Both actions preserve
 source PDFs and history.
 
-Source/artifact cleanup is disabled until an operational retention period is
+Ingestion source/artifact cleanup is disabled until an operational retention period is
 agreed, preserving the old pipeline's evidence. A positive
 UPRAISE_ARTIFACT_RETENTION_DAYS enables cleanup for terminal jobs/completed deletions. It does
 not erase Qdrant course material, job records or audit history. Disk capacity,

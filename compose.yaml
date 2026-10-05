@@ -1,6 +1,8 @@
 name: upraise
 
 x-ingestion-environment: &ingestion-environment
+  UPRAISE_ENVIRONMENT: ${UPRAISE_ENVIRONMENT:-production}
+  UPRAISE_LOCAL_TEST_MODE: ${UPRAISE_LOCAL_TEST_MODE:-false}
   UPRAISE_JOBS_DSN: ${UPRAISE_JOBS_DSN:-postgresql://upraise_jobs:${JOBS_PASSWORD:-upraise_jobs_password}@postgres:5432/upraise_jobs}
   UPRAISE_AUDIT_DSN: ${UPRAISE_AUDIT_DSN:-postgresql://upraise_audit_app:${AUDIT_PASSWORD:-upraise_audit_password}@postgres:5432/${POSTGRES_DB:-upraise_audit}}
   UPRAISE_DATA_DIR: /data/ingestion
@@ -15,6 +17,29 @@ x-ingestion-environment: &ingestion-environment
   UPRAISE_MTLS_ALLOWED_FINGERPRINTS: ${UPRAISE_MTLS_ALLOWED_FINGERPRINTS:-[]}
   UPRAISE_MOODLE_ALLOWED_CIDRS: ${UPRAISE_MOODLE_ALLOWED_CIDRS:-[]}
   UPRAISE_ARTIFACT_RETENTION_DAYS: ${UPRAISE_ARTIFACT_RETENTION_DAYS:-0}
+  UPRAISE_LESSON_GENERATION_MODEL_ID: ${UPRAISE_LESSON_GENERATION_MODEL_ID:-openai.gpt-oss-120b-1:0}
+  UPRAISE_LESSON_REVIEW_MODEL_ID: ${UPRAISE_LESSON_REVIEW_MODEL_ID:-qwen.qwen3-235b-a22b-2507-v1:0}
+  UPRAISE_LESSON_VISUAL_MODEL_ID: ${UPRAISE_LESSON_VISUAL_MODEL_ID:-eu.amazon.nova-pro-v1:0}
+  UPRAISE_LESSON_TTL_SECONDS: ${UPRAISE_LESSON_TTL_SECONDS:-86400}
+  UPRAISE_LESSON_SOURCE_WAIT_SECONDS: ${UPRAISE_LESSON_SOURCE_WAIT_SECONDS:-86400}
+  UPRAISE_LESSON_TIMEOUT_SECONDS: ${UPRAISE_LESSON_TIMEOUT_SECONDS:-43200}
+  UPRAISE_LESSON_SECONDS_PER_SECTION: ${UPRAISE_LESSON_SECONDS_PER_SECTION:-1200}
+  UPRAISE_LESSON_SECONDS_PER_CHUNK: ${UPRAISE_LESSON_SECONDS_PER_CHUNK:-180}
+  UPRAISE_LESSON_MAX_SOURCE_CHARACTERS: ${UPRAISE_LESSON_MAX_SOURCE_CHARACTERS:-120000}
+  UPRAISE_LESSON_CAPTURE_MODEL_OUTPUTS: ${UPRAISE_LESSON_CAPTURE_MODEL_OUTPUTS:-false}
+  UPRAISE_POLLY_ENGINE: ${UPRAISE_POLLY_ENGINE:-neural}
+  UPRAISE_LESSON_PUBLIC_BASE_URL: ${UPRAISE_LESSON_PUBLIC_BASE_URL:-}
+  UPRAISE_CALLBACK_ALLOWED_HOSTS: ${UPRAISE_CALLBACK_ALLOWED_HOSTS:-[]}
+  UPRAISE_CALLBACK_ALLOWED_CIDRS: ${UPRAISE_CALLBACK_ALLOWED_CIDRS:-[]}
+  UPRAISE_CALLBACK_TOKEN_URL: ${UPRAISE_CALLBACK_TOKEN_URL:-}
+  UPRAISE_CALLBACK_CLIENT_ID: ${UPRAISE_CALLBACK_CLIENT_ID:-}
+  UPRAISE_CALLBACK_CLIENT_SECRET: ${UPRAISE_CALLBACK_CLIENT_SECRET:-}
+  UPRAISE_CALLBACK_OAUTH_AUTH_METHOD: ${UPRAISE_CALLBACK_OAUTH_AUTH_METHOD:-client_secret_basic}
+  UPRAISE_CALLBACK_SCOPE: ${UPRAISE_CALLBACK_SCOPE:-lessons:deliver}
+  UPRAISE_CALLBACK_CERTIFICATE: ${UPRAISE_CALLBACK_CERTIFICATE:-}
+  UPRAISE_CALLBACK_PRIVATE_KEY: ${UPRAISE_CALLBACK_PRIVATE_KEY:-}
+  UPRAISE_CALLBACK_CA_FILE: ${UPRAISE_CALLBACK_CA_FILE:-}
+  UPRAISE_CALLBACK_MAX_ATTEMPTS: ${UPRAISE_CALLBACK_MAX_ATTEMPTS:-8}
 
 services:
   backend:
@@ -24,8 +49,6 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     environment:
       <<: *ingestion-environment
-      UPRAISE_ENVIRONMENT: ${UPRAISE_ENVIRONMENT:-production}
-      UPRAISE_LOCAL_TEST_MODE: ${UPRAISE_LOCAL_TEST_MODE:-false}
       UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
     volumes:
       - ingestion_data:/data/ingestion
@@ -105,6 +128,51 @@ services:
     stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "python", "-c", "import pathlib, time; p=pathlib.Path('/tmp/upraise-worker-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime < 150"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  lesson-worker: &lesson-worker
+    image: upraise-backend
+    build:
+      context: ./backend
+    command: ["python", "-m", "upraise_ai.workers.lessons"]
+    environment:
+      <<: *ingestion-environment
+    volumes:
+      - ingestion_data:/data/ingestion
+      - type: bind
+        source: ./aws_credentials.json
+        target: /run/secrets/aws_credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./callback_tls
+        target: /run/secrets/callback_tls
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib, time; p=pathlib.Path('/tmp/upraise-lesson-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime < 150"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  lesson-delivery:
+    <<: *lesson-worker
+    command: ["python", "-m", "upraise_ai.workers.lesson_delivery"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib, time; p=pathlib.Path('/tmp/upraise-delivery-heartbeat'); assert p.exists() and time.time()-p.stat().st_mtime < 150"]
       interval: 30s
       timeout: 5s
       retries: 3

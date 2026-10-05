@@ -28,6 +28,14 @@ def status_changed():
     st.session_state["tracking_path"] = st.session_state.get("status_url", "")
     st.session_state.pop("status_response", None)
     st.session_state.pop("job_action_response", None)
+    st.session_state.pop("lesson_result", None)
+    st.session_state.pop("lesson_audio", None)
+
+
+def new_lesson():
+    st.session_state["lesson_key"] = str(uuid4())
+    for name in ("lesson_response", "lesson_result", "lesson_audio"):
+        st.session_state.pop(name, None)
 
 
 def list_course_changed():
@@ -60,7 +68,7 @@ with st.sidebar:
         st.caption("Use your HTTPS mTLS gateway. Certificate files and tokens are session-only.")
     timeout = st.number_input("Request timeout (seconds)", min_value=5, max_value=600, value=180, step=5)
     st.divider()
-    page = st.radio("API tools", ["Ingest material", "Manage material", "Processing status", "Health", "API explorer"], key="page")
+    page = st.radio("API tools", ["Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
     st.button("Clear session data", on_click=clear_session, width="stretch")
 
 try:
@@ -71,10 +79,10 @@ except ValueError as error:
 
 if (os.environ.get("UPRAISE_LOCAL_TEST_MODE", "false").lower() == "true"
         and base_url == os.environ.get("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")):
-    st.info("Local testing mode is enabled. Leave the bearer token and mTLS fields empty to test A1/A2/A4/A6.")
+    st.info("Local testing mode is enabled. Leave the bearer token and mTLS fields empty to test A1 through A6.")
 
 if st.session_state.get("target") != base_url:
-    for name in ("ingestion_response", "status_response", "job_action_response", "health_response", "explorer_response", "api_schema", "schema_response", "documents_response", "delete_response"):
+    for name in ("ingestion_response", "lesson_response", "lesson_result", "lesson_audio", "status_response", "job_action_response", "health_response", "explorer_response", "api_schema", "schema_response", "documents_response", "delete_response"):
         st.session_state.pop(name, None)
     st.session_state["status_url"] = ""
     st.session_state["tracking_path"] = ""
@@ -82,12 +90,15 @@ if st.session_state.get("target") != base_url:
     st.session_state["list_course_id"] = ""
     st.session_state["delete_document_id"] = ""
     st.session_state["submission_key"] = str(uuid4())
+    st.session_state["lesson_key"] = str(uuid4())
     st.session_state["target"] = base_url
 
 # Keep form values when their widgets are hidden by navigation. In particular,
 # a network retry must keep the same idempotency key after leaving A1.
 for name in ("submission_key", "course_id", "activity_id", "language", "source_ref",
-             "version", "content_hash", "source_mode", "fill_hash", "mime", "list_course_id", "delete_document_id"):
+             "version", "content_hash", "source_mode", "fill_hash", "mime", "list_course_id", "delete_document_id",
+             "lesson_key", "a3_lesson_id", "a3_course_id", "a3_activity_id", "a3_document_ids", "a3_language",
+             "a3_voice", "a3_callback", "a3_window", "a3_words", "a3_level"):
     if name in st.session_state:
         st.session_state[name] = st.session_state[name]
 for name, default in {"language": "en", "mime": "application/pdf", "fill_hash": True}.items():
@@ -201,6 +212,51 @@ if page == "Ingest material":
     if st.session_state.get("tracking_path"):
         st.info("Open Processing status to follow the latest accepted document.")
 
+elif page == "Generate lesson":
+    st.subheader("A3 · Generate a draft lesson")
+    st.caption("Known documents are processed in the order supplied. Pending ingestion is awaited.")
+    st.button("Start a new lesson generation", on_click=new_lesson)
+    st.session_state.setdefault("lesson_key", str(uuid4()))
+    with st.form("lesson_form"):
+        left, right = st.columns(2)
+        lesson_id = left.text_input("lesson_id", key="a3_lesson_id")
+        course_id = right.text_input("course_id", key="a3_course_id")
+        activity_id = left.text_input("activity_id", key="a3_activity_id")
+        language = right.text_input("Generated language", value="en", key="a3_language")
+        voice = left.text_input("Polly voice", value="Joanna", key="a3_voice")
+        document_ids = st.text_area("Document UUIDs in order (one per line)", key="a3_document_ids")
+        window = left.number_input("Source window (pages)", min_value=1, max_value=50, value=5, key="a3_window")
+        words = right.number_input("Target chunk length (words)", min_value=30, max_value=1000, value=200, key="a3_words")
+        level = left.selectbox("Learner level", ["beginner", "intermediate", "advanced"], index=1, key="a3_level")
+        st.caption("Learner level is recorded for now; it does not change the generation style.")
+        callback = st.text_input("Middleware callback URL (optional)", key="a3_callback",
+                                 help="Requires configured outbound mTLS and OAuth. Leave empty for A5 pull.")
+        key = st.text_input("Idempotency-Key", key="lesson_key")
+        submitted = st.form_submit_button("Send A3 request", type="primary")
+    if submitted:
+        try:
+            ids = [str(UUID(value.strip())) for value in document_ids.splitlines() if value.strip()]
+            if not all((lesson_id.strip(), course_id.strip(), activity_id.strip(), ids, language.strip(), voice.strip())):
+                raise ValueError("Enter the lesson, course, activity, documents, language and voice.")
+            payload = {"lesson_id": lesson_id.strip(), "course_id": course_id.strip(),
+                       "activity_id": activity_id.strip(), "document_ids": ids,
+                       "language": language.strip(), "voice": voice.strip(),
+                       "options": {"source_window_pages": window, "target_chunk_words": words, "learner_level": level}}
+            if callback.strip():
+                payload["callback_url"] = callback.strip()
+            result = request(connection, "POST", "/v1/lesson-jobs", json_body=payload,
+                             headers={"Idempotency-Key": key.strip()} if key.strip() else {})
+            st.session_state["lesson_response"] = result
+            if result.status == 202 and result.headers.get("location"):
+                path = status_path(result.headers["location"], base_url)
+                st.session_state["status_url"] = path
+                st.session_state["tracking_path"] = path
+                for name in ("status_response", "job_action_response", "lesson_result", "lesson_audio"):
+                    st.session_state.pop(name, None)
+        except ValueError as error:
+            st.error(str(error))
+    show_response(st.session_state.get("lesson_response"))
+
 elif page == "Manage material":
     st.subheader("A2 · List or remove ingested material")
     st.caption("List documents by course, including processing status and version.")
@@ -278,6 +334,32 @@ elif page == "Processing status":
         show_response(result)
 
     processing_status()
+
+    st.subheader("A5 · Lesson result and audio")
+    if st.button("Fetch lesson result", disabled=not location.strip()):
+        try:
+            path = status_path(location, base_url)
+            st.session_state["lesson_result"] = request(connection, "GET", path + "/result")
+            st.session_state.pop("lesson_audio", None)
+        except ValueError as error:
+            st.error(str(error))
+    lesson = st.session_state.get("lesson_result")
+    show_response(lesson)
+    if lesson and lesson.successful and isinstance(lesson.body, dict):
+        chunks = lesson.body.get("chunks", [])
+        st.caption("AI-generated DRAFT. Download all required audio before acknowledging receipt.")
+        if chunks:
+            selected = st.selectbox("Audio chunk", range(len(chunks)), format_func=lambda i: f"Chunk {chunks[i]['index'] + 1}")
+            if st.button("Fetch chunk audio"):
+                path = status_path(location, base_url)
+                chunk_id = str(UUID(chunks[selected]["chunk_id"]))
+                st.session_state["lesson_audio"] = request(connection, "GET", path + "/audio/" + chunk_id)
+            audio = st.session_state.get("lesson_audio")
+            if audio and audio.successful and audio.binary:
+                st.audio(audio.binary, format="audio/wav")
+                st.download_button("Download audio", audio.binary, file_name="lesson-chunk.wav", mime="audio/wav")
+            elif audio:
+                show_response(audio)
 
     st.subheader("A6 · Cancel or acknowledge")
     reason = st.selectbox("Job action", ["CANCEL", "RECEIVED"],

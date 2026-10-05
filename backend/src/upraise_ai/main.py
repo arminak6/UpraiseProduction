@@ -14,9 +14,11 @@ from upraise_ai.guards.body_limit import UploadLimitMiddleware
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
+from upraise_ai.storage.lessons import LessonRepository
 from upraise_ai.storage.vectors import VectorStore
 from upraise_ai.workflows.documents import DocumentService
 from upraise_ai.workflows.jobs import JobService
+from upraise_ai.workflows.lessons import LessonService
 from upraise_ai.workflows.submission import SubmissionService
 
 
@@ -26,6 +28,7 @@ async def lifespan(app):
     app.state.submission = None
     app.state.documents = None
     app.state.jobs = None
+    app.state.lessons = None
     vectors = None
     if settings.jobs_dsn.get_secret_value():
         jobs = JobRepository(settings.jobs_dsn.get_secret_value())
@@ -36,6 +39,9 @@ async def lifespan(app):
             audit = AuditRepository(settings.audit_dsn.get_secret_value())
             app.state.documents = DocumentService(jobs, vectors, audit)
             app.state.jobs = JobService(jobs, vectors, audit, staging)
+            app.state.lessons = LessonService(
+                settings, LessonRepository(settings.jobs_dsn.get_secret_value()), jobs, staging, audit,
+            )
     try:
         yield
     finally:
@@ -46,7 +52,7 @@ async def lifespan(app):
 app = FastAPI(
     title="UPRAISE AI Module",
     version="0.1.0",
-    description="UPRAISE A1 ingestion, A2 material management, A4 monitoring and A6 job control.",
+    description="UPRAISE A1 ingestion, A2 material management, A3 draft lessons, A4/A5 jobs and A6 control.",
     lifespan=lifespan,
 )
 

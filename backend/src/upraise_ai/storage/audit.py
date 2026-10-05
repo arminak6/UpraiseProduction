@@ -13,6 +13,11 @@ CREATE TABLE IF NOT EXISTS ingestion_audit (
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX IF NOT EXISTS ingestion_audit_job ON ingestion_audit (job_id, created_at);
+CREATE TABLE IF NOT EXISTS lesson_audit (
+    event_id UUID PRIMARY KEY, job_id UUID NOT NULL, event_type TEXT NOT NULL,
+    details JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS lesson_audit_job ON lesson_audit(job_id, created_at);
 """
 
 
@@ -35,4 +40,15 @@ class AuditRepository:
                 """INSERT INTO ingestion_audit (event_id,job_id,document_id,event_type,details)
                 VALUES (%s,%s,%s,%s,%s) ON CONFLICT (event_id) DO NOTHING""",
                 (event_id, job["job_id"], job["document_id"], event_type, Jsonb(details)),
+            )
+
+    def lesson(self, job, event_type, details, *, attempt=False):
+        identity = f"lesson:{job['job_id']}:{event_type}"
+        if attempt:
+            identity += f":{job['lease_token']}"
+        with psycopg.connect(self.dsn, connect_timeout=5) as conn:
+            conn.execute(
+                """INSERT INTO lesson_audit(event_id,job_id,event_type,details) VALUES (%s,%s,%s,%s)
+                ON CONFLICT(event_id) DO NOTHING""",
+                (uuid5(NAMESPACE_URL, identity), job["job_id"], event_type, Jsonb(details)),
             )

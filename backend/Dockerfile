@@ -1,3 +1,8 @@
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS math-runtime
+WORKDIR /math_runtime
+COPY math_runtime/package.json math_runtime/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
 FROM python:3.12.14-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,6 +26,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-cache
 
 COPY src ./src
+COPY --from=math-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=math-runtime /math_runtime /app/math_runtime
+COPY math_runtime/math_speech.mjs /app/math_runtime/math_speech.mjs
 
 RUN groupadd --gid 10001 upraise && useradd --uid 10001 --gid upraise --create-home upraise \
     && mkdir -p /data/ingestion /cache \

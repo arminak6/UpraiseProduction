@@ -21,13 +21,16 @@ docker compose --profile tools up --build -d --wait --wait-timeout 180
 
 Open http://localhost:8501. Leave bearer token and mTLS inputs empty, use
 **Ingest material** for A1, **Processing status** for A4, and **Manage material**
-for A2 list/delete. Processing status also offers A6 cancellation/receipt.
+for A2 list/delete. **Generate lesson** provides A3; Processing status offers
+A5 DRAFT result/audio and A6 cancellation/receipt. Submit known A1 document IDs;
+no re-ingestion is required. Leave callback_url empty for pull-only tests.
+Outbound callbacks still require mTLS/OAuth deployment configuration in local mode.
 Course/activity/source metadata and PDF support limits still
 apply. AWS/PDF extraction, PostgreSQL, Qdrant and audit run normally.
 
 The backend assigns the fixed `local-test-client` identity, allows any course ID
 entered for these tests, and grants only documents:read, documents:write,
-jobs:read and jobs:write. Client ownership remains enforced: local mode does not expose or
+lessons:write, jobs:read and jobs:write. Client ownership remains enforced: local mode does not expose or
 delete documents belonging to another Middleware client. Requests must arrive
 from a loopback/private network peer (including the Compose frontend container),
 using the actual socket address, not forwarded headers. The existing API and

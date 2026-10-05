@@ -32,6 +32,7 @@ class Result:
     is_json: bool = False
     headers: dict = field(default_factory=dict)
     error: str | None = None
+    binary: bytes | None = field(default=None, repr=False)
 
     @property
     def successful(self):
@@ -129,17 +130,21 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
             for name in ("location", "content-type", "retry-after", "x-request-id", "x-upraise-auth-mode")
             if name in response.headers
         }
-        try:
-            result.body = response.json()
-            result.is_json = True
-        except ValueError:
-            result.body = response.text
+        if response.headers.get("content-type", "").split(";")[0] == "audio/wav":
+            result.binary = response.content
+            result.body = f"WAV audio: {len(response.content)} bytes"
+        else:
+            try:
+                result.body = response.json()
+                result.is_json = True
+            except ValueError:
+                result.body = response.text
     except httpx.TimeoutException:
         if result.method == "DELETE" and path.startswith("/v1/jobs/"):
             result.error = "Request timed out. The job action may have completed; refresh status or retry the same job ID and reason."
         elif result.method == "DELETE":
             result.error = "Request timed out. Deletion may have completed; refresh the list or retry the same document ID."
-        elif result.method == "POST" and path == "/v1/documents":
+        elif result.method == "POST" and path in {"/v1/documents", "/v1/lesson-jobs"}:
             result.error = "Request timed out. An upload may already be accepted; retry with the same Idempotency-Key."
         else:
             result.error = "Request timed out. Check the backend and retry."

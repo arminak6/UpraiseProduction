@@ -48,6 +48,10 @@ def dispose_job(
     principal: Principal = Depends(ingress),
 ):
     principal.require_scope("jobs:write")
+    lessons = getattr(request.app.state, "lessons", None)
+    if lessons is not None and lessons.jobs.get(str(job_id)):
+        lessons.dispose(str(job_id), reason, principal)
+        return Response(status_code=204)
     jobs = getattr(request.app.state, "jobs", None)
     if jobs is None:
         raise HTTPException(503, "JOB_CONTROL_NOT_CONFIGURED")
@@ -132,6 +136,19 @@ async def ingest_document(request: Request, response: Response, principal: Princ
 @router.get("/v1/jobs/{job_id}", response_model=JobStatus, summary="A4 – Job status")
 def job_status(job_id: UUID, request: Request, principal: Principal = Depends(ingress)):
     principal.require_scope("jobs:read")
+    lessons = getattr(request.app.state, "lessons", None)
+    if lessons is not None and lessons.jobs.get(str(job_id)):
+        row = lessons.authorized(job_id, principal)
+        return JobStatus(
+            job_id=str(row["job_id"]), lesson_id=row["metadata"]["lesson_id"], status=row["status"],
+            step=row["step"], progress=row["progress"], attempts=row["attempts"],
+            error={"code": row["error_code"]} if row["error_code"] else None, result=row["result"],
+            created_at=row["created_at"], updated_at=row["updated_at"], expires_at=row["expires_at"],
+            cleanup_pending=bool(row["cleanup_requested_at"] and not row["cleanup_completed_at"]),
+            acknowledged=bool(row["cleanup_reason"] == "RECEIVED" and row["cleanup_completed_at"]),
+            callback_status=row["callback_status"], callback_attempts=row["callback_attempts"],
+            callback_error=row["callback_error"],
+        )
     row = service(request).jobs.get(str(job_id))
     if (
         not row

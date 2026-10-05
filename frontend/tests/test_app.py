@@ -20,6 +20,28 @@ def text_input(app, label):
 
 
 class AppTests(unittest.TestCase):
+    def test_a3_submission_preserves_options_and_retry_key_across_navigation(self):
+        job, document = str(uuid4()), str(uuid4())
+        accepted = Result('POST', '/v1/lesson-jobs', 202, 3, {'job_id': job}, True,
+                          {'location': '/v1/jobs/' + job})
+        with patch('api_client.request', return_value=accepted) as send:
+            app = self.app()
+            app.radio(key='page').set_value('Generate lesson').run()
+            for key, value in [('a3_lesson_id', 'lesson'), ('a3_course_id', '25'), ('a3_activity_id', '310')]:
+                app.text_input(key=key).set_value(value)
+            app.text_area(key='a3_document_ids').set_value(document)
+            app.number_input(key='a3_window').set_value(6)
+            button(app, 'Send A3 request').click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(send.call_args.args[1:3], ('POST', '/v1/lesson-jobs'))
+            self.assertEqual(send.call_args.kwargs['json_body']['options']['source_window_pages'], 6)
+            key = send.call_args.kwargs['headers']['Idempotency-Key']
+            app.radio(key='page').set_value('Health').run()
+            app.radio(key='page').set_value('Generate lesson').run()
+            self.assertEqual(app.text_input(key='lesson_key').value, key)
+            self.assertEqual(app.session_state['tracking_path'], '/v1/jobs/' + job)
+            self.assertEqual(send.call_count, 1)
+
     def app(self):
         app = AppTest.from_file(str(FRONTEND / 'app.py'), default_timeout=10).run()
         self.assertFalse(app.exception)

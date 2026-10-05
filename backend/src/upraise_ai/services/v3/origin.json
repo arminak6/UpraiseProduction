@@ -1,0 +1,43 @@
+{
+  "origin": "../Uprise/v2/backend/learning/v1",
+  "files": {
+    "bedrock_teacher.py": {
+      "source_sha256": "5d80dda2b7998fbe1f79c6afe71947ee9804e097a7bc8b5b1d8e57a940b4d5f2",
+      "local_sha256": "5d80dda2b7998fbe1f79c6afe71947ee9804e097a7bc8b5b1d8e57a940b4d5f2",
+      "relocations": []
+    },
+    "models.py": {
+      "source_sha256": "78e5c90e9df16ca51ec4e9de485387e473ebf1cc8c67a7c0da2122534ef827f1",
+      "local_sha256": "78e5c90e9df16ca51ec4e9de485387e473ebf1cc8c67a7c0da2122534ef827f1",
+      "relocations": []
+    },
+    "prompts.py": {
+      "source_sha256": "86a24acede3c5ba0c6ee644955f79796aa8bbc96f64aeb68aa2333bb11f6ab5c",
+      "local_sha256": "86a24acede3c5ba0c6ee644955f79796aa8bbc96f64aeb68aa2333bb11f6ab5c",
+      "relocations": []
+    },
+    "math_speech.py": {
+      "source_sha256": "9915c3cfdc225a60620d287c45c8ad50678b5f9881a53fe3614dc548271d31bd",
+      "local_sha256": "b7a67ef41ec3f3f42728a62f09fbb02536df38152b5c5d6ef43d7b3ceb4617ca",
+      "relocations": [
+        "Local SHA-256 utility import",
+        "Installed runtime directory"
+      ]
+    },
+    "math_speech_v4.py": {
+      "source_sha256": "9ecd4e6e596f011fc2bcf14013f99e13f533e729734c5581f40ca8951f5b8dcf",
+      "local_sha256": "c8fed022f0b1326138292fbdf69ce8f3e359dd25cf2c90432e91af97d620143e",
+      "relocations": [
+        "Local SHA-256 utility import",
+        "Installed runtime directory"
+      ]
+    },
+    "polly_speech.py": {
+      "source_sha256": "961aacf5daf76c4a62d3609f18f77f2c02df90020731344c99bf7a3bf5e536fb",
+      "local_sha256": "eddb5d46de0abd56f44dfca229d8bb2e6f156b45afdcea64629c8d576058d380",
+      "relocations": [
+        "Local SHA-256 utility import"
+      ]
+    }
+  }
+}

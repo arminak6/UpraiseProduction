@@ -11,6 +11,14 @@ from api_client import Connection, normalize_base_url, request, status_path
 
 
 class ClientTests(unittest.TestCase):
+    def test_audio_is_binary_and_hidden_from_repr(self):
+        result = request(Connection('http://backend:8000'), 'GET', '/v1/jobs/job/audio/chunk',
+                         transport=httpx.MockTransport(lambda _: httpx.Response(
+                             200, content=b'RIFF-test-audio', headers={'Content-Type': 'audio/wav'})))
+        self.assertEqual(result.binary, b'RIFF-test-audio')
+        self.assertNotIn('RIFF-test-audio', repr(result))
+        self.assertFalse(result.is_json)
+
     def test_multipart_preserves_pdf_and_metadata_and_does_not_follow_redirects(self):
         seen = []
 

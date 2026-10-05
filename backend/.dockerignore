@@ -3,5 +3,9 @@
 !uv.lock
 !src/
 !src/**
+!math_runtime/
+!math_runtime/package.json
+!math_runtime/package-lock.json
+!math_runtime/math_speech.mjs
 **/__pycache__/
 **/*.py[cod]

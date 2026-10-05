@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,6 +58,55 @@ class Settings(BaseSettings):
     # Zero retains evidence until an operator sets an agreed retention period.
     artifact_retention_days: int = Field(0, ge=0)
 
+    lesson_generation_model_id: str = "openai.gpt-oss-120b-1:0"
+    lesson_review_model_id: str = "qwen.qwen3-235b-a22b-2507-v1:0"
+    lesson_visual_model_id: str = "eu.amazon.nova-pro-v1:0"  # Retained legacy key; unused by native V3 A3.
+    lesson_pipeline_version: str = "lesson-v3-a3-4"
+    lesson_capture_model_outputs: bool = False
+    lesson_ttl_seconds: int = Field(86400, ge=60)
+    lesson_source_wait_seconds: int = Field(86400, ge=60)
+    lesson_timeout_seconds: float = Field(43200, ge=1, allow_inf_nan=False)
+    lesson_seconds_per_section: float = Field(1200, gt=0, allow_inf_nan=False)
+    lesson_seconds_per_chunk: float = Field(180, gt=0, allow_inf_nan=False)
+    lesson_max_source_characters: int = Field(120000, ge=1000)
+    polly_engine: Literal["neural", "standard"] = "neural"
+    lesson_public_base_url: str = ""
+    callback_allowed_hosts: list[str] = []
+    callback_allowed_cidrs: list[str] = []
+    callback_token_url: str = ""
+    callback_client_id: str = ""
+    callback_client_secret: SecretStr = SecretStr("")
+    callback_oauth_auth_method: Literal["client_secret_basic", "client_secret_post", "tls_client_auth"] = "client_secret_basic"
+    callback_scope: str = "lessons:deliver"
+    callback_certificate: Path | None = None
+    callback_private_key: Path | None = None
+    callback_ca_file: Path | None = None
+    callback_max_attempts: int = Field(8, ge=1, le=20)
+    callback_max_token_lifetime_seconds: int = Field(900, ge=60, le=3600)
+
+    @model_validator(mode="after")
+    def lesson_capture_requires_local_testing(self):
+        if self.lesson_capture_model_outputs and not (self.environment == "development" and self.local_test_mode):
+            raise ValueError("lesson_capture_model_outputs requires development local_test_mode")
+        return self
+
+    @field_validator("callback_certificate", "callback_private_key", "callback_ca_file", mode="before")
+    @classmethod
+    def empty_callback_path(cls, value):
+        return None if value == "" else value
+
+    @field_validator("lesson_generation_model_id", "lesson_review_model_id", "lesson_visual_model_id")
+    @classmethod
+    def lesson_model_must_stay_in_eu(cls, value):
+        if value.startswith(("global.", "us.", "apac.")):
+            raise ValueError("lesson models require EU or in-region inference")
+        if value.startswith("arn:"):
+            region = value.split(":")[3]
+            if region not in {"eu-central-1", "eu-central-2", "eu-west-1", "eu-west-3",
+                              "eu-north-1", "eu-south-1", "eu-south-2"}:
+                raise ValueError("lesson model ARN must use an EU region")
+        return value
+
     oauth_issuer: str = ""
     oauth_audience: str = ""
     oauth_jwks_url: str = ""
@@ -94,6 +143,13 @@ class Settings(BaseSettings):
             json.dumps({k: getattr(self, k) for k in keys}, sort_keys=True).encode()
         ).hexdigest()
         return f"{self.pipeline_version}-{digest[:12]}"
+
+    @property
+    def lesson_signature(self) -> str:
+        import hashlib
+        identity = ":".join((self.lesson_pipeline_version, self.lesson_generation_model_id,
+                             self.lesson_review_model_id, self.lesson_visual_model_id, self.polly_engine))
+        return f"{self.lesson_pipeline_version}-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
 
 
 @lru_cache

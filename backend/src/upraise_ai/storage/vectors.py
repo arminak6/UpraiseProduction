@@ -108,6 +108,20 @@ class VectorStore:
             self.collection, count_filter=self.document_filter(document_id, course_id, token), exact=True
         ).count
 
+    def document_sections(self, document_id, course_id, token):
+        if not self.client.collection_exists(self.collection):
+            return []
+        result, offset = [], None
+        while True:
+            points, offset = self.client.scroll(
+                self.collection, scroll_filter=self.document_filter(document_id, course_id, token),
+                limit=128, offset=offset, with_payload=True, with_vectors=False,
+            )
+            result.extend(point.payload for point in points)
+            if offset is None:
+                break
+        return sorted(result, key=lambda chunk: (chunk["chunk_index"], chunk["chunk_id"]))
+
     def remove_document(self, document_id, course_id):
         self.purge_inactive_attempts(document_id, course_id)
 

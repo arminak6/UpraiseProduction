@@ -32,6 +32,15 @@ not an automatically loaded file.
 
 ## Tools
 
+- **Generate lesson — A3**: ordered document UUIDs, lesson/course/activity,
+  output language/Polly voice, configurable page windows, word target and reserved
+  learner level. Optional MW callback requires outbound OAuth/mTLS configuration.
+  Submission returns job_id and remembers A4 Location; the retry key survives
+  navigation. Start a new lesson generation to request fresh output.
+- **Lesson result/audio — A5**: on Processing status, fetch DRAFT JSON and
+  authenticated chunk audio, play or download the WAV. Download needed artifacts
+  before A6 RECEIVED removes the temporary lesson copy. Expiry defaults to 24 hours.
+
 - **Ingest material — A1**: PDF multipart upload or signed Moodle URL, course,
   activity, source-language, Moodle file ID, source hash/revision and optional
   version. Uploaded content_hash can be filled from local SHA-256 as a

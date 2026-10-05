@@ -64,6 +64,9 @@ class JobRepository:
     def migrate(self):
         with self.connect() as conn:
             conn.execute(SCHEMA)
+        from upraise_ai.storage.lessons import LessonRepository
+
+        LessonRepository(self.dsn).migrate()
 
     def accept(
         self, job_id, document_id, client_id, key, fingerprint, metadata, pipeline_version,

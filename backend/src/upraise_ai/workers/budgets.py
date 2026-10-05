@@ -8,7 +8,7 @@ from typing import Literal
 from upraise_ai.core.config import Settings
 from upraise_ai.schemas.documents import DocumentElement, ElementType
 
-BudgetPhase = Literal["startup", "init", "parse", "enrich", "chunk", "embed", "store"]
+BudgetPhase = Literal["startup", "init", "parse", "enrich", "chunk", "embed", "store", "lesson", "speech"]
 
 
 def phase_timeout_seconds(settings: Settings, phase: BudgetPhase, units: int) -> float:
@@ -41,6 +41,10 @@ def phase_timeout_seconds(settings: Settings, phase: BudgetPhase, units: int) ->
         per_unit = settings.parse_timeout_per_page_seconds
     elif phase == "store":
         base, per_unit = settings.worker_phase_timeout_seconds, 5.0
+    elif phase == "lesson":
+        base, per_unit = settings.worker_phase_timeout_seconds, settings.lesson_seconds_per_section
+    elif phase == "speech":
+        base, per_unit = settings.worker_phase_timeout_seconds, settings.lesson_seconds_per_chunk
     else:
         raise ValueError(f"Unsupported budget phase: {phase}")
     return min(settings.job_timeout_seconds, max(1.0, base + (per_unit * units)))
