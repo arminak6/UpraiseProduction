@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     lesson_generation_model_id: str = "openai.gpt-oss-120b-1:0"
     lesson_review_model_id: str = "qwen.qwen3-235b-a22b-2507-v1:0"
     lesson_visual_model_id: str = "eu.amazon.nova-pro-v1:0"  # Retained legacy key; unused by native V3 A3.
-    lesson_pipeline_version: str = "lesson-v3-a3-4"
+    lesson_pipeline_version: str = "lesson-v3-a3-5"
     lesson_capture_model_outputs: bool = False
     lesson_ttl_seconds: int = Field(86400, ge=60)
     lesson_source_wait_seconds: int = Field(86400, ge=60)

@@ -12,13 +12,14 @@ from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.lessons import ReviewReport
 from upraise_ai.services.aws import aws_session
 from upraise_ai.services.lesson_compat import legacy_review_report, turn_to_draft
+from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION, learner_level_system_prompt
 from upraise_ai.services.v3.bedrock_teacher import BedrockTeacherV1, TeacherGenerationError
 from upraise_ai.services.v3.math_speech import MathNarrationRequest
 from upraise_ai.services.v3.models import EASY_LECTURE_PROMPT_VERSION, LearningChunk, LearningDocument
 
-DRAFT_PROMPT = EASY_LECTURE_PROMPT_VERSION
-REVIEW_PROMPT = "learning-v1-source-review-original"
-FINALIZER_PROMPT = "learning-v1-final-editor-original"
+DRAFT_PROMPT = f"{EASY_LECTURE_PROMPT_VERSION}-{LEARNER_LEVEL_PROMPT_VERSION}"
+REVIEW_PROMPT = f"learning-v1-source-review-original-{LEARNER_LEVEL_PROMPT_VERSION}"
+FINALIZER_PROMPT = f"learning-v1-final-editor-original-{LEARNER_LEVEL_PROMPT_VERSION}"
 VISUAL_PROMPT = "not-used-v3"
 MATH_PROMPT = "math-narration-v3"
 log = logging.getLogger("upraise.lesson_models")
@@ -47,11 +48,14 @@ class _LanguageClient:
     def __init__(self, client):
         self.client = client
         self.language = "en"
+        self.teaching_prompt = None
         self.raw = ""
 
     def converse(self, **request):
-        # English requests are byte-for-byte the original V3 request. The only
-        # prompt extension supplies the language explicitly requested by A3.
+        # Keep V3 schemas/recovery intact; add trusted API teaching policy only
+        # during generation, review and editing, not mathematical narration.
+        if self.teaching_prompt is not None:
+            request["system"] = [*request["system"], {"text": self.teaching_prompt}]
         if self.language.lower() not in {"en", "en-us", "en-gb"}:
             request["system"] = [*request["system"], {"text":
                 f"Write all teaching text and mathematical narration in {self.language}. "
@@ -109,20 +113,24 @@ class LessonModels:
             except OSError:
                 log.warning("V3 lesson diagnostic storage unavailable")
 
-    def generate_section(self, section, language, source_path=None, *, notify=None):
+    def generate_section(self, section, language, source_path=None, *, learner_level="intermediate", notify=None):
         self.transport.language = language
+        teaching_prompt = learner_level_system_prompt(learner_level, "generator")
         self.transport.raw = ""
         document, arguments = self.source(section)
         phase = "draft"
         try:
+            self.transport.teaching_prompt = teaching_prompt
             draft = self.teacher.explain(document, **arguments)
             phase = "review"
             if notify:
                 notify("REVIEW")
+            self.transport.teaching_prompt = learner_level_system_prompt(learner_level, "reviewer")
             review = self.teacher.review_explanation(document, draft=draft, **arguments)
             phase = "finalize"
             if notify:
                 notify("FINALIZE")
+            self.transport.teaching_prompt = learner_level_system_prompt(learner_level, "editor")
             # V3 always finalizes, including an approved draft: this is where its
             # citation/markup checks belong. There is no additional post-edit judge.
             final = self.teacher.finalize_explanation(document, draft=draft, review=review, **arguments)
@@ -133,6 +141,8 @@ class LessonModels:
             if isinstance(error, TeacherGenerationError) and "reached maxTokens" in str(error):
                 code = "LESSON_MODEL_INCOMPLETE"
             raise IngestionError(code, retryable=True) from None
+        finally:
+            self.transport.teaching_prompt = None
 
     def narrate_math_fallback(self, requests, language):
         self.transport.language = language

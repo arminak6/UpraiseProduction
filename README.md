@@ -81,8 +81,11 @@ A3 uses a separate generation worker and a separate delivery/expiry worker.
 It accepts document IDs already submitted through A1, configurable source page
 windows and output chunk word targets. It delivers only AI-generated DRAFTs,
 with V3 source reviewer reports, WAV audio and viseme timings.
-The copied V3 teacher reviews the draft, edits once if needed and validates the final text. Learner level is
-recorded without changing generation style yet. A3 output expires after 24 hours
+The copied V3 teacher reviews the draft, edits once if needed and validates the final text.
+A3's beginner/intermediate/advanced explanation level guides the generator,
+reviewer and editor through their system prompts. New results report
+`learner_level_applied=true`; accuracy and source coverage remain required at every
+level. A3 output expires after 24 hours
 by default, or is removed after A6 receipt; source PDFs/vectors remain.
 Optional push delivery requires the AI's outbound mTLS identity and a fresh
 short-lived OAuth2 token. Pull-only A5 works without callback settings. Set up

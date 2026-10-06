@@ -2,13 +2,10 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 AI provides A1 ingestion, A2 material management, A3 draft lessons,
-A4 status, A5 result/audio and A6 cancellation/receipt. Local A3 is reachable;
-native V3 teacher/speech implementation is restored as lesson-v3-a3-4.
-A live V3 job completed first attempt:30 audio chunks verified. Content still
-requires human approval. A5 pull downloads support audit, TTL and parallel reads.
-Finalized A3 text and exact speech SSML now persist in PostgreSQL as requested
-on2026-10-06, following the original Uprise/v2 prepared-text storage approach.
+UPRAISE WP7 AI implements A1 ingestion, A2 material management, A3 draft lessons,
+A4 status, A5 result/audio and A6 cancellation/receipt. Native V3 teacher/speech
+now applies requested explanation levels (lesson-v3-a3-5). Human approval remains
+external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary.
 
 ## Architecture and data flow
 
@@ -33,9 +30,12 @@ on2026-10-06, following the original Uprise/v2 prepared-text storage approach.
   Draft citations reach review; final citation/math checks occur during finalization.
   One editor revision if rejected; no extra Nova PDF judge or post-edit model review.
   Reports retain pre-edit findings/source/speech flags; business status stays DRAFT.
-- Requested language controls text/speech, with EU-region voice checks. Learner level
-  is recorded only. V3 MathJax/ClearSpeak and contextual narration retain deterministic
-  fallback with speech findings. Original structured/prompt-only recovery is kept.
+- Requested language controls text/speech, with EU-region voice checks. Beginner/
+  intermediate/advanced (default intermediate) controls explanation difficulty in
+  all three role system prompts, including recovery. Accuracy/coverage stay required;
+  reviewer flags level mismatches. New A5 reports learner_level_applied=true and
+  learner_level_prompt=explanation-level-v1; old output stays unchanged. Math narration
+  has no teaching-level policy; V3 MathJax/contextual/deterministic fallbacks remain.
 - V3 PCM/WAV uses matching SSML/visemes. Overshoot is rescaled/flagged; malformed
   marks fail. Actual engines, including standard fallback, are recorded.
 - Independent worker, lesson-worker and lesson-delivery services use killable
@@ -43,10 +43,9 @@ on2026-10-06, following the original Uprise/v2 prepared-text storage approach.
   Provider calls are at least once. upraise_jobs holds operational ingestion_jobs/
   lesson_jobs; upraise_audit holds separate content-free audits. Sources, crops,
   checkpoints and temporary lesson JSON/audio are on the shared volume.
-- upraise_jobs.prepared_lesson_chunks stores exact finalized chunk text before
-  TTS, then exact SSML/parts before synthesis, with job/chunk order, provenance,
-  pre-edit review and model/prompt versions. Valid leases/active sources fence
-  writes. Retries are idempotent; differing text under the same identity fails.
+- upraise_jobs.prepared_lesson_chunks stores finalized text before TTS and SSML/
+  parts before synthesis, with order, provenance, pre-edit review and prompt/model
+  versions. Valid leases/active sources fence writes; differing retry text fails.
 - MW callbacks use allowlisted pinned HTTPS, mTLS and short-lived OAuth tokens.
   Basic/POST/certificate client auth supported. Callback2xx is not receipt;
   MW stores A5 output then sends A6 RECEIVED. Secrets remain deployment-only.
@@ -84,11 +83,11 @@ on2026-10-06, following the original Uprise/v2 prepared-text storage approach.
 - callback_tls/README.md: ignored read-only secret mounts; real callback
   credentials not supplied or logged/built.
 - Legacy V3: ../Uprise/v2/backend/learning/v1/.
-- backend/tests/test_a3*.py: V3/lifecycle/speech/callbacks/durable text; test_a5_integration.py:
+- backend/tests/test_a3*.py: V3/levels/lifecycle/speech/callbacks/durable text; test_a5_integration.py:
   pull/audit/concurrency/TTL, test_artifact_locks.py: Windows/Linux process locks.
   test_v3_original_*.py keeps original regressions; AWS mocked.
 - codex_helper/: ignored comparison reports/checkpoints and validation scripts/logs.
-  validate-a3/a5.ps1 uses disposable services; a3-text-*.log records text-storage QA.
+  validate-a3/a5.ps1 uses disposable services; a3-{text,level}-*.log records QA.
 
 ## Commands
 
@@ -119,9 +118,8 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 
 ## Conventions and invariants
 
-- No learner state. Final DRAFT text/SSML is retained by explicit user request;
-  downloadable audio/JSON is temporary. Source/drafts/feedback/images
-  are untrusted prompt data. Local auth never bypasses outbound callback security.
+- No learner state. Source/drafts/feedback/images are untrusted prompt data.
+  Local auth never bypasses outbound callback security.
 - Volumes: upraise_{qdrant_data,postgres_data,ingestion_data,model_cache}.
   Source content_hash is opaque caller metadata; source_hash is actual SHA-256.
   PDF defaults100MB/500pages. Lesson UUIDs are job-specific; indexes zero-based;
@@ -133,7 +131,7 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   retains all source pages while page is only the first.
 - Source/section/audio checkpoints bind complete ordered request/source/pipeline
   identity. Result/audio hashes are verified. Corrupt/missing503, pending409, expired410.
-- Lesson identity is lesson-v3-a3-4; existing sources need no re-ingestion, and new
+- Lesson identity is lesson-v3-a3-5; existing sources need no re-ingestion, and new
   generation uses a fresh idempotency key. Raw failed replies are opt-in via
   UPRAISE_LESSON_CAPTURE_MODEL_OUTPUTS, only development + local_test_mode; ordinary
   A6/TTL cleanup removes job diagnostics. Default logs contain no generated text.
@@ -152,8 +150,8 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 
 - Live v1.4 source verification has false passes/rejections and14 unexplained
   ValidationExceptions. See codex_helper/ingestion-1-vs-2-vs-3-report.md.
-- A3 reports do not guarantee global coherence. Learner level is reserved;
-  huge windows fail explicitly, requiring smaller windows/request-budget tuning.
+- A3 reports do not guarantee coherence or pedagogical suitability. Huge windows
+  fail explicitly; reduce windows or tune request budgets.
 - Historical speech failure c6e896a6 lacks the rejected provider reply. Live
   job241c4bda completed with30 checked WAVs/visemes and259 findings; sampled final
   text had unsupported claims. Reports do not re-review edited text. Evidence:
@@ -171,19 +169,17 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   it to unchanged A3 inputs/results after repeated compatibility failures.
 - 2026-10-06: User requested PostgreSQL retention of final text used for speech,
   as in Uprise/v2. Added prepared_lesson_chunks; retain after output disposal.
+- 2026-10-06: User requested explanation levels in all three role system prompts.
+  Applies existing learner_level option; fresh jobs/keys use the new policy.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-06: Compared legacy postgres_repository.py/preparation.py; updated
-storage/lessons.py, services/lesson_pipeline.py, workers/lessons.py,
-test_a3_text_storage.py and A3/A5/A6/baseline/README contracts.377 tests passed
-in disposable PostgreSQL/Qdrant with fake providers, including6 persistence
-cases. Ruff/Compose/whitespace passed. Built image, applied additive migration,
-restarted4 app services; all6 services healthy. Live job efef122c-8dbc-4d68-b6bb-fa9f100565c8
-has12 archived chunks/13,755 text characters; exact text, SSML, parts and ordering
-match A5 (direct UTF-8 API/DB comparison). No agent-triggered paid generation or
-historical backfill. Build/test evidence: codex_helper/a3-text-{validation,build}.log.
-Prior live A5 concurrency/30WAV/audit checks:
-codex_helper/a5-runtime-check.json (2026-10-05).
+2026-10-06: Checked level policy/model adapter/pipeline/config, A3 tests/docs.
+388 tests passed in disposable PostgreSQL/Qdrant with fake providers; Ruff,
+Compose and whitespace passed. Built/restarted4 services with idle queues;
+all6 healthy, running lesson-v3-a3-5-f88e33e6d2f7. Live efef122c archive preserves
+12 chunks matching A5 text/SSML; prior level flag remains false. No paid generation
+or backfill by the agent. Evidence: codex_helper/a3-level-{validation,build}.log,
+a3-level-runtime-check.json; prior30-WAV checks: a5-runtime-check.json.

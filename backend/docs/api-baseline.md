@@ -106,6 +106,12 @@ native V3 implementation validates edited text without a second model review. So
 uncertainty remains explicit; all lessons are DRAFT. See `a3.md` for the full wire
 contract, idempotency, scope, callback retry and expiry behavior.
 
+On 2026-10-06 the user requested level-aware explanations. A3's existing
+beginner/intermediate/advanced option now guides the generator, reviewer and
+editor system prompts. The level changes teaching difficulty, with the same
+source-grounding and coverage requirements. A5 records the applied level and
+prompt version; prior jobs are not regenerated automatically.
+
 ## Infrastructure sources
 
 The selected versions are explicit. Healthcheck commands are verified against

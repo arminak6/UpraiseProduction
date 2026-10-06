@@ -33,6 +33,7 @@ class Models(MathModels):
     def __init__(self, reject=False):
         self.reject = reject
         self.drafts = self.reviews = self.revisions = 0
+        self.levels = []
 
     def draft(self, section, language):
         self.drafts += 1
@@ -50,7 +51,8 @@ class Models(MathModels):
         self.revisions += 1
         return draft
 
-    def generate_section(self, section, language, source_path=None, *, notify=None):
+    def generate_section(self, section, language, source_path=None, *, learner_level, notify=None):
+        self.levels.append(learner_level)
         draft = self.draft(section, language)
         if notify:
             notify("REVIEW")
@@ -127,7 +129,8 @@ def test_full_a3_a4_a5_audio_a6_and_new_generation(integration, lesson):
         assert result.status_code == 200, result.text
         body = result.json()
         assert body["status"] == "DRAFT" and body["label"] == "AI-generated"
-        assert body["learner_level"] == "beginner" and not body["learner_level_applied"]
+        assert body["learner_level"] == "beginner" and body["learner_level_applied"]
+        assert lesson[5].levels == ["beginner"] * lesson[5].drafts
         assert body["expires_at"] and body["versions"]["math_runtime"] == "MathJax-4.1.3-v3"
         assert [c["index"] for c in body["chunks"]] == list(range(len(body["chunks"])))
         assert len({c["chunk_id"] for c in body["chunks"]}) == len(body["chunks"])
@@ -197,6 +200,9 @@ def test_idempotency_conflict_cancel_and_fenced_writes(integration, lesson):
     with api(integration, lesson) as client:
         payload = data.model_dump(mode="json")
         payload["voice"] = "Matthew"
+        assert client.post("/v1/lesson-jobs", json=payload, headers={"Idempotency-Key": "key"}).status_code == 409
+        payload = data.model_dump(mode="json")
+        payload["options"]["learner_level"] = "advanced"
         assert client.post("/v1/lesson-jobs", json=payload, headers={"Idempotency-Key": "key"}).status_code == 409
         path = "/v1/jobs/" + target["job_id"]
         assert client.delete(path, params={"reason": "CANCEL"}).status_code == 204
@@ -401,7 +407,8 @@ def test_lesson_services_start_idle_and_stop_cleanly(integration, lesson, module
         child.communicate(timeout=10)
 
 
-def test_v3_prose_and_finalizer_recovery_complete_through_existing_api(integration, lesson):
+@pytest.mark.parametrize("level", [None, "beginner", "intermediate", "advanced"])
+def test_v3_prose_and_finalizer_recovery_apply_requested_level_through_api(integration, lesson, level):
     from test_a3_model_compat import review_data
 
     calls = []
@@ -428,7 +435,7 @@ def test_v3_prose_and_finalizer_recovery_complete_through_existing_api(integrati
                                       "issues": [], "revision_instructions": []})
             return {"stopReason": "end_turn", "output": {"message": {"content": [{"text": payload}]}}}
 
-    target, source, _ = accept(integration, lesson)
+    target, source, _ = accept(integration, lesson, options={} if level is None else {"learner_level": level})
     lesson[2].models = LessonModels(lesson[0], Client())
     row = process(lesson)
     assert row["status"] == "DONE", row["error_code"]
@@ -437,6 +444,8 @@ def test_v3_prose_and_finalizer_recovery_complete_through_existing_api(integrati
         assert result.status_code == 200
         body = result.json()
         assert body["status"] == "DRAFT" and body["course_id"] == "course-1"
+        assert body["learner_level"] == (level or "intermediate") and body["learner_level_applied"]
+        assert body["versions"]["learner_level_prompt"] == "explanation-level-v1"
         assert body["chunks"] and all(chunk["revisions"] == 1 for chunk in body["chunks"])
         assert all(source["document_id"] == provenance["document_id"]
                    for chunk in body["chunks"] for provenance in chunk["sources"])
@@ -446,6 +455,10 @@ def test_v3_prose_and_finalizer_recovery_complete_through_existing_api(integrati
     editors = [call for call in calls if "Uprise Final Lecture Editor" in call["system"][0]["text"]]
     assert len(drafts) == 1 and len(editors) == 2 and reviews == 1
     assert "outputConfig" not in drafts[0]
+    for call in calls:
+        assert f"Requested explanation level: {level or 'intermediate'}." in call["system"][-1]["text"]
+    saved = lesson[1].prepared_chunks(target["job_id"])
+    assert all(chunk["versions"]["learner_level_prompt"] == body["versions"]["learner_level_prompt"] for chunk in saved)
 
 
 def test_local_failed_reply_diagnostics_are_cleaned_without_removing_sources(integration, lesson):

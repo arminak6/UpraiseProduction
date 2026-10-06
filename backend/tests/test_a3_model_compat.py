@@ -14,6 +14,7 @@ from upraise_ai.core.config import Settings
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.services.lesson_compat import legacy_review_report, turn_to_draft
 from upraise_ai.services.lesson_models import LessonModels
+from upraise_ai.services.lesson_prompts import learner_level_system_prompt
 from upraise_ai.services.lesson_speech import LessonSpeech, align_visemes
 from upraise_ai.services.v3 import bedrock_teacher
 from upraise_ai.services.v3.bedrock_teacher import BedrockTeacherV1
@@ -60,7 +61,7 @@ def test_copied_v3_bundle_matches_recorded_original_hashes():
 
 
 @pytest.mark.parametrize("approved", [True, False])
-def test_english_provider_requests_equal_original_teacher_requests(approved):
+def test_english_provider_requests_preserve_v3_contract_with_level_policy(approved):
     replies = ["A source explanation [p. 1].", json.dumps(review_data(**({} if approved else {
         "approved": False, "clarity_issues": ["Clarify."], "revision_instructions": ["Explain notation."]})))]
     if not approved:
@@ -76,7 +77,10 @@ def test_english_provider_requests_equal_original_teacher_requests(approved):
     draft = native.explain(document, **args)
     review = native.review_explanation(document, draft=draft, **args)
     turn = native.finalize_explanation(document, draft=draft, review=review, **args)
-    assert wrapped.calls == direct.calls
+    roles = ["generator", "reviewer"] + ([] if approved else ["editor"])
+    for wrapped_call, direct_call, role in zip(wrapped.calls, direct.calls, roles, strict=True):
+        assert wrapped_call["system"][-1] == {"text": learner_level_system_prompt("intermediate", role)}
+        assert {**wrapped_call, "system": wrapped_call["system"][:-1]} == direct_call
     assert final == turn_to_draft(turn) and report == legacy_review_report(review, turn.source_pages)
     assert revisions == int(not approved) and notifications == ["REVIEW", "FINALIZE"]
 
@@ -98,16 +102,19 @@ def test_approved_draft_still_passes_original_final_citation_validation():
     assert len(client.calls) == 2
 
 
-def test_original_structured_fallback_preserves_damaged_editor_latex():
+@pytest.mark.parametrize("level", ["beginner", "intermediate", "advanced"])
+def test_original_structured_fallback_preserves_damaged_editor_latex_and_level(level):
     formula = r"\(\delta(q_0,a)=q_1\)"
     client = Converse(["A draft [p. 1].", RuntimeError("Structured review unavailable"),
         "Response:\n" + json.dumps(review_data(approved=False, clarity_issues=["Clarify."],
                                                revision_instructions=["Explain notation."])),
         RuntimeError("Structured editor unavailable"),
         '{"lecture_text":"' + formula + '\nA transition [p. 1]."}'])
-    final, _, _ = LessonModels(Settings(), client).generate_section(section(), "en")
+    final, _, _ = LessonModels(Settings(), client).generate_section(section(), "en", learner_level=level)
     assert formula in final.paragraphs[0].text
     assert ["outputConfig" in call for call in client.calls] == [False, True, False, True, False]
+    for call, role in zip(client.calls, ["generator", "reviewer", "reviewer", "editor", "editor"], strict=True):
+        assert call["system"][-1] == {"text": learner_level_system_prompt(level, role)}
 
 
 def test_inconsistent_original_review_is_rejected_after_its_bounded_fallback():
@@ -118,11 +125,11 @@ def test_inconsistent_original_review_is_rejected_after_its_bounded_fallback():
     assert len(client.calls) == 3
 
 
-def test_non_english_language_is_the_only_prompt_extension():
+def test_non_english_language_and_level_policies_work_together():
     english = Converse(["A lecture [p. 1].", json.dumps(review_data())])
     italian = Converse(["A lecture [p. 1].", json.dumps(review_data())])
-    LessonModels(Settings(), english).generate_section(section(), "en")
-    LessonModels(Settings(), italian).generate_section(section(), "it")
+    LessonModels(Settings(), english).generate_section(section(), "en", learner_level="advanced")
+    LessonModels(Settings(), italian).generate_section(section(), "it", learner_level="advanced")
     for en, it in zip(english.calls, italian.calls, strict=True):
         assert it["system"][:-1] == en["system"] and "in it" in it["system"][-1]["text"]
         assert {k: v for k, v in it.items() if k != "system"} == {k: v for k, v in en.items() if k != "system"}

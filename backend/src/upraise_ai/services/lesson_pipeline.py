@@ -23,6 +23,7 @@ from upraise_ai.services.lesson_models import (
     VISUAL_PROMPT,
     merge_reviews,
 )
+from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION
 from upraise_ai.services.lesson_speech import split_words
 
 
@@ -185,6 +186,7 @@ class LessonPipeline:
             else:
                 source_path = self.staging.source_path(section["document_job_id"])
                 draft, report, revisions = self.models.generate_section(section, data.language, source_path,
+                    learner_level=data.options.learner_level,
                     notify=lambda step: progress(step, 0.05+0.55*index/len(sections)))
                 flags = source_issues(section)
                 report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
@@ -206,7 +208,7 @@ class LessonPipeline:
                     "generator_model": self.settings.lesson_generation_model_id,
                     "review_model": self.settings.lesson_review_model_id,
                     "draft_prompt": DRAFT_PROMPT, "review_prompt": REVIEW_PROMPT,
-                    "finalizer_prompt": FINALIZER_PROMPT}
+                    "finalizer_prompt": FINALIZER_PROMPT, "learner_level_prompt": LEARNER_LEVEL_PROMPT_VERSION}
         save_text(all_chunks, versions)
         progress.set_workload("speech", len(all_chunks))
         result_chunks, engines = [], set()
@@ -252,13 +254,15 @@ class LessonPipeline:
         review.issues = list(unique.values())
         result = LessonResult(job_id=job_id, lesson_id=data.lesson_id, course_id=data.course_id,
                               activity_id=data.activity_id, language=data.language, voice=data.voice,
-                              learner_level=data.options.learner_level, chunks=result_chunks, reviewer_report=review,
+                              learner_level=data.options.learner_level, learner_level_applied=True,
+                              chunks=result_chunks, reviewer_report=review,
                               versions={"pipeline": job["pipeline_version"],
                                         "generator_model": self.settings.lesson_generation_model_id,
                                         "review_model": self.settings.lesson_review_model_id,
                                         "visual_review_model": "not-used-v3",
                                         "draft_prompt": DRAFT_PROMPT, "review_prompt": REVIEW_PROMPT,
                                         "visual_review_prompt": VISUAL_PROMPT, "finalizer_prompt": FINALIZER_PROMPT,
+                                        "learner_level_prompt": LEARNER_LEVEL_PROMPT_VERSION,
                                         "math_speech_prompt": MATH_PROMPT, "math_runtime": "MathJax-4.1.3-v3",
                                         "polly_engine": ",".join(sorted(engines)), "aws_region": self.settings.aws_region})
         write_json(folder / "result.json", result.model_dump(mode="json"))

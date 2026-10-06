@@ -17,8 +17,11 @@ speech pipeline is not selected.
 Keep API-specific code in the surrounding lesson_models, lesson_compat,
 lesson_speech and lesson_pipeline modules. Those modules adapt language/voice,
 page windows, API chunks, SSML, additional viseme requests, job checkpoints,
-review reports and delivery. English model requests are compared with the
-original teacher in regression tests. The MathJax JavaScript runtime matches
+review reports and delivery. The adapter adds the requested explanation level
+to the generator/reviewer/editor system prompts, and the requested language
+for non-English output. Regression tests compare the base requests and output
+contracts with the original teacher after removing those deliberate additions.
+The MathJax JavaScript runtime matches
 the original docker/math_speech.mjs.
 
 Update source hashes and parity tests deliberately if this bundle is changed.
