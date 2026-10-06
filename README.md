@@ -7,6 +7,11 @@ identifies the original A4 job-status URL; durable internal jobs remain. A separ
 worker runs the reviewed Uprise/v2 extraction method and stores course chunks
 and Titan embeddings in Qdrant. PostgreSQL stores operational job state and
 separate audit records; document text is not duplicated there.
+Finalized A3 lesson text is stored separately in PostgreSQL
+`prepared_lesson_chunks`, with provenance, review and version metadata. All
+chunk text is committed before speech synthesis, and exact SSML request parts
+are saved before each TTS call. This follows the user's 2026-10-06 request to
+retain the original text used for audio, as in Uprise/v2.
 
 The original Word draft remains the API baseline, with the user-approved
 extensions recorded in [api-baseline.md](backend/docs/api-baseline.md).
@@ -82,6 +87,10 @@ by default, or is removed after A6 receipt; source PDFs/vectors remain.
 Optional push delivery requires the AI's outbound mTLS identity and a fresh
 short-lived OAuth2 token. Pull-only A5 works without callback settings. Set up
 deployment secrets and the public gateway URL as described in [a3.md](backend/docs/a3.md).
+Saved lesson text/SSML remains in PostgreSQL after A6 receipt or TTL cleanup;
+temporary JSON/WAV delivery still expires and A5 returns 410. Audio is not stored
+in PostgreSQL. Existing jobs are not backfilled automatically. See a3.md for
+operator access and archive lifecycle details.
 
 - upraise_qdrant_data: source chunks, vectors and provenance.
 - upraise_postgres_data: upraise_jobs and upraise_audit databases.

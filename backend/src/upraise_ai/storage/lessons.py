@@ -1,4 +1,4 @@
-"""Operational lesson state only. Text, review reports and audio live on the TTL volume."""
+"""Lesson jobs and durable finalized text; downloadable audio stays on the TTL volume."""
 
 from contextlib import contextmanager
 from uuid import uuid4
@@ -29,6 +29,23 @@ CREATE INDEX IF NOT EXISTS lesson_jobs_pending ON lesson_jobs(available_at,creat
     WHERE status IN ('QUEUED','RUNNING');
 CREATE INDEX IF NOT EXISTS lesson_jobs_expiry ON lesson_jobs(expires_at)
     WHERE cleanup_completed_at IS NULL;
+CREATE TABLE IF NOT EXISTS prepared_lesson_chunks (
+    job_id UUID NOT NULL REFERENCES lesson_jobs(job_id) ON DELETE CASCADE,
+    chunk_id UUID NOT NULL,
+    chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+    section_index INTEGER NOT NULL CHECK(section_index >= 0),
+    text TEXT NOT NULL CHECK(btrim(text) <> ''),
+    sources JSONB NOT NULL,
+    reviewer_report JSONB NOT NULL,
+    revisions INTEGER NOT NULL CHECK(revisions BETWEEN 0 AND 1),
+    versions JSONB NOT NULL,
+    ssml TEXT,
+    ssml_parts JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY(job_id, chunk_id),
+    UNIQUE(job_id, chunk_index)
+);
 """
 
 
@@ -59,6 +76,46 @@ class LessonRepository(JobRepository):
     def get(self, job_id):
         with self.connect() as conn:
             return conn.execute("SELECT * FROM lesson_jobs WHERE job_id=%s", (job_id,)).fetchone()
+
+    def save_prepared_text(self, conn, job_id, chunks, versions):
+        """Caller holds the job lease and source locks; commit before any TTS call."""
+        for index, (chunk_id, text, source, report, section_index, revisions) in enumerate(chunks):
+            saved = conn.execute(
+                """INSERT INTO prepared_lesson_chunks
+                (job_id,chunk_id,chunk_index,section_index,text,sources,reviewer_report,revisions,versions)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(job_id,chunk_id) DO NOTHING RETURNING chunk_id""",
+                (job_id, chunk_id, index, section_index, text, Jsonb([source.model_dump()]),
+                 Jsonb(report.model_dump()), revisions, Jsonb(versions)),
+            ).fetchone()
+            if saved is None:
+                row = conn.execute(
+                    "SELECT * FROM prepared_lesson_chunks WHERE job_id=%s AND chunk_id=%s", (job_id, chunk_id)
+                ).fetchone()
+                if (row["text"] != text or row["chunk_index"] != index or row["section_index"] != section_index
+                        or row["sources"] != [source.model_dump()] or row["versions"] != versions
+                        or row["reviewer_report"] != report.model_dump() or row["revisions"] != revisions):
+                    raise IngestionError("LESSON_PREPARED_TEXT_CONFLICT")
+        count = conn.execute(
+            "SELECT count(*) AS n FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,)
+        ).fetchone()["n"]
+        if count != len(chunks):
+            raise IngestionError("LESSON_PREPARED_TEXT_CONFLICT")
+
+    def save_prepared_speech(self, conn, job_id, chunk_id, ssml, parts):
+        """Save the precise narration requests before synthesis, including on retries."""
+        if not conn.execute(
+            """UPDATE prepared_lesson_chunks SET ssml=%s,ssml_parts=%s,updated_at=clock_timestamp()
+            WHERE job_id=%s AND chunk_id=%s RETURNING chunk_id""", (ssml, Jsonb(parts), job_id, chunk_id)
+        ).fetchone():
+            raise IngestionError("LESSON_PREPARED_TEXT_MISSING")
+
+    def prepared_chunks(self, job_id):
+        """Internal/operator access; API authorization and output expiry remain separate."""
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM prepared_lesson_chunks WHERE job_id=%s ORDER BY chunk_index", (job_id,)
+            ).fetchall()
 
     @contextmanager
     def job_transaction(self, job_id):

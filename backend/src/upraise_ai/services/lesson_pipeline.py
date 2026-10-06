@@ -159,7 +159,7 @@ class LessonPipeline:
                     or (expected and str(row["active_attempt"]) != expected[document_id])):
                 raise IngestionError("LESSON_DOCUMENT_UNAVAILABLE", status=409)
 
-    def prepare(self, job, documents, progress):
+    def prepare(self, job, documents, progress, *, save_text, save_speech):
         data = LessonInput.model_validate(job["metadata"])
         job_id = str(job["job_id"])
         folder = self.staging.job_dir(job_id)
@@ -202,6 +202,12 @@ class LessonPipeline:
                                       source_chunk_ids=[chunk["chunk_id"] for chunk in source_chunks],
                                       quality_status="NEEDS_REVIEW" if any(source_issues(section)) else "AUTO_CHECKED")
                 all_chunks.append((chunk_id, text, source, report, index, revisions))
+        versions = {"pipeline": job["pipeline_version"],
+                    "generator_model": self.settings.lesson_generation_model_id,
+                    "review_model": self.settings.lesson_review_model_id,
+                    "draft_prompt": DRAFT_PROMPT, "review_prompt": REVIEW_PROMPT,
+                    "finalizer_prompt": FINALIZER_PROMPT}
+        save_text(all_chunks, versions)
         progress.set_workload("speech", len(all_chunks))
         result_chunks, engines = [], set()
         for index, (chunk_id, text, source, report, section_index, revisions) in enumerate(all_chunks):
@@ -219,8 +225,10 @@ class LessonPipeline:
                                                        ("ssml", "ssml_parts", "visemes", "duration", "audio_sha256"))
                 speech_issues = [ReviewIssue.model_validate(issue) for issue in cached["issues"]]
                 engine = cached["engine"]
+                save_speech(chunk_id, full, parts)
             else:
                 full, parts, speech_issues = self.speech.prepare(text, data.language)
+                save_speech(chunk_id, full, parts)
                 audio, marks, duration, digest = self.speech.synthesize(parts, data.voice, code)
                 speech_issues.extend(self.speech.last_timing_issues)
                 engine = self.speech.last_engine

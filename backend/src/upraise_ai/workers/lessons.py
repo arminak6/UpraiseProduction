@@ -160,9 +160,20 @@ class LessonWorker:
                     pipeline.models = self.models or LessonModels(
                         self.settings, diagnostic_dir=self.staging.job_dir(job_id) / "model-diagnostics")
                     pipeline.speech = self.speech or LessonSpeech(self.settings, pipeline.models)
-                    result = pipeline.prepare(job, documents, progress)
-                    progress("PUBLISH", 0.98)
                     expected = {str(row["document_id"]): str(row["active_attempt"]) for row, _ in documents}
+
+                    def save_text(chunks, versions):
+                        with self.jobs.owned_transaction(job_id, token) as conn:
+                            pipeline.check_sources(job, expected, conn)
+                            self.jobs.save_prepared_text(conn, job_id, chunks, versions)
+
+                    def save_speech(chunk_id, ssml, parts):
+                        with self.jobs.owned_transaction(job_id, token) as conn:
+                            pipeline.check_sources(job, expected, conn)
+                            self.jobs.save_prepared_speech(conn, job_id, chunk_id, ssml, parts)
+
+                    result = pipeline.prepare(job, documents, progress, save_text=save_text, save_speech=save_speech)
+                    progress("PUBLISH", 0.98)
                     with self.jobs.owned_transaction(job_id, token) as conn:
                         pipeline.check_sources(job, expected, conn)
                         summary = {"lesson_id": job["metadata"]["lesson_id"], "lesson_status": "DRAFT",

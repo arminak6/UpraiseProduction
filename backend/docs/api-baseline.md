@@ -56,7 +56,10 @@ the user-requested A2 contract and operational interpretation are in `a2.md`.
 - Original diagram: PostgreSQL is audit-only. On 2026-10-02 the user explicitly
   approved separate durable ingestion-job storage alongside audit. Implementation
   uses `upraise_jobs` and `upraise_audit` databases, plus persistent processing
-  artifacts; no lesson business tables are introduced. Session state remains
+  artifacts. On 2026-10-06 the user explicitly requested durable finalized
+  lesson text as in Uprise/v2: `prepared_lesson_chunks` stores the text used for
+  speech, SSML, provenance, review and model/prompt versions alongside the
+  operational lesson jobs. Audio remains temporary. Session state remains
   in memory and never persisted; incoming B4 audio is discarded after STT.
 - The internal cognitive-load flag never leaves the module. B2's decision
   value HIGH_COGNITIVE_LOAD is nevertheless an explicit external control reply
@@ -76,7 +79,7 @@ A1 decisions.
 | Topic | Difference or unclear detail | Scaffold treatment |
 | --- | --- | --- |
 | Interrupt intents | Diagram's Agent 2 says ask/repeat/continue/pause/stop. Word B4 currently classifies question/repeat and returns REPEAT/ANSWER; open point 8 only proposes adding CONTINUE/STOP | Keep original B3/B4/B5 responsibilities. No new intent, pause API or reply type |
-| Temporary lesson output | Diagram says no lesson storage inside the module. Word A3/A5/A6 allow a temporary local result/audio copy until acknowledgement/TTL for pull mode | On 2026-10-05 the user approved A3/A5, temporary output until explicit A6 receipt or configurable 24-hour TTL, operational lesson job rows and content-free lesson audit. No permanent lesson business storage |
+| Temporary lesson output | Diagram says no lesson storage inside the module. Word A3/A5/A6 allow a temporary local result/audio copy until acknowledgement/TTL for pull mode | On 2026-10-05 the user approved A3/A5, temporary output until explicit A6 receipt or configurable 24-hour TTL. On 2026-10-06 the user requested permanent retention of finalized lesson text as in Uprise/v2. Text/SSML and provenance/review/versions now survive cleanup in PostgreSQL; A5 JSON/audio remain temporary and audit stays content-free |
 | Job/checkpoint state | Word open point 4 suggests Redis or a job table, to check against audit-only PostgreSQL; diagram shows no job store | User approved durable PostgreSQL ingestion jobs on 2026-10-02. Separate worker, database roles and processing artifacts implement recovery; no learner-session checkpoints |
 | Placeholder names | Word overview uses `{id}` for A2 and B2-B6; detailed sections use `{document_id}` and `{session_id}` | User's 2026-10-02 A2 request explicitly uses document_id; implemented that detailed form. Runtime placeholders remain reserved |
 | Telemetry path | Diagram draws Middleware telemetry. Word B6 leaves direct versus Middleware routing open and suggests a possible `/v1/sessions/{session_id}/telemetry/ws` | Preserve original REST B6. WebSocket is an open possibility, not an added contract |
@@ -99,7 +102,7 @@ sentence-level grounding before audio streaming. No scaffold code resolves them.
 On 2026-10-05 the user approved mTLS plus short-lived OAuth2 tokens for AI → MW
 callbacks as a design addition, configurable source windows (default five pages),
 word-based lesson chunks and exactly one optional finalizer revision. The
-implementation reviews revised text once more without a second rewrite. Source
+native V3 implementation validates edited text without a second model review. Source
 uncertainty remains explicit; all lessons are DRAFT. See `a3.md` for the full wire
 contract, idempotency, scope, callback retry and expiry behavior.
 
