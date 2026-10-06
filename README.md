@@ -2,7 +2,7 @@
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio and A6 control are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
-persistently, and returns HTTP 202 with document_id only. The Location header
+persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
 worker runs the reviewed Uprise/v2 extraction method and stores course chunks
 and Titan embeddings in Qdrant. PostgreSQL stores operational job state and
@@ -15,7 +15,7 @@ retain the original text used for audio, as in Uprise/v2.
 
 The original Word draft remains the API baseline, with the user-approved
 extensions recorded in [api-baseline.md](backend/docs/api-baseline.md).
-The Word file is currently absent from its recorded root path. The supplied
+The Word file was supplied again on 2026-10-06 and checked directly. The supplied
 architecture diagram is retained as conversation context. A/B/C grouping and
 all reserved endpoints remain unchanged. This work implements A1 through A6.
 See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
@@ -23,7 +23,8 @@ See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
-from its response body. A1 retains processor readability/resource limits and
+from its response body. On 2026-10-06 the user restored job_id in that body,
+matching the Word specification. A1 retains processor readability/resource limits and
 OAuth/mTLS INGRESS. content_hash is unverified source metadata; actual SHA-256
 is computed internally as source_hash. Current pipeline: pdf-ingestion-v1.4.
 Source text/HTML and AI candidates are retained separately. Every visual source

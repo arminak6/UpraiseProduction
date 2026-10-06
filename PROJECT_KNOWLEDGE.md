@@ -17,7 +17,8 @@ external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary
 - INGRESS enforces OAuth JWT/client/course/scopes and trusted mTLS assertions;
   proxy headers are disabled. Explicit development + local_test_mode grants
   local-test-client authoring access only to actual private/loopback peers.
-- A1 fsyncs bytes, commits a job and returns202/document_id with A4 Location.
+- A1 fsyncs bytes, commits a job and returns202/document_id+job_id with A4 Location.
+  Its job_id supports A4/A6; A5 uses the separate lesson job_id from A3.
   User removed Ingestion Guard/hash/origin scans; PDF/HTTPS support limits remain.
 - Ingestion: Docling/OCR -> Nova candidates/source comparison -> quality-aware
   chunks -> Titan -> isolated Qdrant attempt/count -> audit -> DONE.
@@ -64,6 +65,8 @@ external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary
 
 ## Important paths
 
+- FUTURE_UPDATES.md: Git-ignored local backlog; consult for future feature updates.
+  Worker concurrency is the next proposed update, followed by DOCX/CSV and A7.
 - README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,
   local-testing}.md: maintained contracts; api-baseline.md preserves draft decisions.
 - backend/src/upraise_ai/: api/authoring/{documents,lessons}.py and schemas/ expose
@@ -144,7 +147,7 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   survives. External artifact locks are never unlinked. A6 requires cleanup/audit
   before204; busy writers503 with recovery.
 - Scopes: documents:read/write, lessons:write, jobs:read/write. Inaccessible IDs404;
-  key/action conflicts409, malformed422. A1 response contains only document_id.
+  key/action conflicts409, malformed422. A1 response contains document_id and job_id.
 
 ## Known limitations and next work
 
@@ -152,16 +155,19 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   ValidationExceptions. See codex_helper/ingestion-1-vs-2-vs-3-report.md.
 - A3 reports do not guarantee coherence or pedagogical suitability. Huge windows
   fail explicitly; reduce windows or tune request budgets.
-- Historical speech failure c6e896a6 lacks the rejected provider reply. Live
-  job241c4bda completed with30 checked WAVs/visemes and259 findings; sampled final
-  text had unsupported claims. Reports do not re-review edited text. Evidence:
-  codex_helper/a3-completed-lesson-verification.json. MW callbacks remain unverified.
+- Level test: beginner51455f0c FAILED after3 finalizer ValueErrors (no raw diagnostic);
+  intermediate d51a2862/advanced b17d31a1 DONE with12/15 DB-matching chunks and valid
+  27 WAVs. Final text misses Monte Carlo (intermediate), corrupts math (advanced),
+  and inherits a false AUTO_CHECKED page31 plot description. See codex_helper/
+  level-assessment/assessment.md. Beginner retry df496cce finalized14 DB chunks;
+  nine WAVs succeeded, then U+0008 in a corrupted binomial made chunk10 SSML
+  invalid; AWS_REQUEST_REJECTED hides the provider code. See codex_helper/
+  beginner-retry-diagnosis.md. No post-edit model review; MW callbacks unverified.
 - Production gateway/Moodle, HA/backups, retention/audit erasure, orphan cleanup
   and cross-host artifact storage remain open; other APIs/learner RAG are reserved.
-- Durable lesson-text retention/erasure and archive-read APIs remain undefined;
-  inspect job status for partial/failed archives. Deleted temporary text cannot
-  be recovered automatically. CSV/DOCX remain unsupported: researched native
-  Docling DOCX and Polars/PyArrow CSV, with section/record provenance required.
+- Archive-read/erasure APIs remain undefined; inspect job status for partial archives.
+  Deleted temporary text cannot be restored. See FUTURE_UPDATES.md for concurrency,
+  researched DOCX/CSV parsing and deferred A7 regeneration.
 
 ## Recent decisions
 
@@ -171,15 +177,22 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   as in Uprise/v2. Added prepared_lesson_chunks; retain after output disposal.
 - 2026-10-06: User requested explanation levels in all three role system prompts.
   Applies existing learner_level option; fresh jobs/keys use the new policy.
+- 2026-10-06: User restored A1's job_id in its 202 JSON alongside document_id,
+  matching the supplied original Word specification. Location remains unchanged.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-06: Checked level policy/model adapter/pipeline/config, A3 tests/docs.
-388 tests passed in disposable PostgreSQL/Qdrant with fake providers; Ruff,
-Compose and whitespace passed. Built/restarted4 services with idle queues;
-all6 healthy, running lesson-v3-a3-5-f88e33e6d2f7. Live efef122c archive preserves
-12 chunks matching A5 text/SSML; prior level flag remains false. No paid generation
-or backfill by the agent. Evidence: codex_helper/a3-level-{validation,build}.log,
-a3-level-runtime-check.json; prior30-WAV checks: a5-runtime-check.json.
+2026-10-06: A1 response schema/handler now return document_id+job_id. Multipart,
+URL, retry identity and A4/A6 lifecycle passed57 isolated backend tests;17
+frontend tests, Ruff and whitespace passed. Rebuilt backend/frontend images;
+restarted local backend healthy, live OpenAPI requires both IDs. Evidence:
+codex_helper/a1-response-{validation,build}.log; helper validate-a1-response.ps1.
+
+2026-10-06: Beginner retry diagnosed via worker logs, DB/checkpoints and offline
+SSML parsing; see codex_helper/beginner-retry-diagnosis.md. Level assessment used
+A4/A5, DB,27 WAVs, source PDF/Qdrant and MathJax; see level-assessment/assessment.md.
+Prior388 isolated tests, Ruff/Compose passed;6 healthy services, pipeline
+lesson-v3-a3-5-f88e33e6d2f7. QA: codex_helper/a3-level-{validation,build}.log.
+No provider calls/product changes during diagnosis; no agent generation/backfill.

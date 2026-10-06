@@ -8,8 +8,9 @@ The user subsequently confirmed Moodle source identity and durable job/audit
 storage and instructed implementation. This document preserves the agreed
 design; `a1.md` describes the actual wire contract, operation and limits.
 On the same date the user explicitly removed the A1 Ingestion Guard and job_id
-from the A1 response body. The original Word inventory is preserved separately
-in `api-baseline.md`; these are approved deviations from that draft.
+from the A1 response body. On 2026-10-06 the user restored job_id in that body,
+matching the original Word response. The Ingestion Guard remains removed;
+`api-baseline.md` records these decisions separately from the original inventory.
 
 ## Moodle source identity and delivery
 
@@ -81,7 +82,7 @@ recorded signatures also include the extraction/model configuration.
 1. INGRESS authenticates and authorizes the Middleware request.
 2. Durably stage the PDF, check processor support/resource limits and compute
    internal source_hash. The caller's content_hash is not verified.
-3. Commit the accepted job, then return HTTP 202 with {document_id} only and
+3. Commit the accepted job, then return HTTP 202 with {document_id, job_id} and
    Location pointing to A4. This means accepted work, not finished ingestion.
 4. The worker performs source-faithful Docling extraction/OCR, Nova recovery,
    section-aware chunking and Titan embeddings without an Ingestion Guard.

@@ -159,7 +159,7 @@ def remember_submission(result):
 
 if page == "Ingest material":
     st.subheader("A1 · Ingest teaching material")
-    st.caption("POST /v1/documents · PDF processing · 202 response contains document_id only")
+    st.caption("POST /v1/documents · PDF processing · 202 response contains document_id and job_id")
     source_mode = st.radio("Document source", ["PDF upload", "Signed Moodle URL"], horizontal=True, key="source_mode")
     auto_hash = source_mode == "PDF upload" and st.checkbox("Fill content_hash from the uploaded PDF", key="fill_hash")
     st.caption("content_hash is source metadata; the backend does not verify it.")

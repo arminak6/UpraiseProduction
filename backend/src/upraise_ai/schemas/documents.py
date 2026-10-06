@@ -44,6 +44,7 @@ class IngestionMetadata(DocumentInput):
 
 class AcceptedDocument(BaseModel):
     document_id: str
+    job_id: str
 
 
 class DocumentSummary(BaseModel):

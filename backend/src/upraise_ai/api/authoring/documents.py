@@ -130,7 +130,7 @@ async def ingest_document(request: Request, response: Response, principal: Princ
     else:
         raise IngestionError("UNSUPPORTED_CONTENT_TYPE", status=415)
     response.headers["Location"] = f"/v1/jobs/{result['job_id']}"
-    return {"document_id": result["document_id"]}
+    return {"document_id": result["document_id"], "job_id": result["job_id"]}
 
 
 @router.get("/v1/jobs/{job_id}", response_model=JobStatus, summary="A4 – Job status")

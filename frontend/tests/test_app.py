@@ -63,7 +63,7 @@ class AppTests(unittest.TestCase):
 
     def test_signed_submission_tracks_location_without_resubmission_on_rerun(self):
         job = str(uuid4())
-        accepted = Result('POST', '/v1/documents', 202, 12, {'document_id': 'document'}, True,
+        accepted = Result('POST', '/v1/documents', 202, 12, {'document_id': 'document', 'job_id': job}, True,
                           {'location': '/v1/jobs/' + job})
         with patch('api_client.request', return_value=accepted) as send:
             app = self.app()

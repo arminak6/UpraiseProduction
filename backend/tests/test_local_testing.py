@@ -74,7 +74,8 @@ def test_real_ingress_local_branch_supports_a1_a2_a4_without_auth_override(integ
             accepted = client.post("/v1/documents", data=data,
                                    files={"file": ("local-test.pdf", raw, "application/pdf")})
             assert accepted.status_code == 202, accepted.text
-            assert set(accepted.json()) == {"document_id"}
+            assert set(accepted.json()) == {"document_id", "job_id"}
+            assert accepted.headers["Location"] == f"/v1/jobs/{accepted.json()['job_id']}"
             assert accepted.headers["x-upraise-auth-mode"] == "local-test"
             document_id = accepted.json()["document_id"]
             status = accepted.headers["location"]

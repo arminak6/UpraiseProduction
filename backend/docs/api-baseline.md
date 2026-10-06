@@ -9,8 +9,8 @@ the differences table records explicit implementation decisions separately.
 C1 `GET /health`, A1 `POST /v1/documents`, A2 list/delete and A4 `GET /v1/jobs/{job_id}` are
 implemented, together with A3 lesson generation and A5 result/audio. Other endpoints
 remain reserved for their original responsibility. A3/A5's approved contract is in `a3.md`.
-A/B/C grouping is preserved. The original Word is currently absent from its
-recorded path; this inventory preserves the previously reviewed draft. Current
+A/B/C grouping is preserved. The original Word was supplied again and checked
+directly on 2026-10-06; this inventory preserves its draft contract. Current
 A1 wire details and approved extensions are in `a1.md` and `a1-design.md`;
 the user-requested A2 contract and operational interpretation are in `a2.md`.
 
@@ -89,7 +89,7 @@ A1 decisions.
 | Liveness payload | Word defines C1 purpose/status but no `/health` JSON schema | Scaffold returns `{"status":"alive"}` with 200, without claiming integration or AI readiness |
 | A1 enrichment | Earlier Word A1 overview says LLM=No; old extraction uses generative Nova math/figure enrichment | User explicitly approved the old pipeline including Nova on 2026-10-02; applies to A1 extraction only |
 | A1 Ingestion Guard | Original A1 requires instruction scanning and origin/MIME/hash provenance checks | User explicitly removed this stage on 2026-10-02. No instruction/active-content, expected-hash, magic/declared MIME/extension or source-host allowlist checks remain. PDF readability/encryption/size/page support limits, OAuth/mTLS INGRESS and HTTPS/TLS/DNS network handling remain |
-| A1 accepted response | Original Word A1 returns document_id and job_id | User requested job_id removal on 2026-10-02. A1 implements this in the response body, which contains only document_id; Location still identifies the unchanged A4 job-status route. Durable internal jobs remain |
+| A1 accepted response | Original Word A1 returns document_id and job_id | User requested job_id removal on 2026-10-02, then restored it on 2026-10-06 after checking the Word specification. A1 now returns both document_id and job_id. Location identifies the A4 route for the same ingestion job; use that job_id with A4/A6. A5 uses the lesson job_id returned by A3 |
 | A1 input details | Draft describes content hash/version without a complete wire schema | After the explicit 2026-10-02 guard removal, content_hash is required opaque unverified source metadata, including Moodle SHA-1. Internal source_hash is actual SHA-256. Optional version and Idempotency-Key support byte-aware retries, including legacy accepted requests |
 | A2 status/list source | Draft describes Qdrant reads but status/version for accepted documents also live in the approved PostgreSQL job registry; queued/failed documents can have no vectors | User requested A2 on 2026-10-02. Return all undeleted client/course submissions with registry status/version and active Qdrant chunk counts; preserve the Word's methods, grouping and delete-only audit. Durable deletion markers fence workers and recover interrupted deletion |
 | A6 reason and cleanup | Draft gives CANCEL/RECEIVED and temporary-output purge without state or parameter placement details | User requested implementation on 2026-10-02. Required reason query parameter; CANCEL fences QUEUED/RUNNING and sets CANCELLED, RECEIVED acknowledges DONE/FAILED. Preserve originals/history/active vectors; durable cleanup and audit precede 204. Busy writers return retryable 503 until cleanup completes. See a6.md |

@@ -4,9 +4,9 @@ FastAPI preserves A/B/C grouping. Implemented routes are GET /health,
 POST /v1/documents (A1), GET /v1/documents and DELETE /v1/documents/{document_id}
 (A2), GET /v1/jobs/{job_id} (A4), and DELETE /v1/jobs/{job_id} (A6).
 Run through root Compose; see ../README.md and docs/{a1,a2,a6}.md.
-The user explicitly removed the A1 Ingestion Guard and job_id from the A1 body
-on 2026-10-02. A1 returns 202 with document_id only; Location supplies the
-unchanged A4 polling URL. Internal PostgreSQL jobs remain.
+The user explicitly removed the A1 Ingestion Guard on 2026-10-02. On 2026-10-06
+the user restored job_id in the A1 body: A1 returns 202 with document_id and
+job_id; Location supplies the A4 polling URL for that job. Internal PostgreSQL jobs remain.
 
 services/pdf contains the reviewed Docling/Nova PDF extraction components.
 Its input.py checks readability, unsupported encryption and size/page limits.

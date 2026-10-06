@@ -46,6 +46,7 @@ not an automatically loaded file.
   version. Uploaded content_hash can be filled from local SHA-256 as a
   convenience; the backend does not verify declared hashes. Any filename/MIME
   can be submitted for testing; only readable PDFs are currently processed.
+  Acceptance returns document_id and ingestion job_id, plus the A4 Location header.
 - **Processing status — A4**: automatically remembers A1's Location header.
   Refresh manually or poll every five seconds. Polling stops after DONE/FAILED/CANCELLED
   or pauses on an HTTP/connection error. A different status URL clears the
