@@ -4,7 +4,7 @@
 
 UPRAISE WP7 AI implements A1 ingestion, A2 material management, A3 draft lessons,
 A4 status, A5 result/audio and A6 cancellation/receipt. Native V3 teacher/speech
-now applies requested explanation levels (lesson-v3-a3-5). Human approval remains
+applies explanation levels and source-label-based translation (lesson-v3-a3-8). Human approval remains
 external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary.
 
 ## Architecture and data flow
@@ -14,52 +14,53 @@ external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary
   MW owns lesson pace, learner state and human approval. AI also retains finalized
   DRAFT text/SSML in PostgreSQL; Qdrant stores
   source material only. Other original A/B/C paths remain reserved.
-- INGRESS enforces OAuth JWT/client/course/scopes and trusted mTLS assertions;
-  proxy headers are disabled. Explicit development + local_test_mode grants
-  local-test-client authoring access only to actual private/loopback peers.
-- A1 fsyncs bytes, commits a job and returns202/document_id+job_id with A4 Location.
-  Its job_id supports A4/A6; A5 uses the separate lesson job_id from A3.
-  User removed Ingestion Guard/hash/origin scans; PDF/HTTPS support limits remain.
+- INGRESS enforces OAuth/client/course/scopes/mTLS; no proxy headers. Explicit
+  development + local_test_mode grants authoring only to real private/loopback peers.
+- A1 fsyncs bytes/commits job, returns202 document_id+job_id/A4 Location.
+  A1 job_id supports A4/A6; A5 uses A3 job_id. User removed hash/origin guard scans.
 - Ingestion: Docling/OCR -> Nova candidates/source comparison -> quality-aware
   chunks -> Titan -> isolated Qdrant attempt/count -> audit -> DONE.
   Undeleted DONE + active_attempt is activation authority; vector tokens must match.
-- A3 returns202 job_id, waits known pending A1 jobs, rejects unknown IDs (use A1),
-  scrolls all active chunks and preserves requested document/page/chunk order.
-  Cross-window chunks are assigned once with all source pages. Defaults:5page
-  source windows, approximately200word output chunks; no silent source truncation.
-- A3 uses copied services/v3/ explain -> review_explanation -> finalize_explanation.
-  Draft citations reach review; final citation/math checks occur during finalization.
-  One editor revision if rejected; no extra Nova PDF judge or post-edit model review.
-  Reports retain pre-edit findings/source/speech flags; business status stays DRAFT.
-- Requested language controls text/speech, with EU-region voice checks. Beginner/
-  intermediate/advanced (default intermediate) controls explanation difficulty in
-  all three role system prompts, including recovery. Accuracy/coverage stay required;
-  reviewer flags level mismatches. New A5 reports learner_level_applied=true and
-  learner_level_prompt=explanation-level-v1; old output stays unchanged. Math narration
-  has no teaching-level policy; V3 MathJax/contextual/deterministic fallbacks remain.
+- A3 returns202 job_id, awaits pending A1, rejects unknown IDs, reads all active
+  chunks in document/page/chunk order. Cross-window chunks are assigned once with
+  all pages. Defaults:5page source windows/~200word output; no silent truncation.
+- A3 uses copied V3 explain -> review_explanation -> finalize_explanation, with final
+  citation/math checks and one editor revision. Reports retain pre-edit/source/speech
+  findings; status stays DRAFT. No extra PDF judge or post-edit source review.
+- A3 generates in each document's stored A1 language. Differing primary tags
+  trigger finalized-prose translation plus independent language/fidelity/level
+  verification before splitting, PostgreSQL and target-language speech. Matching
+  tags skip translation. Formulas/citations/code and paragraph pages/order stay
+  immutable. Source and translated checkpoints prevent repeated generation/TTS
+  work on retries; A4 can show TRANSLATE. Versions record translation/source labels.
+  Labels are declared, not detected; EU voice checks remain. Translation parser
+  recovers one intact schema-valid JSON object from wrapper damage; never repairs
+  strings/content. Ambiguous/truncated/damaged content still fails with specific logs.
+  Translation review compares paired prose with identical opaque notation tokens;
+  English inside immutable equations cannot be treated as untranslated prose.
+  Negative checks require exact passage/paragraph evidence and one bounded
+  correction plus independent recheck (2 calls normally, at most4 per attempt).
+- Beginner/intermediate/advanced (default intermediate) controls all three role
+  system prompts, including recovery; accuracy/coverage stay required. Reviewer flags
+  level mismatches. A5 learner_level_applied=true, prompt explanation-level-v1.
+  Math narration has no level policy; V3 MathJax/contextual/deterministic fallbacks remain.
 - V3 PCM/WAV uses matching SSML/visemes. Overshoot is rescaled/flagged; malformed
   marks fail. Actual engines, including standard fallback, are recorded.
-- Independent worker, lesson-worker and lesson-delivery services use killable
-  spawned processes, artifact locks, leases, fencing and supervised deadlines.
-  Provider calls are at least once. upraise_jobs holds operational ingestion_jobs/
-  lesson_jobs; upraise_audit holds separate content-free audits. Sources, crops,
-  checkpoints and temporary lesson JSON/audio are on the shared volume.
+- Independent worker/lesson-worker/lesson-delivery processes use artifact locks,
+  leases, fencing and supervised deadlines; provider calls are at least once.
+  upraise_jobs holds jobs; upraise_audit holds content-free audits. Sources/crops/
+  checkpoints/temporary lesson JSON/audio share the artifact volume.
 - upraise_jobs.prepared_lesson_chunks stores finalized text before TTS and SSML/
   parts before synthesis, with order, provenance, pre-edit review and prompt/model
   versions. Valid leases/active sources fence writes; differing retry text fails.
-- MW callbacks use allowlisted pinned HTTPS, mTLS and short-lived OAuth tokens.
-  Basic/POST/certificate client auth supported. Callback2xx is not receipt;
-  MW stores A5 output then sends A6 RECEIVED. Secrets remain deployment-only.
-- A5 uses jobs:read/client/course/source/hash checks and shared reader locks.
-  Writes/cleanup stay exclusive. JSON/WAV access audits are content-free and
-  mandatory; audit outages block delivery. no-store; pull never acknowledges A6.
-- Output TTL defaults24h from completion. A5 denies expiry immediately; independent
-  delivery recovers deletion/callback retries. RECEIVED/CANCEL purge lesson output
-  only, preserving sources/vectors. Durable markers/audit IDs recover cleanup.
-- RECEIVED/CANCEL/TTL retain prepared_lesson_chunks, including text saved before
-  failed/cancelled speech. A5 still returns410 after disposal. Operator DB access
-  joins parent lesson_jobs for client/course/status; no archive API/audio DB blobs.
-  Old jobs are not backfilled. A2 does not erase saved lesson text/history.
+- MW callbacks use pinned allowlisted HTTPS/mTLS/short-lived OAuth. MW stores A5
+  then sends A6 RECEIVED; callback2xx is no receipt.
+- A5 checks scope/client/course/source/hash, shared reader locks and mandatory
+  content-free audit (outage blocks delivery). Writers/cleanup stay exclusive.
+- TTL24h from completion; A5 denies expired output immediately. Independent
+  delivery recovers cleanup/callbacks; RECEIVED/CANCEL preserves sources/vectors.
+- Disposal/A2 retains prepared_lesson_chunks, including failed/cancelled speech.
+  Operator SQL joins parent jobs for ownership/status; no archive API/audio DB/backfill.
 - A2 fences ingestion, purges all vector attempts and audits before204. A1 A6
   preserves source/active vectors/history; lesson A6 removes JSON/audio/checkpoints.
 
@@ -69,28 +70,22 @@ external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary
   Worker concurrency is the next proposed update, followed by DOCX/CSV and A7.
 - README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,
   local-testing}.md: maintained contracts; api-baseline.md preserves draft decisions.
-- backend/src/upraise_ai/: api/authoring/{documents,lessons}.py and schemas/ expose
-  APIs; main.py wires services. guards/{ingress,body_limit}.py controls access.
-- core/config.py: provider identities, signatures, budgets and TLS/OAuth settings.
-- services/pdf/, formats.py: extraction/fidelity. services/{quality,chunking,
-  embeddings,moodle}.py: source quality/chunks, vectors and downloads.
-- services/lesson_{models,compat,prompts,pipeline,speech,callback}.py: A3 generation,
-  native V3 API conversion and delivery. services/v3/ contains the original
-  teacher/models/prompts/Polly/math code, provenance README and SHA origin.json.
-- storage/{jobs,lessons,audit,files,vectors,migrate}.py: operational schemas,
-  content-free audit, fsync/locks, active-vector retrieval and startup migration.
-- workflows/{submission,documents,jobs,lessons}.py: acceptance/control.
-  workers/{ingestion,lessons,lesson_delivery,supervision,budgets}.py: execution.
+- backend/src/upraise_ai/: api/authoring/, schemas/, guards/ and main.py expose/wire
+  APIs; core/config.py owns provider identities, signatures, budgets and TLS/OAuth.
+- services/pdf/, formats.py, quality/chunking/embeddings/moodle.py: ingestion.
+  lesson_{models,compat,prompts,translation,pipeline,speech,callback}.py: A3/A5.
+  services/v3/ retains original code, provenance README and SHA origin.json.
+- storage/: jobs/lessons/audit/files/vectors/migrate. workflows/: acceptance/control.
+  workers/: ingestion/lessons/lesson_delivery/supervision/budgets.
 - frontend/{app,api_client}.py: API-only A1-A6 testbench; frontend/tests/: AppTest/fake HTTP.
-- backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned build/math runtime.
-- callback_tls/README.md: ignored read-only secret mounts; real callback
-  credentials not supplied or logged/built.
+- backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned build/math.
+- callback_tls/README.md: ignored read-only secret mounts; credentials never logged/built.
 - Legacy V3: ../Uprise/v2/backend/learning/v1/.
-- backend/tests/test_a3*.py: V3/levels/lifecycle/speech/callbacks/durable text; test_a5_integration.py:
-  pull/audit/concurrency/TTL, test_artifact_locks.py: Windows/Linux process locks.
-  test_v3_original_*.py keeps original regressions; AWS mocked.
+- backend/tests/: test_a3* covers V3/levels/translation/lifecycle/speech/archive;
+  test_a5_integration covers pull/audit/TTL; test_artifact_locks covers process locks.
+  test_v3_original_* preserves original regressions; AWS mocked.
 - codex_helper/: ignored comparison reports/checkpoints and validation scripts/logs.
-  validate-a3/a5.ps1 uses disposable services; a3-{text,level}-*.log records QA.
+  validate-a3/a5.ps1 uses disposable services; a3-{text,level,translation}-*.log records QA.
 
 ## Commands
 
@@ -100,20 +95,20 @@ From root, Docker Desktop Linux containers:
 - docker compose build backend
 - docker compose up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
 - docker compose logs -f backend worker lesson-worker lesson-delivery
-- Frontend tests: see README.md; optional Streamlit uses Compose profile tools.
+- Start only UI: docker compose --profile tools up --build -d --no-deps --wait frontend
+  Tests: frontend/README.md. Plain compose up skips the tools-profile UI.
 
 Migration is additive. Drain old jobs before changing pipeline identity; never
 reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501.
 
 ## Dependencies and environment
 
-- Production Python3.12.14 slim Bookworm/uv0.9.5; Docling2.115.0,
-  docling-core2.99.0/EasyOCR/CPU Torch. Host Python3.10.8 differs: use pinned Docker.
-  UID10001; exact dependencies in uv.lock.
+- Python3.12.14 Bookworm/uv0.9.5/UID10001; pinned Docker (host3.10 differs).
+  Docling2.115.0/core2.99.0/EasyOCR/CPU Torch; dependencies in uv.lock.
 - Nova Lite figures and Nova Pro math/fidelity for A1; normalized TitanV2 1024D.
   A3 GPT OSS120B generator/Qwen235B reviewer; explicit EU region (eu-central-1 default).
-- Node22 image digest, MathJax4.1.3/SRE5.0.0-rc.4 npm lock. EN/IT/FR/DE local math
-  smoke tested. PDF evidence renders with direct pypdfium2 dependency.
+- Node22/MathJax4.1.3/SRE5.0.0-rc.4 npm lock; EN/IT/FR/DE math smoke tested.
+  PDF evidence renders with pypdfium2.
 - Polly neural:16kHz mono16-bit WAV; same-SSML visemes offset by PCM duration.
   Request limits:2800 billed/5800 total SSML characters.
 - Streamlit1.64.0/httpx0.28.1; PostgreSQL17.11/Qdrant1.19.1; no Redis.
@@ -134,15 +129,15 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   retains all source pages while page is only the first.
 - Source/section/audio checkpoints bind complete ordered request/source/pipeline
   identity. Result/audio hashes are verified. Corrupt/missing503, pending409, expired410.
-- Lesson identity is lesson-v3-a3-5; existing sources need no re-ingestion, and new
+- Lesson identity is lesson-v3-a3-8; existing sources need no re-ingestion, and new
   generation uses a fresh idempotency key. Raw failed replies are opt-in via
   UPRAISE_LESSON_CAPTURE_MODEL_OUTPUTS, only development + local_test_mode; ordinary
-  A6/TTL cleanup removes job diagnostics. Default logs contain no generated text.
-- Budgets never skip source/change identity. Ingestion max12h: parse180+30/pageOCR
-  (10 without), enrich180+180/request, embed120+90/chunk. A3 max12h:
-  overhead300+1200/section or180/outputchunk; tune for large PDFs.
-- Progress never resets deadlines. Linux parent-death/group shutdown kills writers;
-  bounded DB ownership readers supervise children. Retry maximum defaults3.
+  A6/TTL cleanup removes job diagnostics. Translation captures both candidate and
+  verifier replies when enabled; default logs contain no generated text.
+- Workload deadlines never skip source or reset on progress; max12h per attempt,
+  A3 overhead300+1200/section or180/outputchunk. Detailed A1 budgets in config.
+  Linux parent-death/group shutdown and DB ownership checks supervise writers;
+  retry maximum defaults3.
 - A1 artifact retention defaults off; A3 TTL is independent. Job/audit history
   survives. External artifact locks are never unlinked. A6 requires cleanup/audit
   before204; busy writers503 with recovery.
@@ -155,14 +150,18 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   ValidationExceptions. See codex_helper/ingestion-1-vs-2-vs-3-report.md.
 - A3 reports do not guarantee coherence or pedagogical suitability. Huge windows
   fail explicitly; reduce windows or tune request budgets.
-- Level test: beginner51455f0c FAILED after3 finalizer ValueErrors (no raw diagnostic);
-  intermediate d51a2862/advanced b17d31a1 DONE with12/15 DB-matching chunks and valid
-  27 WAVs. Final text misses Monte Carlo (intermediate), corrupts math (advanced),
-  and inherits a false AUTO_CHECKED page31 plot description. See codex_helper/
-  level-assessment/assessment.md. Beginner retry df496cce finalized14 DB chunks;
-  nine WAVs succeeded, then U+0008 in a corrupted binomial made chunk10 SSML
-  invalid; AWS_REQUEST_REJECTED hides the provider code. See codex_helper/
-  beginner-retry-diagnosis.md. No post-edit model review; MW callbacks unverified.
+- v5 Italian job25748535 produced English (italian-assessment.md); v6/v7 failed
+  wrappers/review. Approved replays reproduced wrapper and English-inside-equation
+  false rejection; v8 fixes parsing/masked review and feedback. Historical failed
+  replies unavailable. v8 job47194bc7 DONE first attempt:14 Italian-prose chunks,
+  matching PG text/SSML and valid delivered WAVs. Binomial/matrix, spoken-newline,
+  English math-speech and page31 figure errors remain. See codex_helper/
+  italian-v8-assessment-47194bc7.md and translation-failure-*/.
+- Level/source defects: codex_helper/level-assessment/assessment.md. Beginner retry
+  saved14 texts/nine WAVs before U+0008 invalidated SSML (beginner-retry-diagnosis.md).
+  Original V3 shares this but returns no-audio warnings; A3 fails
+  (original-speech-comparison.md); V4/V5 not reproduced. AWS errors lose provider
+  codes; no post-edit source review; MW callbacks unverified.
 - Production gateway/Moodle, HA/backups, retention/audit erasure, orphan cleanup
   and cross-host artifact storage remain open; other APIs/learner RAG are reserved.
 - Archive-read/erasure APIs remain undefined; inspect job status for partial archives.
@@ -171,28 +170,23 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 
 ## Recent decisions
 
-- 2026-10-05: User requested copying the working V3 implementation and adapting
-  it to unchanged A3 inputs/results after repeated compatibility failures.
-- 2026-10-06: User requested PostgreSQL retention of final text used for speech,
-  as in Uprise/v2. Added prepared_lesson_chunks; retain after output disposal.
-- 2026-10-06: User requested explanation levels in all three role system prompts.
-  Applies existing learner_level option; fresh jobs/keys use the new policy.
-- 2026-10-06: User restored A1's job_id in its 202 JSON alongside document_id,
-  matching the supplied original Word specification. Location remains unchanged.
+- 2026-10-05: Copied original V3 teacher/speech into A3 adapters.
+- 2026-10-06: User requested durable text/SSML, all-role level prompts and
+  source-label-based translation; human approval stays external.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-06: A1 response schema/handler now return document_id+job_id. Multipart,
-URL, retry identity and A4/A6 lifecycle passed57 isolated backend tests;17
-frontend tests, Ruff and whitespace passed. Rebuilt backend/frontend images;
-restarted local backend healthy, live OpenAPI requires both IDs. Evidence:
-codex_helper/a1-response-{validation,build}.log; helper validate-a1-response.ps1.
+2026-10-07: frontend/Dockerfile/app.py and Compose tools profile checked. Started
+frontend only after plain compose up skipped it; localhost8501 root/health and
+frontend-to-backend health return200. Initial-page AppTest has no exceptions.
 
-2026-10-06: Beginner retry diagnosed via worker logs, DB/checkpoints and offline
-SSML parsing; see codex_helper/beginner-retry-diagnosis.md. Level assessment used
-A4/A5, DB,27 WAVs, source PDF/Qdrant and MathJax; see level-assessment/assessment.md.
-Prior388 isolated tests, Ruff/Compose passed;6 healthy services, pipeline
-lesson-v3-a3-5-f88e33e6d2f7. QA: codex_helper/a3-level-{validation,build}.log.
-No provider calls/product changes during diagnosis; no agent generation/backfill.
+2026-10-06: lesson_translation/models/config, a3.md and translation tests checked.
+442 full backend tests plus final50 focused translation tests passed; changed-file
+Ruff/Compose/build passed. Legacy copied V3 has2 pre-existing import lint findings.
+Runtime lesson-v3-a3-8-1658e1bb2509/source hash verified after idle app restart;
+all six services healthy. Logs: codex_helper/a3-translation-review-{validation,build}.log.
+Job47194bc7 A5/PG/checkpoints/all14 WAV routes and page31 render inspected read-only;
+Italian prose/storage/delivery pass; math speech/content still need review. No new
+model calls or code changes for this assessment. Document79fd4c5e remains DONE/en.

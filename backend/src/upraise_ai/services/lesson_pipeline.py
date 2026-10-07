@@ -25,6 +25,7 @@ from upraise_ai.services.lesson_models import (
 )
 from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION
 from upraise_ai.services.lesson_speech import split_words
+from upraise_ai.services.lesson_translation import TRANSLATION_PROMPT_VERSION, needs_translation
 
 
 def atomic_write(path, data):
@@ -52,6 +53,9 @@ def plan_sections(documents, window_pages):
     sections = []
     for row, chunks in documents:
         seen = set()
+        source_language = row["metadata"].get("language")
+        if not isinstance(source_language, str) or not source_language.strip():
+            raise IngestionError("LESSON_SOURCE_LANGUAGE_MISSING")
         page_count = int(row["result"]["page_count"])
         for start in range(1, page_count+1, window_pages):
             end = min(page_count, start+window_pages-1)
@@ -66,6 +70,7 @@ def plan_sections(documents, window_pages):
             sections.append({"document_id": str(row["document_id"]),
                              "document_job_id": str(row["job_id"]),
                              "page_count": page_count,
+                             "source_language": source_language.lower(),
                              "document_version_id": selected[0]["document_version_id"],
                              "active_attempt": str(row["active_attempt"]),
                              "window": [start, end], "pages": pages, "chunks": selected})
@@ -184,13 +189,30 @@ class LessonPipeline:
                 report = ReviewReport.model_validate(cached["review"])
                 revisions = cached["revisions"]
             else:
-                source_path = self.staging.source_path(section["document_job_id"])
-                draft, report, revisions = self.models.generate_section(section, data.language, source_path,
-                    learner_level=data.options.learner_level,
-                    notify=lambda step: progress(step, 0.05+0.55*index/len(sections)))
-                flags = source_issues(section)
-                report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
-                                      issues=[*report.issues, *flags], revision_instructions=report.revision_instructions)
+                # Retain the finalized source-language draft separately so a
+                # translation/provider retry does not repeat the three agents.
+                source_checkpoint = folder / f"source-section-{index}.json"
+                source_cached = json.loads(source_checkpoint.read_text()) if source_checkpoint.is_file() else None
+                if source_cached and source_cached.get("signature") == signature:
+                    draft = SectionDraft.model_validate(source_cached["draft"])
+                    report = ReviewReport.model_validate(source_cached["review"])
+                    revisions = source_cached["revisions"]
+                else:
+                    source_path = self.staging.source_path(section["document_job_id"])
+                    draft, report, revisions = self.models.generate_section(section, section["source_language"], source_path,
+                        learner_level=data.options.learner_level,
+                        notify=lambda step: progress(step, 0.05+0.55*index/len(sections)))
+                    validate_draft(draft, section["pages"])
+                    flags = source_issues(section)
+                    report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
+                                          issues=[*report.issues, *flags], revision_instructions=report.revision_instructions)
+                    write_json(source_checkpoint, {"signature": signature, "draft": draft.model_dump(),
+                                                   "review": report.model_dump(), "revisions": revisions})
+                if needs_translation(section["source_language"], data.language):
+                    progress("TRANSLATE", 0.05+0.55*index/len(sections))
+                    draft = self.models.translate_section(draft, section["source_language"], data.language,
+                                                          learner_level=data.options.learner_level)
+                validate_draft(draft, section["pages"])
                 write_json(checkpoint, {"signature": signature, "draft": draft.model_dump(),
                                         "review": report.model_dump(), "revisions": revisions})
             validate_draft(draft, section["pages"])
@@ -208,7 +230,13 @@ class LessonPipeline:
                     "generator_model": self.settings.lesson_generation_model_id,
                     "review_model": self.settings.lesson_review_model_id,
                     "draft_prompt": DRAFT_PROMPT, "review_prompt": REVIEW_PROMPT,
-                    "finalizer_prompt": FINALIZER_PROMPT, "learner_level_prompt": LEARNER_LEVEL_PROMPT_VERSION}
+                    "finalizer_prompt": FINALIZER_PROMPT, "learner_level_prompt": LEARNER_LEVEL_PROMPT_VERSION,
+                    "translation_prompt": TRANSLATION_PROMPT_VERSION,
+                    "translation_model": self.settings.lesson_generation_model_id,
+                    "translation_review_model": self.settings.lesson_review_model_id,
+                    "translation_applied": str(any(needs_translation(s["source_language"], data.language)
+                                                   for s in sections)).lower(),
+                    "source_languages": ",".join(dict.fromkeys(s["source_language"] for s in sections))}
         save_text(all_chunks, versions)
         progress.set_workload("speech", len(all_chunks))
         result_chunks, engines = [], set()
@@ -256,13 +284,9 @@ class LessonPipeline:
                               activity_id=data.activity_id, language=data.language, voice=data.voice,
                               learner_level=data.options.learner_level, learner_level_applied=True,
                               chunks=result_chunks, reviewer_report=review,
-                              versions={"pipeline": job["pipeline_version"],
-                                        "generator_model": self.settings.lesson_generation_model_id,
-                                        "review_model": self.settings.lesson_review_model_id,
+                              versions={**versions,
                                         "visual_review_model": "not-used-v3",
-                                        "draft_prompt": DRAFT_PROMPT, "review_prompt": REVIEW_PROMPT,
-                                        "visual_review_prompt": VISUAL_PROMPT, "finalizer_prompt": FINALIZER_PROMPT,
-                                        "learner_level_prompt": LEARNER_LEVEL_PROMPT_VERSION,
+                                        "visual_review_prompt": VISUAL_PROMPT,
                                         "math_speech_prompt": MATH_PROMPT, "math_runtime": "MathJax-4.1.3-v3",
                                         "polly_engine": ",".join(sorted(engines)), "aws_region": self.settings.aws_region})
         write_json(folder / "result.json", result.model_dump(mode="json"))

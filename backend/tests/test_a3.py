@@ -42,7 +42,7 @@ def test_input_defaults_and_invalid_options():
 def test_source_order_and_multipage_window_not_duplicated():
     def document(name, page_count, chunks):
         row = {"document_id": name, "job_id": "job-"+name, "active_attempt": "attempt",
-               "result": {"page_count": page_count}}
+               "result": {"page_count": page_count}, "metadata": {"language": "en"}}
         return row, [{"chunk_id": name+str(i), "document_version_id": "version", "page_numbers": pages}
                      for i, pages in enumerate(chunks)]
 

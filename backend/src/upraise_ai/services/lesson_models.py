@@ -13,6 +13,7 @@ from upraise_ai.schemas.lessons import ReviewReport
 from upraise_ai.services.aws import aws_session
 from upraise_ai.services.lesson_compat import legacy_review_report, turn_to_draft
 from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION, learner_level_system_prompt
+from upraise_ai.services.lesson_translation import LessonTranslator, language_name
 from upraise_ai.services.v3.bedrock_teacher import BedrockTeacherV1, TeacherGenerationError
 from upraise_ai.services.v3.math_speech import MathNarrationRequest
 from upraise_ai.services.v3.models import EASY_LECTURE_PROMPT_VERSION, LearningChunk, LearningDocument
@@ -58,7 +59,7 @@ class _LanguageClient:
             request["system"] = [*request["system"], {"text": self.teaching_prompt}]
         if self.language.lower() not in {"en", "en-us", "en-gb"}:
             request["system"] = [*request["system"], {"text":
-                f"Write all teaching text and mathematical narration in {self.language}. "
+                f"Write all teaching text and mathematical narration in {language_name(self.language)}. "
                 "Retain the exact source notation and JSON contract field names."}]
         response = self.client.converse(**request)
         blocks = response.get("output", {}).get("message", {}).get("content", [])
@@ -74,6 +75,7 @@ class LessonModels:
         client = client or aws_session(settings).client("bedrock-runtime", region_name=settings.aws_region,
             config=Config(retries={"max_attempts": 6, "mode": "adaptive"}, connect_timeout=10, read_timeout=180))
         self.client = client
+        self.translator = LessonTranslator(settings, client)
         self.transport = _LanguageClient(client)
         self.teacher = BedrockTeacherV1(session=None, client=self.transport,
             model_id=settings.lesson_generation_model_id, reviewer_model_id=settings.lesson_review_model_id)
@@ -147,6 +149,16 @@ class LessonModels:
     def narrate_math_fallback(self, requests, language):
         self.transport.language = language
         return self.teacher.narrate_math_fallback(requests)
+
+    def translate_section(self, draft, source_language, target_language, *, learner_level):
+        try:
+            return self.translator.translate(draft, source_language, target_language, learner_level)
+        except IngestionError as error:
+            # Keep candidate and verifier replies together in the existing
+            # opt-in diagnostic capture; the last verifier alone hides defects.
+            self.transport.raw = json.dumps(self.translator.outputs, ensure_ascii=False)
+            self.diagnose("translation", error)
+            raise
 
     def math_narration(self, latex, context, language):
         return self.narrate_math_fallback([MathNarrationRequest(latex, context)], language)[0]

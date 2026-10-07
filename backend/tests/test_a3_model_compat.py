@@ -131,7 +131,7 @@ def test_non_english_language_and_level_policies_work_together():
     LessonModels(Settings(), english).generate_section(section(), "en", learner_level="advanced")
     LessonModels(Settings(), italian).generate_section(section(), "it", learner_level="advanced")
     for en, it in zip(english.calls, italian.calls, strict=True):
-        assert it["system"][:-1] == en["system"] and "in it" in it["system"][-1]["text"]
+        assert it["system"][:-1] == en["system"] and "in Italian (it)" in it["system"][-1]["text"]
         assert {k: v for k, v in it.items() if k != "system"} == {k: v for k, v in en.items() if k != "system"}
 
 
