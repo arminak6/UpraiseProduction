@@ -43,7 +43,9 @@ class AppTests(unittest.TestCase):
             self.assertEqual(send.call_count, 1)
 
     def app(self):
-        app = AppTest.from_file(str(FRONTEND / 'app.py'), default_timeout=10).run()
+        app = AppTest.from_file(str(FRONTEND / 'app.py'), default_timeout=10)
+        app.session_state['page'] = 'Ingest material'
+        app.run()
         self.assertFalse(app.exception)
         return app
 

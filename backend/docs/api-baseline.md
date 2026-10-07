@@ -26,6 +26,12 @@ the user-requested A2 contract and operational interpretation are in `a2.md`.
 | A6 | `DELETE /v1/jobs/{job_id}` | Cancel running job or acknowledge receipt using CANCEL/RECEIVED; purge temporary output; 204 |
 | A7 | `POST /v1/audio:regenerate` | Regenerate SSML, audio and lip-sync for author-edited text, optional review; sync for short text, otherwise job; author's text bypasses learner Input Guard |
 
+## Approved authoring extension
+
+A8 is a user-approved extension dated 2026-10-07, separate from the original
+Word inventory: `GET /v1/lesson-jobs` lists ready generated lessons for frontend
+selection. See [A8's contract](a8.md). A7 remains reserved as above.
+
 ## B runtime APIs
 
 | ID | Original method and path in the overview | Responsibility and intended behavior |

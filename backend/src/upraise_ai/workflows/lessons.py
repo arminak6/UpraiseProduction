@@ -7,6 +7,7 @@ import psycopg
 from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import LessonResult
 from upraise_ai.services.lesson_callback import validate_callback_config
 from upraise_ai.services.lesson_pipeline import LessonPipeline
@@ -43,6 +44,22 @@ class LessonService:
                 or not principal.can_access_course(row["metadata"]["course_id"])):
             raise HTTPException(404, "JOB_NOT_FOUND")
         return row
+
+    def list_ready(self, principal, *, course_id=None, limit=100, offset=0):
+        if course_id is not None:
+            principal.require_course(course_id)
+        rows = self.jobs.list_ready(principal.client_id,
+                                    None if principal.local_test else principal.courses,
+                                    course_id, limit, offset)
+        return [ReadyLesson(
+            job_id=str(row["job_id"]), lesson_id=row["metadata"]["lesson_id"],
+            course_id=row["metadata"]["course_id"], activity_id=row["metadata"]["activity_id"],
+            language=row["metadata"]["language"], voice=row["metadata"]["voice"],
+            learner_level=row["metadata"].get("options", {}).get("learner_level", "intermediate"),
+            chunk_count=row["result"]["chunk_count"], requires_review=True,
+            review_issue_count=row["result"].get("review_issue_count", 0),
+            created_at=row["created_at"], expires_at=row["expires_at"],
+        ) for row in rows]
 
     def result(self, row):
         row = self.jobs.get(row["job_id"])

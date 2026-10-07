@@ -1,11 +1,12 @@
 import os
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from upraise_ai.guards.ingress import Principal, ingress
+from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import AcceptedLesson, LessonInput, LessonResult
 
 router = APIRouter()
@@ -16,6 +17,16 @@ def service(request):
     if value is None:
         raise HTTPException(503, "LESSON_STORAGE_NOT_CONFIGURED")
     return value
+
+
+@router.get("/v1/lesson-jobs", response_model=list[ReadyLesson], summary="A8 - List ready generated lessons")
+def ready_lessons(request: Request, response: Response,
+                  course_id: str | None = Query(None, min_length=1, max_length=120),
+                  limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
+                  principal: Principal = Depends(ingress)):
+    principal.require_scope("jobs:read")
+    response.headers["Cache-Control"] = "no-store"
+    return service(request).list_ready(principal, course_id=course_id, limit=limit, offset=offset)
 
 
 @router.post("/v1/lesson-jobs", response_model=AcceptedLesson, status_code=202,

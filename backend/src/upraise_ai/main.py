@@ -52,7 +52,7 @@ async def lifespan(app):
 app = FastAPI(
     title="UPRAISE AI Module",
     version="0.1.0",
-    description="UPRAISE A1 ingestion, A2 material management, A3 draft lessons, A4/A5 jobs and A6 control.",
+    description="UPRAISE A1 ingestion, A2 material management, A3 draft lessons, A4/A5 jobs, A6 control and A8 ready lessons.",
     lifespan=lifespan,
 )
 

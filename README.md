@@ -1,6 +1,6 @@
 # UPRAISE AI Module
 
-A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio and A6 control are implemented.
+A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control and A8 ready-lesson listing are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -17,7 +17,8 @@ The original Word draft remains the API baseline, with the user-approved
 extensions recorded in [api-baseline.md](backend/docs/api-baseline.md).
 The Word file was supplied again on 2026-10-06 and checked directly. The supplied
 architecture diagram is retained as conversation context. A/B/C grouping and
-all reserved endpoints remain unchanged. This work implements A1 through A6.
+all reserved endpoints remain unchanged. A8 is the user-approved 2026-10-07 extension
+for listing ready lessons; see [A8's contract](backend/docs/a8.md).
 See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
 [A5 pull downloads, auditing and TTL](backend/docs/a5.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
@@ -58,12 +59,17 @@ overrides for passwords that need URI encoding.
 
 - API docs: http://localhost:8000/docs
 - Liveness: http://localhost:8000/health
-- Optional Streamlit API Testbench: http://localhost:8501
+- Optional Streamlit Learning and API Testbench: http://localhost:8501
 
 Streamlit is a testing tool in frontend/, separate from the final product.
 Start it with docker compose --profile tools up --build -d --wait.
-It provides A1 PDF/URL submission, A2 course lists/deletion, A4 status polling,
-A6 job actions, health and a general API
+Its default Learning page lists ready lessons through A8. Choose a course and
+select Start course to read its text and play its teacher voice. Previous/Next,
+audio pause/resume, Replay, Finish and Restart control session-only progress.
+All lessons remain drafts requiring human review, and temporary playback expires
+after the configured A5 TTL (24 hours by default).
+It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,
+A4 status polling, A5 downloads, A6 job actions, health and a general API
 request panel. Enter the real OAuth token and HTTPS mTLS gateway credentials
 in its sidebar for authenticated requests. See [frontend/README.md](frontend/README.md).
 

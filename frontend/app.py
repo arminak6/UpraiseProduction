@@ -4,13 +4,12 @@ import os
 from uuid import UUID, uuid4
 
 import streamlit as st
-
 from api_client import Connection, normalize_base_url, request, status_path
+from learning import render_learning
 
-
-st.set_page_config(page_title="UPRAISE API Testbench", page_icon="🧪", layout="wide")
-st.title("UPRAISE API Testbench")
-st.caption("Development testing interface · Separate from the final product")
+st.set_page_config(page_title="UPRAISE", page_icon="🧪", layout="wide")
+st.title("UPRAISE")
+st.caption("Prepared lesson learning and API testing")
 
 
 def clear_session():
@@ -68,7 +67,7 @@ with st.sidebar:
         st.caption("Use your HTTPS mTLS gateway. Certificate files and tokens are session-only.")
     timeout = st.number_input("Request timeout (seconds)", min_value=5, max_value=600, value=180, step=5)
     st.divider()
-    page = st.radio("API tools", ["Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
+    page = st.radio("Pages", ["Learning", "Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
     st.button("Clear session data", on_click=clear_session, width="stretch")
 
 try:
@@ -79,7 +78,7 @@ except ValueError as error:
 
 if (os.environ.get("UPRAISE_LOCAL_TEST_MODE", "false").lower() == "true"
         and base_url == os.environ.get("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")):
-    st.info("Local testing mode is enabled. Leave the bearer token and mTLS fields empty to test A1 through A6.")
+    st.info("Local testing mode is enabled. Leave the bearer token and mTLS fields empty to use learning and API tools.")
 
 if st.session_state.get("target") != base_url:
     for name in ("ingestion_response", "lesson_response", "lesson_result", "lesson_audio", "status_response", "job_action_response", "health_response", "explorer_response", "api_schema", "schema_response", "documents_response", "delete_response"):
@@ -157,7 +156,10 @@ def remember_submission(result):
             st.session_state["auto_refresh"] = False
 
 
-if page == "Ingest material":
+if page == "Learning":
+    render_learning(connection)
+
+elif page == "Ingest material":
     st.subheader("A1 · Ingest teaching material")
     st.caption("POST /v1/documents · PDF processing · 202 response contains document_id and job_id")
     source_mode = st.radio("Document source", ["PDF upload", "Signed Moodle URL"], horizontal=True, key="source_mode")
@@ -228,7 +230,7 @@ elif page == "Generate lesson":
         window = left.number_input("Source window (pages)", min_value=1, max_value=50, value=5, key="a3_window")
         words = right.number_input("Target chunk length (words)", min_value=30, max_value=1000, value=200, key="a3_words")
         level = left.selectbox("Learner level", ["beginner", "intermediate", "advanced"], index=1, key="a3_level")
-        st.caption("Learner level is recorded for now; it does not change the generation style.")
+        st.caption("Learner level controls how the lesson explains the source material.")
         callback = st.text_input("Middleware callback URL (optional)", key="a3_callback",
                                  help="Requires configured outbound mTLS and OAuth. Leave empty for A5 pull.")
         key = st.text_input("Idempotency-Key", key="lesson_key")
@@ -289,6 +291,7 @@ elif page == "Manage material":
             deleted = request(connection, "DELETE", "/v1/documents/" + document_id)
             st.session_state["delete_response"] = deleted
             if deleted.status == 204:
+                st.session_state.pop("learning_state", None)
                 st.session_state.pop("status_response", None)
                 st.session_state["auto_refresh"] = False
                 if course.strip():
@@ -374,6 +377,7 @@ elif page == "Processing status":
     action = st.session_state.get("job_action_response")
     show_response(action)
     if action and action.status == 204:
+        st.session_state.pop("learning_state", None)
         st.caption("Job action completed. Refresh status to see its current state.")
     elif action and isinstance(action.body, dict) and action.body.get("detail") == "JOB_CLEANUP_PENDING":
         st.info("Cancellation is recorded. The worker is finishing its current operation before cleanup. Retry the same action for the final 204 response.")

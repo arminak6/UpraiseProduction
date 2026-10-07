@@ -77,6 +77,34 @@ class LessonRepository(JobRepository):
         with self.connect() as conn:
             return conn.execute("SELECT * FROM lesson_jobs WHERE job_id=%s", (job_id,)).fetchone()
 
+    def list_ready(self, client_id, courses, course_id, limit, offset):
+        # Apply ownership/course/availability filters BEFORE pagination. A8
+        # exposes metadata only; A5 rechecks artifacts and audits playback.
+        filters = ["j.client_id=%s", "j.status='DONE'", "j.cleanup_requested_at IS NULL",
+                   "j.expires_at>clock_timestamp()",
+                   "jsonb_array_length(j.metadata->'document_ids')>0"]
+        values = [client_id]
+        if courses is not None:
+            filters.append("j.metadata->>'course_id'=ANY(%s)")
+            values.append(list(courses))
+        if course_id is not None:
+            filters.append("j.metadata->>'course_id'=%s")
+            values.append(course_id)
+        filters.append("""NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(j.metadata->'document_ids') AS requested(document_id)
+            LEFT JOIN ingestion_jobs AS source ON source.document_id=requested.document_id::uuid
+            WHERE source.document_id IS NULL OR source.client_id<>j.client_id
+                OR source.deletion_requested_at IS NOT NULL OR source.status<>'DONE'
+                OR source.active_attempt IS NULL
+                OR source.metadata->>'course_id' IS DISTINCT FROM j.metadata->>'course_id'
+        )""")
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT j.* FROM lesson_jobs AS j WHERE " + " AND ".join(filters)
+                + " ORDER BY j.created_at DESC,j.job_id DESC LIMIT %s OFFSET %s",
+                [*values, limit, offset],
+            ).fetchall()
+
     def save_prepared_text(self, conn, job_id, chunks, versions):
         """Caller holds the job lease and source locks; commit before any TTS call."""
         for index, (chunk_id, text, source, report, section_index, revisions) in enumerate(chunks):

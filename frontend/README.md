@@ -1,4 +1,4 @@
-# UPRAISE API Testbench
+# UPRAISE Learning and API Testbench
 
 This Streamlit interface is a development/testing tool in frontend/, separate
 from the final product. It sends HTTP requests to the backend and has no direct
@@ -32,9 +32,22 @@ not an automatically loaded file.
 
 ## Tools
 
+- **Learning — A8 + A5**: the default page lists completed lessons whose temporary
+  outputs are still available and whose source documents remain active. Select
+  an available course, then **Start course** for its text and teacher voice.
+  Previous/Next select parts; the audio controls pause/resume; Replay restarts
+  the audio; Finish/Restart and Back to courses control session-only progress.
+  Read aloud can be disabled. The selector includes language, explanation level
+  and creation time so separate generations can be distinguished. It also accepts
+  a job UUID when automatic listing is unavailable.
+  No generation or A6 receipt happens automatically. Each explicit playback action
+  rechecks A5, and changing the backend/authentication clears cached playback.
+  Ready means a DRAFT preview requiring human approval. Expired/acknowledged jobs
+  are excluded: the PostgreSQL text archive does not provide permanent audio playback.
+  See [A8's contract](../backend/docs/a8.md).
 - **Generate lesson — A3**: ordered document UUIDs, lesson/course/activity,
-  output language/Polly voice, configurable page windows, word target and reserved
-  learner level. Optional MW callback requires outbound OAuth/mTLS configuration.
+  output language/Polly voice, configurable page windows, word target and explanation
+  level. Optional MW callback requires outbound OAuth/mTLS configuration.
   Submission returns job_id and remembers A4 Location; the retry key survives
   navigation. Start a new lesson generation to request fresh output.
 - **Lesson result/audio — A5**: on Processing status, fetch DRAFT JSON and
@@ -69,8 +82,8 @@ not an automatically loaded file.
   with query parameters and JSON bodies, including negative tests. Use A1's
   dedicated form for multipart delivery.
 
-A1's JSON remains exactly {"document_id":"..."}. The interface follows the
-existing status URL rather than adding job_id to that JSON. HTTP status,
+A1's JSON contains document_id and job_id. The interface also follows the
+existing Location status URL. HTTP status,
 elapsed time, actual JSON/text and selected response headers are displayed.
 POST is sent only by an explicit submit click; navigation does not resubmit.
 Idempotency-Key survives page changes. Reuse it for a network retry; click
@@ -85,7 +98,7 @@ is always enabled. Requests never automatically follow redirects or send
 credentials to another origin through an A1 status URL.
 
 The user-approved local testing mode is enabled on this workstation through
-ignored root .env. Leave bearer token and mTLS fields empty to test A1/A2/A4/A6.
+ignored root .env. Leave bearer token and mTLS fields empty to use Learning and the API tools.
 The page displays a local-mode notice, and responses confirm the backend mode.
 See ../backend/docs/local-testing.md for setup and return to production settings.
 Production authentication is the default. Without real OAuth/mTLS configuration,
@@ -115,7 +128,7 @@ checks use standard unittest and Streamlit AppTest, without another dependency:
 docker compose run --rm --no-deps -v ./frontend:/workspace:ro frontend python -m unittest discover -s /workspace/tests -v
 ```
 
-The Docker context includes only requirements.txt, app.py and api_client.py;
+The Docker context includes only requirements.txt, app.py, api_client.py and learning.py;
 tests, documents and local credentials are excluded.
 
 References: [Streamlit AppTest](https://docs.streamlit.io/develop/api-reference/app-testing/testing-element-classes),
