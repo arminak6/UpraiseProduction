@@ -122,6 +122,26 @@ class VectorStore:
                 break
         return sorted(result, key=lambda chunk: (chunk["chunk_index"], chunk["chunk_id"]))
 
+    def source_chunks(self, document_id, course_id, token, chunk_ids):
+        scope = self.document_filter(document_id, course_id, token)
+        scope.must.append(models.FieldCondition(key="chunk_id", match=models.MatchAny(any=list(chunk_ids))))
+        points, _ = self.client.scroll(self.collection, scroll_filter=scope, limit=len(chunk_ids),
+                                       with_payload=True, with_vectors=False)
+        return [point.payload for point in points]
+
+    def search_session(self, vector, course_id, documents, *, limit=6):
+        # documents contains authorized (document_id, active_attempt) pairs from PG.
+        # Pairing prevents matching a stale/rejected attempt of another document.
+        if not documents:
+            return []
+        scope = models.Filter(
+            must=[models.FieldCondition(key="course_id", match=models.MatchValue(value=course_id))],
+            should=[self.attempt_filter(document_id, token) for document_id, token in documents],
+        )
+        result = self.client.query_points(self.collection, query=vector, query_filter=scope,
+                                          limit=limit, with_payload=True, with_vectors=False)
+        return [point.payload for point in result.points]
+
     def remove_document(self, document_id, course_id):
         self.purge_inactive_attempts(document_id, course_id)
 

@@ -40,6 +40,15 @@ not an automatically loaded file.
   Read aloud can be disabled. The selector includes language, explanation level
   and creation time so separate generations can be distinguished. It also accepts
   a job UUID when automatic listing is unavailable.
+  **Interrupt / ask teacher** stops lesson audio and opens a question panel for
+  the current part. Enable questions in local preview (or supply the signed
+  Middleware session JWT), then **Ask teacher** sends text or a WAV recording.
+  B1 starts on the first question; later messages reuse that session and B4
+  automatically receives the current chunk. Replies display text, audio and
+  sources; **Retry question** preserves the request ID. **Continue course**
+  rechecks A5 and resumes this part, applying any replay/speed instruction.
+  Playback-position inputs are omitted; Continue replays the current part from
+  its beginning. Expired sessions require an explicit new session.
   No generation or A6 receipt happens automatically. Each explicit playback action
   rechecks A5, and changing the backend/authentication clears cached playback.
   Ready means a DRAFT preview requiring human approval. Expired/acknowledged jobs
@@ -60,7 +69,16 @@ not an automatically loaded file.
   Middleware session JWT in addition to the sidebar service token/mTLS settings;
   it sends no body session/consent claims. Requests only run after explicit clicks.
   The page initializes backend RAM state; Learning remains the separate text/voice
-  player. B2-B6 remain reserved. See [B1](../backend/docs/b1.md).
+  player. B2/B3/B5/B6 remain reserved. See [B1](../backend/docs/b1.md).
+- **Learner interrupt (B4)**: start B1 with Questions consent, load A5 teaching
+  chunks, choose the interrupted chunk, and submit free text or a PCM WAV recording.
+  Displays/plays inline answer text/audio and source references, or displays a
+  player-control instruction for Middleware to apply. Signed requests reuse the
+  B1 session JWT, with manual ID/JWT entry available. Stable request IDs support
+  explicit retries; navigation/reruns never resubmit. Backend RAM restart/expiry
+  ends availability. This separate API test page remains available alongside
+  the integrated interruption panel in Learning.
+  See [B4](../backend/docs/b4.md) for limits, consent and temporary storage.
 - **Lesson result/audio — A5**: on Processing status, fetch DRAFT JSON and
   authenticated chunk audio, play or download the WAV. Download needed artifacts
   before A6 RECEIVED removes the temporary lesson copy. Expiry defaults to 24 hours.
@@ -139,7 +157,7 @@ checks use standard unittest and Streamlit AppTest, without another dependency:
 docker compose run --rm --no-deps -v ./frontend:/workspace:ro frontend python -m unittest discover -s /workspace/tests -v
 ```
 
-The Docker context includes requirements.txt, app.py, api_client.py, learning.py and session_start.py;
+The Docker context includes requirements.txt and the frontend application modules;
 tests, documents and local credentials are excluded.
 
 References: [Streamlit AppTest](https://docs.streamlit.io/develop/api-reference/app-testing/testing-element-classes),

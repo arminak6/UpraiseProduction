@@ -72,3 +72,12 @@ class AuditRepository:
                 VALUES (%s,%s,'session_started',%s) ON CONFLICT(event_id) DO NOTHING""",
                 (event_id, job["job_id"], Jsonb(details)),
             )
+
+    def learner_interrupt(self, job, session_id, request_id, details):
+        event_id = uuid5(NAMESPACE_URL, f"interrupt:{session_id}:{request_id}")
+        with psycopg.connect(self.dsn, connect_timeout=5, options="-c statement_timeout=5000") as conn:
+            conn.execute(
+                """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
+                VALUES (%s,%s,'learner_interrupt',%s) ON CONFLICT(event_id) DO NOTHING""",
+                (event_id, job["job_id"], Jsonb({"session_id": session_id, "request_id": request_id, **details})),
+            )

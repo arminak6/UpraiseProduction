@@ -125,6 +125,11 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(1800, ge=60, le=86400)
     session_max_count: int = Field(10000, ge=1, le=100000)
     session_sweep_seconds: float = Field(30, ge=1, le=60, allow_inf_nan=False)
+    interrupt_max_concurrent: int = Field(4, ge=1, le=32)
+    interrupt_max_audio_bytes: int = Field(6_000_000, ge=100_000, le=12_000_000)
+    interrupt_max_audio_seconds: int = Field(60, ge=1, le=120)
+    interrupt_source_characters: int = Field(24000, ge=2000, le=60000)
+    interrupt_provider_timeout_seconds: int = Field(45, ge=5, le=120)
 
     @property
     def project_root(self) -> Path:

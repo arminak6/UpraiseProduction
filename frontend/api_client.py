@@ -102,7 +102,7 @@ def _tls_context(connection: Connection):
 
 
 def request(connection: Connection, method: str, path: str, *, params=None, json_body=None,
-            fields=None, upload=None, headers=None, timeout=None, transport=None) -> Result:
+            fields=None, upload=None, upload_field="file", headers=None, timeout=None, transport=None) -> Result:
     started = time.monotonic()
     result = Result(method.upper(), path, None, 0)
     try:
@@ -122,7 +122,7 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
         ) as client:
             response = client.request(
                 result.method, base + path, params=params, headers=request_headers,
-                json=json_body, data=fields, files={"file": upload} if upload else None,
+                json=json_body, data=fields, files={upload_field: upload} if upload else None,
             )
         result.status = response.status_code
         result.headers = {
@@ -148,6 +148,8 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
             result.error = "Request timed out. An upload may already be accepted; retry with the same Idempotency-Key."
         elif result.method == "POST" and path == "/v1/sessions":
             result.error = "Request timed out. The session may already be open; use Retry session start to resend the same session request."
+        elif result.method == "POST" and path.endswith("/interrupts"):
+            result.error = "Request timed out. Use Retry interruption with the same request ID; do not submit a new ID while it is running."
         else:
             result.error = "Request timed out. Check the backend and retry."
     except httpx.RequestError:

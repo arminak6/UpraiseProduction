@@ -19,6 +19,7 @@ from upraise_ai.storage.lessons import LessonRepository
 from upraise_ai.storage.sessions import SessionStore
 from upraise_ai.storage.vectors import VectorStore
 from upraise_ai.workflows.documents import DocumentService
+from upraise_ai.workflows.interrupts import InterruptService
 from upraise_ai.workflows.jobs import JobService
 from upraise_ai.workflows.lessons import LessonService
 from upraise_ai.workflows.submission import SubmissionService
@@ -31,6 +32,7 @@ async def lifespan(app):
     app.state.documents = None
     app.state.jobs = None
     app.state.lessons = None
+    app.state.interrupts = None
     app.state.sessions = SessionStore(settings.session_max_count)
     vectors = None
     if settings.jobs_dsn.get_secret_value():
@@ -45,6 +47,7 @@ async def lifespan(app):
             app.state.lessons = LessonService(
                 settings, LessonRepository(settings.jobs_dsn.get_secret_value()), jobs, staging, audit,
             )
+            app.state.interrupts = InterruptService(settings, app.state.lessons, app.state.sessions, vectors)
     async def sweep_sessions():
         while True:
             await asyncio.sleep(settings.session_sweep_seconds)
@@ -65,11 +68,12 @@ async def lifespan(app):
 app = FastAPI(
     title="UPRAISE AI Module",
     version="0.1.0",
-    description="UPRAISE A1 ingestion, A2 material management, A3 draft lessons, A4/A5 jobs, A6 control, A8 ready lessons and B1 lesson start.",
+    description="UPRAISE A1-A6 authoring, A8 ready lessons, B1 session start and B4 learner interruptions.",
     lifespan=lifespan,
 )
 
-app.add_middleware(UploadLimitMiddleware, max_bytes=get_settings().max_pdf_size_mb * 1024**2 + 1024**2)
+app.add_middleware(UploadLimitMiddleware, max_bytes=get_settings().max_pdf_size_mb * 1024**2 + 1024**2,
+                   interrupt_max_bytes=get_settings().interrupt_max_audio_bytes+65536)
 
 
 @app.middleware("http")

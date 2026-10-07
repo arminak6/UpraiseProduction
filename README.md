@@ -1,7 +1,7 @@
 # UPRAISE AI Module
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
-A8 ready-lesson listing and B1 lesson start are implemented.
+A8 ready-lesson listing, B1 lesson start and B4 learner interruption are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -28,8 +28,11 @@ See [B1's temporary sessions, JWT/consent contract and local curl](backend/docs/
 B1 opens process-local learner state for one selected A3 generation; restarts
 clear sessions. Its default 30-minute TTL is capped by lesson/token expiry.
 Local testing allows draft previews; production requires Middleware's signed
-approval assertion. Questions, cognitive load and streaming remain disabled
-until their runtime APIs are implemented. Existing 24-hour lesson retention remains.
+approval assertion. B4 uses LangGraph semantic routing, exact prepared teaching
+text, scoped Qdrant evidence and inline speech. Teaching support uses original
+v2 teacher responses directly; independent evidence checks apply to factual
+course questions. Reply text is the input to its speech; see [B4](backend/docs/b4.md).
+B2/B3/B5/B6 remain reserved. Existing 24-hour lesson retention remains.
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,
 matching the Word specification. A1 retains processor readability/resource limits and
@@ -45,7 +48,7 @@ or guaranteed accuracy. See [source fidelity](backend/docs/a1.md#source-fidelity
 ## Start
 
 Docker Desktop/Linux containers and Compose are required. The ignored root
-aws_credentials.json is mounted read-only into the worker, never baked into
+aws_credentials.json is mounted read-only into the backend and workers, never baked into
 images. It already contains the user-provided AWS settings. A normal AWS
 credential chain is supported by the Python adapter when no credential file
 is configured; adjust the deployment mount when using an IAM role.
@@ -73,6 +76,10 @@ Start it with docker compose --profile tools up --build -d --wait.
 Its default Learning page lists ready lessons through A8. Choose a course and
 select Start course to read its text and play its teacher voice. Previous/Next,
 audio pause/resume, Replay, Finish and Restart control session-only progress.
+**Interrupt / ask teacher** stops the lesson audio and opens a text/WAV question
+panel for the current part. With Questions consent (or the signed session JWT),
+the first message starts B1 and sends B4; later messages reuse the session.
+**Continue course** returns to this part and applies replay/speed instructions.
 All lessons remain drafts requiring human review, and temporary playback expires
 after the configured A5 TTL (24 hours by default).
 It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,

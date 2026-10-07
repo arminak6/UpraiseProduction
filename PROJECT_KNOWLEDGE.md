@@ -2,7 +2,7 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 AI implements A1-A6, A8 ready-lesson listing and B1 lesson start.
+UPRAISE WP7 AI implements A1-A6, A8 listing, B1 session start and B4 interruptions.
 V3 generation applies levels and source-label translation (lesson-v3-a3-8).
 Human approval is external. Finalized text/SSML persists in PostgreSQL;
 A5 JSON/audio is temporary. Streamlit Learning offers course selection,
@@ -10,22 +10,34 @@ text/voice and session-only progress.
 
 ## Architecture and data flow
 
-- FastAPI: /v1/documents (POST/GET/DELETE by ID), POST /v1/lesson-jobs,
-  GET/DELETE /v1/jobs/{job_id}, GET .../result and .../audio/{chunk_id}, /health.
-  MW owns lesson pace and human approval; B1 opens ephemeral learner runtime state. AI retains finalized
-  DRAFT text/SSML in PostgreSQL; Qdrant stores
-  source material only. B2-B6 and other original A/C paths remain reserved.
+- FastAPI exposes documents, lesson-jobs, job/result/audio, sessions and /health.
+  MW owns pace/human approval; PG retains DRAFT text/SSML, Qdrant only sources.
+  B2/B3/B5/B6 and other original A/C paths remain reserved.
 - B1 POST /v1/sessions: sessions:write + exact lesson_job_id. Separate production
   JWT binds client/subject/context/hash/approval; local DRAFT preview is allowed.
-  Consent stays in RAM; B1 omits capabilities. B2-B6 remain reserved.
+  Consent stays in RAM; B1 omits capabilities.
   session_started audit precedes visibility. New201; unchanged retry200 preserves
   state and never extends expiry.
+- B4 POST /v1/sessions/{id}/interrupts: request-local LangGraph classify/retrieve/
+  respond; no checkpoints/tracing. Exact PG teaching text + current Qdrant evidence;
+  questions always search paired document/attempt filters with pinned versions.
+  Native v2 teacher.respond/source/dialogue formatting + exact PG context. Support
+  returns the teacher turn directly (grounded=null, contextual source references).
+  Course questions retain reviewer/quote/claim/page checks; source-language queries.
+  JSON text or RAM-only WAV -> EU Transcribe; questions consent/JWT required.
+  Inline WAV/SSML/visemes or player instruction; TTS failure retains verified text.
+  Backend needs the read-only AWS credential mount, alongside A1/A3 workers.
+  Content-free audit; one turn/session, default4 concurrent, bounded history,
+  32MiB response cache, max100 messages/session; expiry never renewed.
 - A8 GET /v1/lesson-jobs requires jobs:read. Client/course/active-source/DONE/
   unexpired/no-cleanup filters precede pagination; returns DRAFT metadata only.
-- learning.py uses A8/A5; session_start.py adds an A8/B1 test page with explicit
-  start/retry, manual context, local consent and masked signed-JWT mode.
-  One-part text/WAV playback/navigation rechecks A5;
-  expiry/identity changes and local A2/A6 clear caches. No automatic A3/A6/TTL extension.
+- Frontend Learning uses A8/A5 with expiry/identity checks and cache invalidation.
+  B1 page offers explicit start/retry, local consent and signed JWT. B4 page loads
+  A5 chunks, sends text/WAV and retries stable IDs. Learning's Interrupt button
+  removes lesson audio; first explicit message starts B1 with consent/JWT then
+  B4 on the current chunk. Continue rechecks A5 and applies replay/speed instructions.
+  No position input; Continue replays the current part. Sessions survive navigation,
+  not expiry.
 - INGRESS enforces OAuth/client/course/scopes/mTLS; no proxy headers. Explicit
   development + local_test_mode grants authoring/B1 preview to private/loopback peers.
 - A1 commits bytes/job, returns202 document_id+job_id/A4 Location. A5 uses A3
@@ -36,9 +48,9 @@ text/voice and session-only progress.
 - A3 returns202 job_id, awaits A1 and reads active chunks in source order.
   Cross-window chunks are assigned once with all pages; defaults5pages/~200words,
   no silent truncation and unknown IDs rejected.
-- A3 uses copied V3 explain -> review_explanation -> finalize_explanation, with final
-  citation/math checks and one editor revision. Reports retain pre-edit/source/speech
-  findings; status stays DRAFT. No extra PDF judge or post-edit source review.
+- A3 V3 explain -> review_explanation -> finalize_explanation: citation/math checks,
+  one editor revision. Reports retain pre-edit/source/speech findings; DRAFT stays.
+  No extra PDF judge or post-edit source review.
 - A3 generates in declared A1 language; differing primary tags trigger translation/
   review before splitting/PG/target speech (A4 TRANSLATE). Notation/citations/code/
   pages/order remain immutable. Checkpoints avoid repeats; parser never repairs
@@ -68,34 +80,30 @@ text/voice and session-only progress.
 ## Important paths
 
 - FUTURE_UPDATES.md: ignored backlog: worker concurrency, DOCX/CSV, A7, runtime scaling.
-- README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,a8,b1,
+- README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,a8,b1,b4,
   local-testing}.md: maintained contracts; api-baseline.md preserves draft decisions.
 - backend/src/upraise_ai/: api/, schemas/, guards/, main.py expose/wire APIs;
   core/config.py owns signatures, budgets, providers and OAuth/TLS.
-- api/runtime/sessions.py, schemas/sessions.py, guards/session_jwt.py,
-  storage/sessions.py, workflows/sessions.py and tests/test_b1*.py: B1 contract/state.
+- api/runtime/, schemas/, workflows/{sessions,interrupts}.py, storage/sessions.py,
+  guards/session_jwt.py, services/interrupt_{models,stt}.py: B1/B4 runtime.
 - services/pdf/ and ingestion helpers: A1. services/lesson_*.py: A3/A5;
   services/v3/ retains original code, provenance README and SHA origin.json.
 - storage/, workflows/, workers/: persistence, acceptance/control, supervised work.
-- frontend/{app,api_client,learning,session_start}.py: Learning and A1-A6/B1 testbench;
-  frontend/tests/: AppTest/fake HTTP, including player identity/expiry/navigation.
-  backend/tests/test_a8_integration.py: scoped catalog/availability/pagination.
+- frontend/{app,api_client,learning,learning_interrupt,session_start,learner_interrupt}.py: UI;
+  frontend/tests/: AppTest/fake HTTP. backend/tests/test_{a8,b1,b4}*: runtime/catalog.
 - backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned build/math.
-- callback_tls/README.md: ignored read-only secret mounts; credentials never logged/built.
+- callback_tls/README.md: ignored read-only secret mounts; AWS file mounts in backend/workers.
 - Legacy V3: ../Uprise/v2/backend/learning/v1/.
 - backend/tests/: generation, translation, speech, archive, audit/TTL/locks; AWS mocked.
-- codex_helper/: ignored reports/validation logs; validate-a3/a5/b1.ps1 uses disposable services.
+- codex_helper/: ignored reports/logs; validate-{a3,a5,b1,b4}.ps1 uses disposable services.
 
 ## Commands
 
 From root, Docker Desktop Linux containers:
 
 - docker compose config --quiet
-- docker compose build backend
-- docker compose up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
-- docker compose logs -f backend worker lesson-worker lesson-delivery
-- Start only UI: docker compose --profile tools up --build -d --no-deps --wait frontend
-  Tests: frontend/README.md. Plain compose up skips the tools-profile UI.
+- UI: docker compose --profile tools up --build -d --no-deps --wait frontend
+  Tests: frontend/README.md; plain compose up skips UI.
 - API/UI-only deploy: docker compose build backend frontend; then
   docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend frontend
 
@@ -112,16 +120,16 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   PDF evidence renders with pypdfium2.
 - Polly neural:16kHz mono16-bit WAV; same-SSML visemes offset by PCM duration.
   Request limits:2800 billed/5800 total SSML characters.
-- Streamlit1.64.0/httpx0.28.1; PostgreSQL17.11/Qdrant1.19.1; no Redis.
+- LangGraph1.2.14/amazon-transcribe0.6.4; audio STT needs transcribe:StartStreamTranscription.
+  Streamlit1.64.0/httpx0.28.1; PostgreSQL17.11/Qdrant1.19.1; no Redis.
   Deployment needs credentials, gateway claims, MW TLS/IdP and model/IAM access.
 
 ## Conventions and invariants
 
-- B1 uses a bounded thread-safe dictionary (default10000 sessions); TTL1800s capped
-  by lesson/JWT expiry, swept every30s. Restart clears state; no session DB/Redis.
-  Keep one backend process; shared state and activity renewal are future work.
-  Frontend player progress is session-only; B1 is tested on its separate page.
-  Source/drafts/images are untrusted. Local auth preserves callback security.
+- B1 RAM dictionary: max10000 sessions, TTL1800s capped by lesson/JWT, sweep30s.
+  Restart clears state; one backend process, no Redis/DB or activity renewal.
+  Frontend progress is session-only. Source/drafts/images are untrusted;
+  local auth preserves callback security.
 - Volumes: upraise_{qdrant_data,postgres_data,ingestion_data,model_cache}.
   Source content_hash is opaque caller metadata; source_hash is actual SHA-256.
   PDF defaults100MB/500pages. Lesson UUIDs are job-specific; indexes zero-based;
@@ -140,8 +148,8 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 - A1 artifact retention defaults off; A3 TTL is independent. Job/audit history
   survives. External artifact locks are never unlinked. A6 requires cleanup/audit
   before204; busy writers503 with recovery.
-- Scopes: documents:read/write, lessons:write, jobs:read/write, sessions:write. Inaccessible IDs404;
-  key/action conflicts409, malformed422. A1 response contains document_id and job_id.
+- Scopes: documents:read/write, lessons:write, jobs:read/write, sessions:write.
+  Inaccessible404; conflicts409; malformed422.
 
 ## Known limitations and next work
 
@@ -155,31 +163,35 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   U+0008 invalidated SSML; original V3 returns no-audio warnings, A3 fails. See
   beginner-retry-diagnosis.md/original-speech-comparison.md in codex_helper/.
   AWS errors lose provider codes; no post-edit source review; MW callbacks unverified.
-- Production gateway/Moodle, HA/backups, retention/audit erasure, orphan cleanup
-  and cross-host artifact storage remain open; other APIs/learner RAG are reserved.
-- Archive-read/erasure APIs remain undefined; job status identifies partial archives.
-  FUTURE_UPDATES.md covers concurrency, DOCX/CSV and A7.
-- Learning excludes expired/acknowledged outputs; archive playback needs future
-  design. DRAFT/source/speech defects remain. B1 only; learner Q&A/B2-B6 are reserved.
+- Production gateway/Moodle, HA/backups, retention/erasure, orphan cleanup and
+  cross-host storage remain open. No archive-read API; status identifies partial
+  archives. FUTURE_UPDATES.md covers concurrency, DOCX/CSV and A7.
+- Learning excludes expired/acknowledged outputs. DRAFT/source/speech defects remain.
+  B4 evidence checks do not certify source correctness. Synchronous inline JSON,
+  no 2-second/streaming guarantee; WAV max60s/6MB. Real Bedrock/Polly works on
+  invented Italian material. User's real Italian support test returned complete
+  text/WAV; sources still require review. Agent inspected saved files locally;
+  earlier automatic review rejected agent-initiated real-course content egress.
   Original v2 Learning V1 uses PG lectures/disk voice/SQLite through Python calls;
   comparison: codex_helper/frontend-learning-comparison.md.
 
 ## Recent decisions
 
-- 2026-10-07: User requested simple frontend course learning and explicitly named
-  its approved read-only ready-lesson list API A8. Existing A1-A6 contracts/TTL remain.
-- 2026-10-07: User approved B1 with process-local memory and current 24h playback.
-  No Redis or permanent audio/archive playback added. See docs/b1.md for JWT claims.
+- 2026-10-07: User approved A8/B1/B4 and reaffirmed original v2 teaching support.
+  Current 24h playback, external approval and RAM-only learner content remain.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-07: Removed B1 capabilities from schema/workflow/UI; updated contract/docs.
-68 B1 backend and35 frontend checks passed, plus Ruff/Compose/diff checks.
-Backend/frontend rebuilt/redeployed. Live API and Streamlit AppTest verified Italian
-new201/retry200, no capabilities in output/OpenAPI/display, AI notice and one audit;
-navigation did not resubmit. Logs: codex_helper/b1-capabilities-*. Consent tests pass.
-Prior backend full534 and A8 text/WAV checks passed. No paid model/TTS calls;
-CUA setup unavailable. Italian job47194bc7 expires17:18:25UTC today; source79fd4c5e
-DONE/en, generation identity lesson-v3-a3-8-1658e1bb2509 unchanged.
+2026-10-07: Compared original v2 graph/teacher/frontend speech. Restored native
+teacher.respond for support; independent verification remains for factual RAG
+questions.35 B4 tests passed on disposable PG/Qdrant; Ruff/Compose/diff passed.
+Deployed backend passed real EU Bedrock/Polly with invented Italian material:
+exact response text fed speech, valid341804-byte WAV/134 visemes, no warnings.
+No real project course/learner content sent by agent. Backend restart clears B1.
+Logs/helpers: codex_helper/b4-v2-*. Prior49 frontend/567 backend tests passed.
+User's saved b4-reply.json/WAV checked locally: complete1249-character Italian
+answer, valid84.056s mono16kHz WAV matching JSON, SSML/1052 visemes consistent.
+SOURCE_REQUIRES_REVIEW and grounded=null; support is not independently verified.
+Windows PowerShell5.1 needs Get-Content -Raw -Encoding UTF8 for correct accents.

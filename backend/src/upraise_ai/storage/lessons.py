@@ -145,6 +145,13 @@ class LessonRepository(JobRepository):
                 "SELECT * FROM prepared_lesson_chunks WHERE job_id=%s ORDER BY chunk_index", (job_id,)
             ).fetchall()
 
+    def prepared_chunk(self, job_id, chunk_id):
+        """B4 calls this only after authorizing the exact session/job/chunk."""
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM prepared_lesson_chunks WHERE job_id=%s AND chunk_id=%s", (job_id, chunk_id)
+            ).fetchone()
+
     @contextmanager
     def job_transaction(self, job_id):
         with self.connect() as conn:

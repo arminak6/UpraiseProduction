@@ -36,7 +36,16 @@ B1 was approved on 2026-10-07 with process-local temporary state and the existin
 24-hour lesson-output retention. Its implemented contract adds an exact
 `lesson_job_id`, verified Middleware approval/consent assertion and local draft
 preview. The user approved removing `capabilities` from B1's response on
-2026-10-07. See [B1's contract](b1.md). B2-B6 remain reserved.
+2026-10-07. See [B1's contract](b1.md).
+
+B4 was approved on 2026-10-07 using original v2-style LangGraph semantic
+classify/retrieve/respond, with one output shape instead of public REPEAT/ANSWER
+categories. Exact PG teaching context accompanies scoped Qdrant evidence; audio
+is inline and temporary, and player controls remain Middleware responsibilities.
+User reaffirmed v2 behavior for teaching support: native teacher response text
+feeds speech directly; independent answer verification remains for course questions.
+See [B4's contract](b4.md). B2/B3/B5/B6 remain reserved. The following table keeps
+the original Word inventory for reference.
 
 ## B runtime APIs
 
@@ -90,13 +99,13 @@ A1 decisions.
 
 | Topic | Difference or unclear detail | Scaffold treatment |
 | --- | --- | --- |
-| Interrupt intents | Diagram's Agent 2 says ask/repeat/continue/pause/stop. Word B4 currently classifies question/repeat and returns REPEAT/ANSWER; open point 8 only proposes adding CONTINUE/STOP | Keep original B3/B4/B5 responsibilities. No new intent, pause API or reply type |
+| Interrupt intents | Diagram's Agent 2 says ask/repeat/continue/pause/stop. Word B4 classifies question/repeat and returns REPEAT/ANSWER | On 2026-10-07 user approved open-ended V2-style semantic B4 with one response shape and optional bounded player instructions. B3/B5 responsibilities remain reserved; no session-end API was added |
 | Temporary lesson output | Diagram says no lesson storage inside the module. Word A3/A5/A6 allow a temporary local result/audio copy until acknowledgement/TTL for pull mode | On 2026-10-05 the user approved A3/A5, temporary output until explicit A6 receipt or configurable 24-hour TTL. On 2026-10-06 the user requested permanent retention of finalized lesson text as in Uprise/v2. Text/SSML and provenance/review/versions now survive cleanup in PostgreSQL; A5 JSON/audio remain temporary and audit stays content-free |
 | Job/checkpoint state | Word open point 4 suggests Redis or a job table, to check against audit-only PostgreSQL; diagram shows no job store | User approved durable PostgreSQL ingestion jobs on 2026-10-02. Separate worker, database roles and processing artifacts implement recovery; no learner-session checkpoints |
 | Placeholder names | Word overview uses `{id}` for A2 and B2-B6; detailed sections use `{document_id}` and `{session_id}` | User's 2026-10-02 A2 request explicitly uses document_id; implemented that detailed form. Runtime placeholders remain reserved |
 | Telemetry path | Diagram draws Middleware telemetry. Word B6 leaves direct versus Middleware routing open and suggests a possible `/v1/sessions/{session_id}/telemetry/ws` | Preserve original REST B6. WebSocket is an open possibility, not an added contract |
-| Spoken answer transport | Word gives SSE event order for B4 while common conventions/open points leave SSE versus WebSocket unresolved | No streaming transport selected |
-| Runtime providers | Word A3/B4 refer to AWS EU-region speech/LLM. The scaffold prompt leaves providers undecided; diagram's Speech Services is generic | A3 now uses the user-approved original V3 GPT OSS/Qwen teacher workflow and EU-region Polly audio/visemes. B4 providers remain deferred |
+| Spoken answer transport | Word gives SSE event order for B4 while common conventions/open points leave SSE versus WebSocket unresolved | User approved initial synchronous B4 response with inline temporary audio on 2026-10-07; streaming remains future work |
+| Runtime providers | Word A3/B4 refer to AWS EU-region speech/LLM. The scaffold prompt leaves providers undecided; diagram's Speech Services is generic | A3 uses original V3 GPT OSS/Qwen and EU-region Polly. B4 reuses those models/speech plus Titan retrieval and in-memory Transcribe Streaming |
 | Audit scope | Common convention says every API ends in AUDIT, but A2 lists audit for delete only, A4 omits an audit step, and B6 says no data are persisted | A1 lifecycle and A2 deletion audit are implemented; A2 list has no audit per the explicit request. Broader API/read/rejection audit scope and retention need clarification |
 | Liveness payload | Word defines C1 purpose/status but no `/health` JSON schema | Scaffold returns `{"status":"alive"}` with 200, without claiming integration or AI readiness |
 | A1 enrichment | Earlier Word A1 overview says LLM=No; old extraction uses generative Nova math/figure enrichment | User explicitly approved the old pipeline including Nova on 2026-10-02; applies to A1 extraction only |

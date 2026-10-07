@@ -56,8 +56,19 @@ services:
       UPRAISE_SESSION_TTL_SECONDS: ${UPRAISE_SESSION_TTL_SECONDS:-1800}
       UPRAISE_SESSION_MAX_COUNT: ${UPRAISE_SESSION_MAX_COUNT:-10000}
       UPRAISE_SESSION_SWEEP_SECONDS: ${UPRAISE_SESSION_SWEEP_SECONDS:-30}
+      UPRAISE_INTERRUPT_MAX_CONCURRENT: ${UPRAISE_INTERRUPT_MAX_CONCURRENT:-4}
+      UPRAISE_INTERRUPT_MAX_AUDIO_BYTES: ${UPRAISE_INTERRUPT_MAX_AUDIO_BYTES:-6000000}
+      UPRAISE_INTERRUPT_MAX_AUDIO_SECONDS: ${UPRAISE_INTERRUPT_MAX_AUDIO_SECONDS:-60}
+      UPRAISE_INTERRUPT_SOURCE_CHARACTERS: ${UPRAISE_INTERRUPT_SOURCE_CHARACTERS:-24000}
+      UPRAISE_INTERRUPT_PROVIDER_TIMEOUT_SECONDS: ${UPRAISE_INTERRUPT_PROVIDER_TIMEOUT_SECONDS:-45}
     volumes:
       - ingestion_data:/data/ingestion
+      - type: bind
+        source: ./aws_credentials.json
+        target: /run/secrets/aws_credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       qdrant:
         condition: service_healthy

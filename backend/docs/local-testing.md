@@ -42,9 +42,13 @@ displays that confirmation with each response. Health JSON stays unchanged.
 Changing the Streamlit backend URL does not enable local mode on that server.
 
 B1 `POST /v1/sessions` also supports JWT-free local DRAFT previews, with optional
-body session UUID/consent simulation. Its response advertises disabled questions,
-cognitive load and streaming until the corresponding B APIs exist. See
-[B1's one-line curl and lifecycle](b1.md). The Streamlit Learning player remains A8/A5.
+body session UUID/consent simulation. Its response omits capabilities;
+cognitive-load and streaming APIs remain reserved. See
+[B1's one-line curl and lifecycle](b1.md). B4 additionally requires Questions
+consent on that session and an exact chunk ID from A5; the dedicated frontend
+page tests text/WAV interruptions. Learning also offers **Interrupt / ask teacher**
+with automatic current-chunk selection and an integrated B1/B4 question panel.
+See [B4](b4.md).
 
 ## Production/default authentication
 

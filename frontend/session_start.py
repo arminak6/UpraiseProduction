@@ -85,7 +85,7 @@ def render_session_start(connection, show_response, *, local_testing=False):
                 consent.append("questions")
             if st.checkbox("Telemetry consent", key="b1_field_telemetry"):
                 consent.append("telemetry")
-        st.caption("Questions, cognitive load and streaming remain disabled until their APIs are implemented.")
+        st.caption("Questions consent enables B4 learner interruptions. Cognitive-load APIs remain reserved.")
     else:
         token = st.text_input("Middleware session JWT", type="password", key="b1_field_jwt",
                               help="Separate from the sidebar service bearer token. Middleware signs session, consent and approval claims.").strip()
