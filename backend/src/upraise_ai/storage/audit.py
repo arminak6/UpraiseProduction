@@ -62,3 +62,13 @@ class AuditRepository:
                 VALUES (%s,%s,%s,%s)""",
                 (uuid4(), job["job_id"], event_type, Jsonb(details)),
             )
+
+    def session_started(self, job, event_id, details):
+        # Pseudonymous session UUID + content-free version metadata only. No JWT,
+        # learner identity, chat, telemetry or lesson text is persisted.
+        with psycopg.connect(self.dsn, connect_timeout=5, options="-c statement_timeout=5000") as conn:
+            conn.execute(
+                """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
+                VALUES (%s,%s,'session_started',%s) ON CONFLICT(event_id) DO NOTHING""",
+                (event_id, job["job_id"], Jsonb(details)),
+            )

@@ -1,6 +1,7 @@
 # UPRAISE AI Module
 
-A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control and A8 ready-lesson listing are implemented.
+A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
+A8 ready-lesson listing and B1 lesson start are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -23,6 +24,12 @@ See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
 [A5 pull downloads, auditing and TTL](backend/docs/a5.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
+See [B1's temporary sessions, JWT/consent contract and local curl](backend/docs/b1.md).
+B1 opens process-local learner state for one selected A3 generation; restarts
+clear sessions. Its default 30-minute TTL is capped by lesson/token expiry.
+Local testing allows draft previews; production requires Middleware's signed
+approval assertion. Questions, cognitive load and streaming remain disabled
+until their runtime APIs are implemented. Existing 24-hour lesson retention remains.
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,
 matching the Word specification. A1 retains processor readability/resource limits and
@@ -72,6 +79,10 @@ It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,
 A4 status polling, A5 downloads, A6 job actions, health and a general API
 request panel. Enter the real OAuth token and HTTPS mTLS gateway credentials
 in its sidebar for authenticated requests. See [frontend/README.md](frontend/README.md).
+**Start session (B1)** lets you choose a prepared lesson, open/retry its backend
+session and inspect its session ID, AI notice, language/level and expiry. Local
+preview works without a JWT; signed mode has a separate Middleware session JWT
+field. The Learning page remains the text/voice player.
 
 Local Streamlit testing is enabled on this workstation through the ignored root
 .env (environment=development, local_test_mode=true). Leave token/certificate

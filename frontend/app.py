@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import streamlit as st
 from api_client import Connection, normalize_base_url, request, status_path
 from learning import render_learning
+from session_start import render_session_start
 
 st.set_page_config(page_title="UPRAISE", page_icon="🧪", layout="wide")
 st.title("UPRAISE")
@@ -67,7 +68,7 @@ with st.sidebar:
         st.caption("Use your HTTPS mTLS gateway. Certificate files and tokens are session-only.")
     timeout = st.number_input("Request timeout (seconds)", min_value=5, max_value=600, value=180, step=5)
     st.divider()
-    page = st.radio("Pages", ["Learning", "Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
+    page = st.radio("Pages", ["Learning", "Start session (B1)", "Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
     st.button("Clear session data", on_click=clear_session, width="stretch")
 
 try:
@@ -76,8 +77,9 @@ except ValueError as error:
     st.error(str(error))
     st.stop()
 
-if (os.environ.get("UPRAISE_LOCAL_TEST_MODE", "false").lower() == "true"
-        and base_url == os.environ.get("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")):
+local_testing = (os.environ.get("UPRAISE_LOCAL_TEST_MODE", "false").lower() == "true"
+                 and base_url == os.environ.get("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/"))
+if local_testing:
     st.info("Local testing mode is enabled. Leave the bearer token and mTLS fields empty to use learning and API tools.")
 
 if st.session_state.get("target") != base_url:
@@ -102,6 +104,9 @@ for name in ("submission_key", "course_id", "activity_id", "language", "source_r
         st.session_state[name] = st.session_state[name]
 for name, default in {"language": "en", "mime": "application/pdf", "fill_hash": True}.items():
     st.session_state.setdefault(name, default)
+for name in list(st.session_state):
+    if name.startswith("b1_field_"):
+        st.session_state[name] = st.session_state[name]
 
 connection = Connection(
     base_url=base_url, token=token, certificate=certificate_bytes(cert),
@@ -158,6 +163,9 @@ def remember_submission(result):
 
 if page == "Learning":
     render_learning(connection)
+
+elif page == "Start session (B1)":
+    render_session_start(connection, show_response, local_testing=local_testing)
 
 elif page == "Ingest material":
     st.subheader("A1 · Ingest teaching material")
@@ -292,6 +300,7 @@ elif page == "Manage material":
             st.session_state["delete_response"] = deleted
             if deleted.status == 204:
                 st.session_state.pop("learning_state", None)
+                st.session_state.pop("b1_state", None)
                 st.session_state.pop("status_response", None)
                 st.session_state["auto_refresh"] = False
                 if course.strip():
@@ -378,6 +387,7 @@ elif page == "Processing status":
     show_response(action)
     if action and action.status == 204:
         st.session_state.pop("learning_state", None)
+        st.session_state.pop("b1_state", None)
         st.caption("Job action completed. Refresh status to see its current state.")
     elif action and isinstance(action.body, dict) and action.body.get("detail") == "JOB_CLEANUP_PENDING":
         st.info("Cancellation is recorded. The worker is finishing its current operation before cleanup. Retry the same action for the final 204 response.")

@@ -30,7 +30,7 @@ apply. AWS/PDF extraction, PostgreSQL, Qdrant and audit run normally.
 
 The backend assigns the fixed `local-test-client` identity, allows any course ID
 entered for these tests, and grants only documents:read, documents:write,
-lessons:write, jobs:read and jobs:write. Client ownership remains enforced: local mode does not expose or
+lessons:write, jobs:read, jobs:write and sessions:write. Client ownership remains enforced: local mode does not expose or
 delete documents belonging to another Middleware client. Requests must arrive
 from a loopback/private network peer (including the Compose frontend container),
 using the actual socket address, not forwarded headers. The existing API and
@@ -40,6 +40,11 @@ Streamlit displays a local testing notice for its configured backend. Actual
 backend responses include `X-UPRAISE-Auth-Mode: local-test`; the interface also
 displays that confirmation with each response. Health JSON stays unchanged.
 Changing the Streamlit backend URL does not enable local mode on that server.
+
+B1 `POST /v1/sessions` also supports JWT-free local DRAFT previews, with optional
+body session UUID/consent simulation. Its response advertises disabled questions,
+cognitive load and streaming until the corresponding B APIs exist. See
+[B1's one-line curl and lifecycle](b1.md). The Streamlit Learning player remains A8/A5.
 
 ## Production/default authentication
 

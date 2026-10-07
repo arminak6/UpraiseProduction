@@ -146,6 +146,8 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
             result.error = "Request timed out. Deletion may have completed; refresh the list or retry the same document ID."
         elif result.method == "POST" and path in {"/v1/documents", "/v1/lesson-jobs"}:
             result.error = "Request timed out. An upload may already be accepted; retry with the same Idempotency-Key."
+        elif result.method == "POST" and path == "/v1/sessions":
+            result.error = "Request timed out. The session may already be open; use Retry session start to resend the same session request."
         else:
             result.error = "Request timed out. Check the backend and retry."
     except httpx.RequestError:

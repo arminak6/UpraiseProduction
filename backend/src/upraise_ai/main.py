@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 import psycopg
 from fastapi import FastAPI
@@ -15,6 +16,7 @@ from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
 from upraise_ai.storage.lessons import LessonRepository
+from upraise_ai.storage.sessions import SessionStore
 from upraise_ai.storage.vectors import VectorStore
 from upraise_ai.workflows.documents import DocumentService
 from upraise_ai.workflows.jobs import JobService
@@ -29,6 +31,7 @@ async def lifespan(app):
     app.state.documents = None
     app.state.jobs = None
     app.state.lessons = None
+    app.state.sessions = SessionStore(settings.session_max_count)
     vectors = None
     if settings.jobs_dsn.get_secret_value():
         jobs = JobRepository(settings.jobs_dsn.get_secret_value())
@@ -42,9 +45,19 @@ async def lifespan(app):
             app.state.lessons = LessonService(
                 settings, LessonRepository(settings.jobs_dsn.get_secret_value()), jobs, staging, audit,
             )
+    async def sweep_sessions():
+        while True:
+            await asyncio.sleep(settings.session_sweep_seconds)
+            app.state.sessions.prune()
+
+    sweeper = asyncio.create_task(sweep_sessions())
     try:
         yield
     finally:
+        sweeper.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper
+        app.state.sessions.clear()
         if vectors:
             vectors.close()
 
@@ -52,7 +65,7 @@ async def lifespan(app):
 app = FastAPI(
     title="UPRAISE AI Module",
     version="0.1.0",
-    description="UPRAISE A1 ingestion, A2 material management, A3 draft lessons, A4/A5 jobs, A6 control and A8 ready lessons.",
+    description="UPRAISE A1 ingestion, A2 material management, A3 draft lessons, A4/A5 jobs, A6 control, A8 ready lessons and B1 lesson start.",
     lifespan=lifespan,
 )
 

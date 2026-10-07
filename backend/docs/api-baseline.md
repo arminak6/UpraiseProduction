@@ -6,9 +6,9 @@ conversation is context. References remain drafts; changes require an explicit
 project decision. The inventory below preserves the original Word baseline;
 the differences table records explicit implementation decisions separately.
 
-C1 `GET /health`, A1 `POST /v1/documents`, A2 list/delete and A4 `GET /v1/jobs/{job_id}` are
-implemented, together with A3 lesson generation and A5 result/audio. Other endpoints
-remain reserved for their original responsibility. A3/A5's approved contract is in `a3.md`.
+C1 `GET /health`, A1-A6, A8 ready-lesson listing and B1 lesson start are implemented.
+Other endpoints remain reserved for their original responsibility. A3/A5's approved
+contract is in `a3.md`; B1's integration details are in `b1.md`.
 A/B/C grouping is preserved. The original Word was supplied again and checked
 directly on 2026-10-06; this inventory preserves its draft contract. Current
 A1 wire details and approved extensions are in `a1.md` and `a1-design.md`;
@@ -31,6 +31,12 @@ the user-requested A2 contract and operational interpretation are in `a2.md`.
 A8 is a user-approved extension dated 2026-10-07, separate from the original
 Word inventory: `GET /v1/lesson-jobs` lists ready generated lessons for frontend
 selection. See [A8's contract](a8.md). A7 remains reserved as above.
+
+B1 was approved on 2026-10-07 with process-local temporary state and the existing
+24-hour lesson-output retention. Its implemented contract adds an exact
+`lesson_job_id`, verified Middleware approval/consent assertion and local draft
+preview. The user approved removing `capabilities` from B1's response on
+2026-10-07. See [B1's contract](b1.md). B2-B6 remain reserved.
 
 ## B runtime APIs
 

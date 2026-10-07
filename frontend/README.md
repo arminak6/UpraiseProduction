@@ -50,6 +50,17 @@ not an automatically loaded file.
   level. Optional MW callback requires outbound OAuth/mTLS configuration.
   Submission returns job_id and remembers A4 Location; the retry key survives
   navigation. Start a new lesson generation to request fresh output.
+- **Start session (B1)**: choose an available A8 lesson, then **Start session**.
+  Displays the B1 HTTP response, session UUID, AI notice, language/level
+  and expiry. **Retry session start** reuses the same local UUID
+  and input; **New local session** prepares a fresh UUID without sending a request.
+  Selection/consent/credentials changes clear the previous response. Manual lesson
+  details work when catalog access is unavailable. Local preview allows optional
+  questions/telemetry consent simulation. Signed mode accepts a password-masked
+  Middleware session JWT in addition to the sidebar service token/mTLS settings;
+  it sends no body session/consent claims. Requests only run after explicit clicks.
+  The page initializes backend RAM state; Learning remains the separate text/voice
+  player. B2-B6 remain reserved. See [B1](../backend/docs/b1.md).
 - **Lesson result/audio — A5**: on Processing status, fetch DRAFT JSON and
   authenticated chunk audio, play or download the WAV. Download needed artifacts
   before A6 RECEIVED removes the temporary lesson copy. Expiry defaults to 24 hours.
@@ -128,7 +139,7 @@ checks use standard unittest and Streamlit AppTest, without another dependency:
 docker compose run --rm --no-deps -v ./frontend:/workspace:ro frontend python -m unittest discover -s /workspace/tests -v
 ```
 
-The Docker context includes only requirements.txt, app.py, api_client.py and learning.py;
+The Docker context includes requirements.txt, app.py, api_client.py, learning.py and session_start.py;
 tests, documents and local credentials are excluded.
 
 References: [Streamlit AppTest](https://docs.streamlit.io/develop/api-reference/app-testing/testing-element-classes),

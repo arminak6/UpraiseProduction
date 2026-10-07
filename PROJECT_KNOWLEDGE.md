@@ -2,49 +2,52 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 AI implements A1 ingestion, A2 material management, A3 draft lessons,
-A4 status, A5 result/audio, A6 cancellation/receipt and A8 ready-lesson listing. Native V3 teacher/speech
-applies explanation levels and source-label-based translation (lesson-v3-a3-8). Human approval remains
-external. Finalized text/SSML persists in PostgreSQL; A5 JSON/audio is temporary.
-The optional frontend now opens on Learning: select an available lesson, start,
-read its text and play teacher voice; progress stays in the Streamlit session.
+UPRAISE WP7 AI implements A1-A6, A8 ready-lesson listing and B1 lesson start.
+V3 generation applies levels and source-label translation (lesson-v3-a3-8).
+Human approval is external. Finalized text/SSML persists in PostgreSQL;
+A5 JSON/audio is temporary. Streamlit Learning offers course selection,
+text/voice and session-only progress.
 
 ## Architecture and data flow
 
 - FastAPI: /v1/documents (POST/GET/DELETE by ID), POST /v1/lesson-jobs,
   GET/DELETE /v1/jobs/{job_id}, GET .../result and .../audio/{chunk_id}, /health.
-  MW owns lesson pace, learner state and human approval. AI also retains finalized
+  MW owns lesson pace and human approval; B1 opens ephemeral learner runtime state. AI retains finalized
   DRAFT text/SSML in PostgreSQL; Qdrant stores
-  source material only. Other original A/B/C paths remain reserved.
+  source material only. B2-B6 and other original A/C paths remain reserved.
+- B1 POST /v1/sessions: sessions:write + exact lesson_job_id. Separate production
+  JWT binds client/subject/context/hash/approval; local DRAFT preview is allowed.
+  Consent stays in RAM; B1 omits capabilities. B2-B6 remain reserved.
+  session_started audit precedes visibility. New201; unchanged retry200 preserves
+  state and never extends expiry.
 - A8 GET /v1/lesson-jobs requires jobs:read. Client/course/active-source/DONE/
   unexpired/no-cleanup filters precede pagination; returns DRAFT metadata only.
-- learning.py uses A8/A5 only. One-part text/WAV playback/navigation rechecks A5;
+- learning.py uses A8/A5; session_start.py adds an A8/B1 test page with explicit
+  start/retry, manual context, local consent and masked signed-JWT mode.
+  One-part text/WAV playback/navigation rechecks A5;
   expiry/identity changes and local A2/A6 clear caches. No automatic A3/A6/TTL extension.
 - INGRESS enforces OAuth/client/course/scopes/mTLS; no proxy headers. Explicit
-  development + local_test_mode grants authoring only to real private/loopback peers.
+  development + local_test_mode grants authoring/B1 preview to private/loopback peers.
 - A1 commits bytes/job, returns202 document_id+job_id/A4 Location. A5 uses A3
   job_id. User removed hash/origin guard scans.
 - Ingestion: Docling/OCR -> Nova candidates/source comparison -> quality-aware
   chunks -> Titan -> isolated Qdrant attempt/count -> audit -> DONE.
   Undeleted DONE + active_attempt is activation authority; vector tokens must match.
-- A3 returns202 job_id, awaits pending A1, rejects unknown IDs, reads all active
-  chunks in document/page/chunk order. Cross-window chunks are assigned once with
-  all pages. Defaults:5page source windows/~200word output; no silent truncation.
+- A3 returns202 job_id, awaits A1 and reads active chunks in source order.
+  Cross-window chunks are assigned once with all pages; defaults5pages/~200words,
+  no silent truncation and unknown IDs rejected.
 - A3 uses copied V3 explain -> review_explanation -> finalize_explanation, with final
   citation/math checks and one editor revision. Reports retain pre-edit/source/speech
   findings; status stays DRAFT. No extra PDF judge or post-edit source review.
-- A3 generates in stored A1 language; differing primary tags trigger finalized-
-  prose translation/review before splitting, PG and target-language speech.
-  Labels are declared, not detected. Formulas/citations/code/pages/order remain
-  immutable. Checkpoints prevent repeated work; A4 shows TRANSLATE. Parser accepts
-  one intact schema-valid object, never repairs strings. Reviewer masks notation,
-  requires passage evidence and allows one correction/recheck (2-4 calls).
-- Beginner/intermediate/advanced (default intermediate) controls all three role
-  system prompts, including recovery; accuracy/coverage stay required. Reviewer flags
-  level mismatches. A5 learner_level_applied=true, prompt explanation-level-v1.
-  Math narration has no level policy; V3 MathJax/contextual/deterministic fallbacks remain.
-- V3 PCM/WAV uses matching SSML/visemes. Overshoot is rescaled/flagged; malformed
-  marks fail. Actual engines, including standard fallback, are recorded.
+- A3 generates in declared A1 language; differing primary tags trigger translation/
+  review before splitting/PG/target speech (A4 TRANSLATE). Notation/citations/code/
+  pages/order remain immutable. Checkpoints avoid repeats; parser never repairs
+  strings. Masked reviewer needs passage evidence; one correction/recheck.
+- Beginner/intermediate/advanced (default intermediate) controls all3 role system
+  prompts/recovery; reviewer flags mismatches, accuracy/coverage remain required.
+  A5 learner_level_applied=true, explanation-level-v1. Math narration keeps V3 fallbacks.
+- V3 PCM/WAV matches SSML/visemes; overshoot rescaled/flagged, malformed marks fail.
+  Actual engines/fallbacks are recorded.
 - Independent workers use locks, leases/fencing/deadlines; provider calls are at
   least once. upraise_jobs holds jobs; upraise_audit holds content-free audits.
   Sources/crops/checkpoints/temporary lesson outputs share the artifact volume.
@@ -64,25 +67,24 @@ read its text and play teacher voice; progress stays in the Streamlit session.
 
 ## Important paths
 
-- FUTURE_UPDATES.md: Git-ignored local backlog; consult for future feature updates.
-  Worker concurrency is the next proposed update, followed by DOCX/CSV and A7.
-- README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,a8,
+- FUTURE_UPDATES.md: ignored backlog: worker concurrency, DOCX/CSV, A7, runtime scaling.
+- README.md, compose.yaml, .env.example: setup. backend/docs/{a1,a2,a3,a5,a6,a8,b1,
   local-testing}.md: maintained contracts; api-baseline.md preserves draft decisions.
 - backend/src/upraise_ai/: api/, schemas/, guards/, main.py expose/wire APIs;
   core/config.py owns signatures, budgets, providers and OAuth/TLS.
+- api/runtime/sessions.py, schemas/sessions.py, guards/session_jwt.py,
+  storage/sessions.py, workflows/sessions.py and tests/test_b1*.py: B1 contract/state.
 - services/pdf/ and ingestion helpers: A1. services/lesson_*.py: A3/A5;
   services/v3/ retains original code, provenance README and SHA origin.json.
 - storage/, workflows/, workers/: persistence, acceptance/control, supervised work.
-- frontend/{app,api_client,learning}.py: API-only Learning and A1-A6 testbench;
+- frontend/{app,api_client,learning,session_start}.py: Learning and A1-A6/B1 testbench;
   frontend/tests/: AppTest/fake HTTP, including player identity/expiry/navigation.
   backend/tests/test_a8_integration.py: scoped catalog/availability/pagination.
 - backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned build/math.
 - callback_tls/README.md: ignored read-only secret mounts; credentials never logged/built.
 - Legacy V3: ../Uprise/v2/backend/learning/v1/.
-- backend/tests/: A3/V3/levels/translation/speech/archive, A5 audit/TTL/locks and
-  original V3 regressions; AWS mocked.
-- codex_helper/: ignored comparison reports/checkpoints and validation scripts/logs.
-  validate-a3/a5.ps1 uses disposable services; a3-{text,level,translation}-*.log records QA.
+- backend/tests/: generation, translation, speech, archive, audit/TTL/locks; AWS mocked.
+- codex_helper/: ignored reports/validation logs; validate-a3/a5/b1.ps1 uses disposable services.
 
 ## Commands
 
@@ -115,9 +117,11 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 
 ## Conventions and invariants
 
-- No backend learner state; frontend progress is session-only. Source/drafts/images
-  are untrusted prompt data.
-  Local auth never bypasses outbound callback security.
+- B1 uses a bounded thread-safe dictionary (default10000 sessions); TTL1800s capped
+  by lesson/JWT expiry, swept every30s. Restart clears state; no session DB/Redis.
+  Keep one backend process; shared state and activity renewal are future work.
+  Frontend player progress is session-only; B1 is tested on its separate page.
+  Source/drafts/images are untrusted. Local auth preserves callback security.
 - Volumes: upraise_{qdrant_data,postgres_data,ingestion_data,model_cache}.
   Source content_hash is opaque caller metadata; source_hash is actual SHA-256.
   PDF defaults100MB/500pages. Lesson UUIDs are job-specific; indexes zero-based;
@@ -131,12 +135,12 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
   uses a fresh idempotency key. UPRAISE_LESSON_CAPTURE_MODEL_OUTPUTS captures
   candidate/verifier replies only in development/local_test_mode; A6/TTL removes
   diagnostics. Default logs contain no generated text.
-- Workload deadlines never skip source/reset on progress; max12h, default3 attempts.
-  Budgets in config; Linux parent-death/group shutdown supervises writers.
+- Deadlines never skip source/reset on progress; max12h/default3 attempts.
+  Config owns budgets; Linux parent-death/group shutdown supervises writers.
 - A1 artifact retention defaults off; A3 TTL is independent. Job/audit history
   survives. External artifact locks are never unlinked. A6 requires cleanup/audit
   before204; busy writers503 with recovery.
-- Scopes: documents:read/write, lessons:write, jobs:read/write. Inaccessible IDs404;
+- Scopes: documents:read/write, lessons:write, jobs:read/write, sessions:write. Inaccessible IDs404;
   key/action conflicts409, malformed422. A1 response contains document_id and job_id.
 
 ## Known limitations and next work
@@ -144,21 +148,19 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 - A1 false passes/rejections/ValidationExceptions: codex_helper/ingestion-1-vs-2-vs-3-report.md.
 - A3 reports do not guarantee coherence or pedagogical suitability. Huge windows
   fail explicitly; reduce windows or tune request budgets.
-- v5 Italian output was English; v6/v7 failed translation; v8 fixes parser/masked
-  review/feedback. Job47194bc7 DONE first attempt:14 Italian-prose chunks, matching
-  PG text/SSML/valid WAVs. Binomial/matrix, spoken-newline, English math-speech and
-  page31 figure errors remain: codex_helper/italian-v8-assessment-47194bc7.md.
+- v8 fixes translation parser/masked review/feedback. Job47194bc7 has14 Italian
+  chunks, matching PG/SSML/WAVs. Binomial/matrix, spoken-newline, English math-speech
+  and page31 figure errors remain: codex_helper/italian-v8-assessment-47194bc7.md.
 - Level/source defects: codex_helper/level-assessment/assessment.md. Beginner
   U+0008 invalidated SSML; original V3 returns no-audio warnings, A3 fails. See
   beginner-retry-diagnosis.md/original-speech-comparison.md in codex_helper/.
   AWS errors lose provider codes; no post-edit source review; MW callbacks unverified.
 - Production gateway/Moodle, HA/backups, retention/audit erasure, orphan cleanup
   and cross-host artifact storage remain open; other APIs/learner RAG are reserved.
-- Archive-read/erasure APIs remain undefined; inspect job status for partial archives.
-  Deleted temporary text cannot be restored. See FUTURE_UPDATES.md for concurrency,
-  researched DOCX/CSV parsing and deferred A7 regeneration.
+- Archive-read/erasure APIs remain undefined; job status identifies partial archives.
+  FUTURE_UPDATES.md covers concurrency, DOCX/CSV and A7.
 - Learning excludes expired/acknowledged outputs; archive playback needs future
-  design. DRAFT/source/speech defects remain. No learner Q&A/B APIs.
+  design. DRAFT/source/speech defects remain. B1 only; learner Q&A/B2-B6 are reserved.
   Original v2 Learning V1 uses PG lectures/disk voice/SQLite through Python calls;
   comparison: codex_helper/frontend-learning-comparison.md.
 
@@ -166,23 +168,18 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 
 - 2026-10-07: User requested simple frontend course learning and explicitly named
   its approved read-only ready-lesson list API A8. Existing A1-A6 contracts/TTL remain.
+- 2026-10-07: User approved B1 with process-local memory and current 24h playback.
+  No Redis or permanent audio/archive playback added. See docs/b1.md for JWT claims.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-07: A8 route/schema/repository/service, frontend app/learning/build exclusions,
-their maintained tests/docs and Compose checked. 26 frontend checks passed;
-backend full run:466 passed, one existing startup deadline test lacked child.pid,
-then passed its isolated retry. All A8 checks passed. Changed-file Ruff/Compose/
-backend+frontend builds passed. Idle backend/frontend redeployed; workers unchanged.
-Live A8 lists5 lessons. Real AppTest opened job47194bc7, verified displayed text/
-WAV hashes/format for first2 parts and Start/Next/Previous/Back with no exceptions,
-GET only. UI root/health200. Browser inspection unavailable (CUA setup failure).
-Checks: codex_helper/a8-learning-*.
-Job47194bc7 expiry17:18:25UTC today; no new paid generation or lifecycle calls.
-
-2026-10-06: translation/model/config/V3 and a3.md checked;442 backend plus50 focused
-translation checks passed. Identity lesson-v3-a3-8-1658e1bb2509 verified.
-Job47194bc7 A5/PG/checkpoints/all14 WAVs and page31 evidence inspected read-only;
-prose/storage/delivery pass, math/content defects remain. Document79fd4c5e DONE/en.
+2026-10-07: Removed B1 capabilities from schema/workflow/UI; updated contract/docs.
+68 B1 backend and35 frontend checks passed, plus Ruff/Compose/diff checks.
+Backend/frontend rebuilt/redeployed. Live API and Streamlit AppTest verified Italian
+new201/retry200, no capabilities in output/OpenAPI/display, AI notice and one audit;
+navigation did not resubmit. Logs: codex_helper/b1-capabilities-*. Consent tests pass.
+Prior backend full534 and A8 text/WAV checks passed. No paid model/TTS calls;
+CUA setup unavailable. Italian job47194bc7 expires17:18:25UTC today; source79fd4c5e
+DONE/en, generation identity lesson-v3-a3-8-1658e1bb2509 unchanged.

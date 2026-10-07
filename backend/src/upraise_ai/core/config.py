@@ -118,6 +118,14 @@ class Settings(BaseSettings):
     mtls_allowed_fingerprints: list[str] = []
     moodle_allowed_cidrs: list[str] = []
 
+    # B1 learner JWTs are separate from the Middleware service access token.
+    session_jwt_issuer: str = ""
+    session_jwt_audience: str = "upraise-learner-session"
+    session_jwt_jwks_url: str = ""
+    session_ttl_seconds: int = Field(1800, ge=60, le=86400)
+    session_max_count: int = Field(10000, ge=1, le=100000)
+    session_sweep_seconds: float = Field(30, ge=1, le=60, allow_inf_nan=False)
+
     @property
     def project_root(self) -> Path:
         return self.data_dir
