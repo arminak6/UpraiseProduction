@@ -29,9 +29,11 @@ B1 opens process-local learner state for one selected A3 generation; restarts
 clear sessions. Its default 30-minute TTL is capped by lesson/token expiry.
 Local testing allows draft previews; production requires Middleware's signed
 approval assertion. B4 uses LangGraph semantic routing, exact prepared teaching
-text, scoped Qdrant evidence and inline speech. Teaching support uses original
-v2 teacher responses directly; independent evidence checks apply to factual
-course questions. Reply text is the input to its speech; see [B4](backend/docs/b4.md).
+text, scoped Qdrant evidence and inline speech. Replies use original v2 teacher
+responses with safety/language checks. Factual grounding verification is temporarily
+disabled: `grounded=null`, with contextual source references. Reply text is the
+input to its speech; see [B4](backend/docs/b4.md). Its replacement is in the ignored
+`FUTURE_UPDATES.md` backlog.
 B2/B3/B5/B6 remain reserved. Existing 24-hour lesson retention remains.
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,

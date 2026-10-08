@@ -42,8 +42,10 @@ B4 was approved on 2026-10-07 using original v2-style LangGraph semantic
 classify/retrieve/respond, with one output shape instead of public REPEAT/ANSWER
 categories. Exact PG teaching context accompanies scoped Qdrant evidence; audio
 is inline and temporary, and player controls remain Middleware responsibilities.
-User reaffirmed v2 behavior for teaching support: native teacher response text
-feeds speech directly; independent answer verification remains for course questions.
+User reaffirmed v2 teacher responses and on 2026-10-07 temporarily disabled the
+strict factual grounding gate. Safety/language review remains; native response
+text feeds speech, `grounded=null`, and sources identify context. Replacement
+evidence validation is deferred in the ignored root `FUTURE_UPDATES.md`.
 See [B4's contract](b4.md). B2/B3/B5/B6 remain reserved. The following table keeps
 the original Word inventory for reference.
 

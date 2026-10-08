@@ -1,4 +1,4 @@
-"""B4 routing, evidence gates, session isolation and HTTP privacy without AWS."""
+"""B4 routing, output safety/language, session isolation and HTTP privacy without AWS."""
 
 import base64
 import io
@@ -20,7 +20,7 @@ from upraise_ai.core.config import Settings, get_settings
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.ingress import Principal, ingress
 from upraise_ai.main import app
-from upraise_ai.schemas.interrupts import AnswerCheck, InterruptInput, LearnerIntent
+from upraise_ai.schemas.interrupts import InterruptInput, LearnerIntent, OutputCheck
 from upraise_ai.schemas.lessons import LessonChunk, LessonSource, ReviewReport, Viseme
 from upraise_ai.schemas.sessions import StartedSession
 from upraise_ai.services.interrupt_models import InterruptTeacher
@@ -44,9 +44,7 @@ class Teacher:
         self.intent = LearnerIntent(operation="respond", student_goal="Explain the concept differently",
                                     is_course_question=False, use_course_retrieval=False, retrieval_query="")
         self.calls, self.context, self.history, self.chunks = [], None, None, None
-        self.check = AnswerCheck(supported=True, safe=True, in_language=True,
-            evidence=[{"source_chunk_id": "source-1", "quote": "An original source fact.",
-                       "claim": "A supported explanation."}])
+        self.check = OutputCheck(safe=True, in_language=True)
         self.answer = "A supported explanation. [p. 1]"
         self.wait = None
 
@@ -66,8 +64,8 @@ class Teacher:
     def clarify(self, *args):
         return "Which concept do you mean?"
 
-    def verify(self, text, chunks):
-        self.calls.append(("verify", None))
+    def check_output(self, text):
+        self.calls.append(("check_output", text))
         return self.check
 
     def rewrite_query(self, query, language):
@@ -154,7 +152,8 @@ def test_b4_reexplanation_gets_exact_postgres_context_and_original_source(runtim
     assert value.grounded is None and value.sources[0].document_id == r.document_id
     assert r.teacher.context == r.chunk.text and r.teacher.chunks[0]["text"] == r.vector_chunk["text"]
     assert not r.search_calls
-    assert not any(name == "verify" for name, _ in r.teacher.calls)
+    assert ("check_output", value.text) in r.teacher.calls
+    assert "GROUNDING_NOT_VERIFIED" in value.warnings
     assert value.audio and base64.b64decode(value.audio.data).startswith(b"RIFF")
     assert len(r.audit_calls) == 1 and len(r.session.chat_cache) == 2
     serialized_audit = json.dumps(r.audit_calls, default=str)
@@ -165,7 +164,8 @@ def test_b4_course_question_always_searches_even_if_optional_search_flag_is_fals
     r = runtime
     r.teacher.intent.is_course_question = True
     value = run(r)
-    assert value.grounded and len(r.search_calls) == 1
+    assert value.grounded is None and value.sources and len(r.search_calls) == 1
+    assert "GROUNDING_NOT_VERIFIED" in value.warnings
     assert r.search_calls[0][1:] == ("course", [(r.document_id, r.token)])
     assert ("rewrite", "en") in r.teacher.calls
 
@@ -173,7 +173,6 @@ def test_b4_course_question_always_searches_even_if_optional_search_flag_is_fals
 def test_b4_v2_support_returns_teacher_text_and_speech_from_that_exact_text(runtime):
     r = runtime
     r.teacher.answer = "La stessa idea spiegata con parole più semplici."
-    r.teacher.check = AnswerCheck(supported=False, safe=True, in_language=True, evidence=[])
     prepared = []
 
     class MatchingSpeech(Speech):
@@ -188,7 +187,7 @@ def test_b4_v2_support_returns_teacher_text_and_speech_from_that_exact_text(runt
     assert value.ssml == "<speak>" + value.text + "</speak>"
     assert value.grounded is None and value.sources
     assert "ANSWER_NOT_SUPPORTED" not in value.warnings
-    assert not any(name == "verify" for name, _ in r.teacher.calls)
+    assert ("check_output", value.text) in r.teacher.calls
 
 
 def test_b4_native_v2_respond_preserves_full_pg_context_and_source_pages(runtime):
@@ -210,6 +209,34 @@ def test_b4_native_v2_respond_preserves_full_pg_context_and_source_pages(runtime
     assert context in contents[0]["text"] and "Earlier message" in contents[1]["text"]
     assert '<COURSE_CHUNK id="source-1" pages="1">' in contents[1]["text"]
     assert calls[0]["inferenceConfig"]["temperature"] == 0.2
+
+
+def test_b4_output_reviewer_only_checks_safety_and_session_language(runtime):
+    r = runtime
+    calls = []
+
+    def converse(**request):
+        calls.append(request)
+        return {"stopReason": "end_turn", "output": {"message": {"content": [
+            {"text": '{"safe":true,"in_language":true}'}]}}}
+
+    teacher = InterruptTeacher(r.settings, r.session.binding, client=SimpleNamespace(converse=converse))
+    assert teacher.check_output("Risposta in italiano.") == OutputCheck(safe=True, in_language=True)
+    prompt, schema = calls[0]["messages"][0]["content"][0]["text"].split("\nJSON schema:\n")
+    assert json.loads(prompt) == {"answer": "Risposta in italiano.", "target_language": "it"}
+    assert set(json.loads(schema)["properties"]) == {"safe", "in_language"}
+    assert calls[0]["modelId"] == r.settings.lesson_review_model_id
+
+
+@pytest.mark.parametrize("raw", ["not JSON", '{"safe":1,"in_language":true}', '{"safe":true}'])
+def test_b4_invalid_output_verdict_fails_closed(runtime, raw):
+    r = runtime
+    client = SimpleNamespace(converse=lambda **kwargs: {"stopReason": "end_turn", "output": {
+        "message": {"content": [{"text": raw}]}}})
+    teacher = InterruptTeacher(r.settings, r.session.binding, client=client)
+    with pytest.raises(IngestionError, match="INTERRUPT_MODEL_INVALID_OUTPUT") as failure:
+        teacher.check_output("PRIVATE_ANSWER")
+    assert failure.value.status == 503 and "PRIVATE_ANSWER" not in str(failure.value)
 
 
 def test_b4_player_action_uses_no_retrieval_response_speech_or_history(runtime):
@@ -246,33 +273,51 @@ def test_b4_evicted_retry_does_not_regenerate_and_cache_is_pruned(runtime):
     assert r.store._interrupt_cache_bytes == 0
 
 
-@pytest.mark.parametrize("change", [
-    {"supported": False}, {"safe": False}, {"in_language": False}, {"evidence": []},
-    {"evidence": [{"source_chunk_id": "foreign", "quote": "An original source fact.", "claim": "A supported explanation."}]},
-    {"evidence": [{"source_chunk_id": "source-1", "quote": "Invented quote", "claim": "A supported explanation."}]},
+@pytest.mark.parametrize("is_question", [False, True])
+@pytest.mark.parametrize("change,warning", [
+    ({"safe": False}, "ANSWER_SAFETY_REJECTED"),
+    ({"in_language": False}, "ANSWER_LANGUAGE_REJECTED"),
 ])
-def test_b4_unverified_response_becomes_localized_not_covered(runtime, change):
+def test_b4_output_checks_reject_question_and_support_before_speech(runtime, is_question, change, warning):
     r = runtime
-    r.teacher.intent.is_course_question = True
-    r.teacher.check = AnswerCheck.model_validate({**r.teacher.check.model_dump(), **change})
+    r.teacher.intent.is_course_question = is_question
+    r.teacher.intent.playback_action = {"action": "RESUME", "rate": None}
+    r.teacher.check = OutputCheck.model_validate({**r.teacher.check.model_dump(), **change})
+    spoken = []
+
+    class CapturedSpeech(Speech):
+        def prepare(self, text, language):
+            spoken.append(text)
+            return super().prepare(text, language)
+
+    r.service.speech_factory = CapturedSpeech
     value = run(r)
-    assert value.grounded is False and value.text.startswith("Questo argomento") and value.sources == []
-    assert "ANSWER_NOT_SUPPORTED" in value.warnings
+    assert value.grounded is None and value.sources == [] and value.playback_action is None
+    assert warning in value.warnings and "ANSWER_NOT_SUPPORTED" not in value.warnings
+    assert value.text != r.teacher.answer and spoken == [value.text]
+    assert r.teacher.answer not in json.dumps(r.audit_calls, default=str)
+    assert r.session.chat_cache[-1]["text"] == value.text
 
 
-def test_b4_invalid_page_citation_is_rejected(runtime):
+def test_b4_factual_question_preserves_teacher_wording_without_literal_evidence_matching(runtime):
     r = runtime
     r.teacher.intent.is_course_question = True
-    r.teacher.answer = "A supported explanation. [p. 999]"
-    assert run(r).grounded is False
+    r.vector_chunk["text"] = "| Pipe network | 21.3 | 11.2 |"
+    r.teacher.answer = "Per la rete di tubi:\n- reale: **21.3**\n- casuale: **11.2** [p. 1]"
+    value = run(r)
+    assert value.text == r.teacher.answer and value.audio and value.grounded is None
+    assert value.sources[0].source_chunk_ids == ["source-1"]
+    assert "GROUNDING_NOT_VERIFIED" in value.warnings
+    assert "ANSWER_NOT_SUPPORTED" not in value.warnings
 
 
-def test_b4_speech_failure_returns_verified_text(runtime):
+def test_b4_speech_failure_retains_safety_checked_text_and_unverified_grounding(runtime):
     r = runtime
     r.teacher.intent.is_course_question = True
     r.service.speech_factory = lambda *args: (_ for _ in ()).throw(RuntimeError("PRIVATE_AWS_ERROR"))
     value = run(r)
-    assert value.grounded and value.audio is None and "AUDIO_UNAVAILABLE" in value.warnings
+    assert value.grounded is None and value.text == r.teacher.answer
+    assert value.audio is None and "AUDIO_UNAVAILABLE" in value.warnings
     assert "PRIVATE_AWS_ERROR" not in value.model_dump_json()
 
 
@@ -472,7 +517,7 @@ def test_b4_capacity_and_revocation_during_response(runtime):
     def revoke(*args):
         r.source_row["deletion_requested_at"] = datetime.now(UTC)
         return r.teacher.check
-    r.teacher.verify = revoke
+    r.teacher.check_output = revoke
     r.teacher.intent.is_course_question = True
     with pytest.raises(IngestionError, match="LESSON_DOCUMENT_UNAVAILABLE"):
         run(r)

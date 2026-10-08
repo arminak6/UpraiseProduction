@@ -35,7 +35,7 @@ class PlayerInterruptTests(unittest.TestCase):
             "lesson_job_id": self.job, "ai_notice": "You are interacting with an AI.", "preview": True}
         self.posts = []
         self.answer = {"text": "Un'altra spiegazione.", "audio": {"data": base64.b64encode(b"RIFF-answer").decode()},
-                       "grounded": True, "sources": [], "warnings": [], "playback_action": None}
+                       "grounded": None, "sources": [], "warnings": ["GROUNDING_NOT_VERIFIED"], "playback_action": None}
         self.start_status, self.result_status = 201, 200
 
     def response(self, connection, method, path, **kwargs):
@@ -99,6 +99,8 @@ class PlayerInterruptTests(unittest.TestCase):
             self.assertEqual(start[1]["json_body"]["language"], "it")
             self.assertEqual(answer[1]["json_body"]["chunk_id"], self.chunks[0])
             self.assertTrue(any("Un'altra" in item.value for item in app.markdown))
+            self.assertTrue(any("not been independently verified" in item.value for item in app.caption))
+            self.assertFalse(any("Supported by course sources: yes" in item.value for item in app.caption))
             self.assertEqual(len(app.get("audio")), 1)  # Answer only, lesson stays paused.
             self.assertTrue(any("interacting with an AI" in item.value for item in app.info))
             app.run()

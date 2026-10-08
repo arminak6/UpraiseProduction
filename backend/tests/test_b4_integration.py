@@ -3,12 +3,10 @@
 from uuid import uuid4
 
 import psycopg
-import pytest
 from test_b1_integration import b1_api, completed
 from test_b4 import Speech, Teacher
 
 from upraise_ai.main import app
-from upraise_ai.schemas.interrupts import AnswerCheck
 from upraise_ai.workflows.interrupts import InterruptService
 
 pytest_plugins = ["test_a1_integration", "test_a3_integration", "test_b1"]
@@ -19,12 +17,7 @@ def test_b4_real_prepared_chunk_and_scoped_qdrant_question(integration, lesson):
     teacher = Teacher()
     teacher.intent.is_course_question = True
     vectors = integration[3]
-    with integration[1].document_transaction(str(doc["document_id"])) as (_, document):
-        token = document["active_attempt"]
-    source = vectors.document_sections(str(doc["document_id"]), body["course_id"], token)[0]
     teacher.answer = "A supported explanation. [p. 1]"
-    teacher.check = AnswerCheck(supported=True, safe=True, in_language=True, evidence=[{
-        "source_chunk_id": source["chunk_id"], "quote": source["text"], "claim": "A supported explanation."}])
     with b1_api(integration, lesson) as client:
         started = client.post("/v1/sessions", json={**body, "consent_scope": ["questions"]})
         assert started.status_code == 201
@@ -38,7 +31,9 @@ def test_b4_real_prepared_chunk_and_scoped_qdrant_question(integration, lesson):
         path = f"/v1/sessions/{started.json()['session_id']}/interrupts"
         first = client.post(path, json=payload)
         assert first.status_code == 200, first.text
-        assert first.json()["grounded"] is True and first.json()["audio"]
+        assert first.json()["grounded"] is None and first.json()["audio"]
+        assert first.json()["sources"] and "GROUNDING_NOT_VERIFIED" in first.json()["warnings"]
+        assert ("check_output", first.json()["text"]) in teacher.calls
         assert teacher.context == stored["text"]
         assert all(chunk["document_id"] == str(doc["document_id"]) for chunk in teacher.chunks)
         assert client.post(path, json=payload).json() == first.json()
@@ -76,7 +71,6 @@ def test_b4_real_prepared_text_support_returns_matching_text_and_audio(integrati
     target, _, row, body = completed(integration, lesson)
     teacher = Teacher()
     teacher.answer = "The same teaching idea, expressed more simply."
-    teacher.verify = lambda *args: pytest.fail("v2 teaching support must not run the question evidence gate")
     spoken = []
 
     class MatchingSpeech(Speech):
@@ -100,5 +94,6 @@ def test_b4_real_prepared_text_support_returns_matching_text_and_audio(integrati
         assert answer["text"] == teacher.answer and answer["audio"]
         assert spoken == [answer["text"]] and answer["grounded"] is None
         assert answer["sources"] and "ANSWER_NOT_SUPPORTED" not in answer["warnings"]
+        assert ("check_output", answer["text"]) in teacher.calls
         assert teacher.context == before["text"]
         assert lesson[1].prepared_chunk(target["job_id"], chunk.chunk_id) == before

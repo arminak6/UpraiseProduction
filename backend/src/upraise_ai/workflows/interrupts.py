@@ -3,7 +3,6 @@
 import base64
 import hashlib
 import json
-import re
 from collections import defaultdict
 from contextlib import ExitStack
 from threading import BoundedSemaphore
@@ -22,7 +21,7 @@ from upraise_ai.schemas.interrupts import InlineAudio, InterruptResponse, Learne
 from upraise_ai.schemas.lessons import LessonSource
 from upraise_ai.services.aws import aws_session
 from upraise_ai.services.embeddings import BedrockTitanEmbeddingProvider
-from upraise_ai.services.interrupt_models import InterruptTeacher, normalized
+from upraise_ai.services.interrupt_models import InterruptTeacher
 from upraise_ai.services.interrupt_stt import InterruptSTT, wav_pcm
 from upraise_ai.services.lesson_speech import LessonSpeech
 
@@ -163,28 +162,11 @@ class InterruptService:
         return unique
 
     @staticmethod
-    def _verified_sources(text, chunks, check):
-        lookup = {item["chunk_id"]: item for item in chunks}
-        if not check.supported or not check.safe or not check.in_language or not check.evidence:
-            return None
-        used = {}
-        for evidence in check.evidence:
-            item = lookup.get(evidence.source_chunk_id)
-            if (not item or normalized(evidence.quote) not in normalized(item["text"])
-                    or normalized(evidence.claim) not in normalized(text)):
-                return None
-            used[evidence.source_chunk_id] = item
-        cited_pages = set()
-        for match in re.finditer(r"\[pp?\.\s*(\d+)(?:\s*[-–]\s*(\d+))?\]", text):
-            start, end = int(match[1]), int(match[2] or match[1])
-            if end < start or end-start > 100:
-                return None
-            cited_pages.update(range(start, end+1))
-        if not cited_pages or not cited_pages.issubset({page for item in used.values() for page in item["pages"]}):
-            return None
-        return [LessonSource(document_id=item["document_id"], document_version_id=item["document_version_id"],
-                             pages=item["pages"], source_chunk_ids=[item["chunk_id"]],
-                             quality_status=item["quality_status"]) for item in used.values()]
+    def _output_rejections(check):
+        return [code for passed, code in (
+            (check.safe, "ANSWER_SAFETY_REJECTED"),
+            (check.in_language, "ANSWER_LANGUAGE_REJECTED"),
+        ) if not passed]
 
     def _run_graph(self, session, data, audio, context, chunk, versions, documents):
         teacher = self.teacher_factory(self.settings, session.binding)
@@ -211,35 +193,33 @@ class InterruptService:
                 value.warnings.append("INPUT_BLOCKED")
             elif intent.operation == "clarify":
                 text = teacher.clarify(state["message"], context, history)
-                check = teacher.verify(text, [])
-                value.text = text if check.safe and check.in_language else messages[2]
+                rejected = self._output_rejections(teacher.check_output(text))
+                value.text = text if not rejected else messages[2]
+                value.warnings.extend(rejected)
             else:
                 chunks = self._retrieve(session, chunk, versions, documents, teacher, intent, state["message"])
                 if not chunks:
-                    sources = None
-                    value.text, value.grounded = messages[0], False
+                    value.text = messages[0]
+                    value.playback_action = None
+                    value.warnings.append("ANSWER_NOT_SUPPORTED")
                 else:
                     text = teacher.respond(state["message"], intent.student_goal, context, history, chunks)
-                    if intent.is_course_question:
-                        check = teacher.verify(text, chunks)
-                        sources = self._verified_sources(text, chunks, check)
-                        value.text = text if sources is not None else messages[0]
-                        value.grounded = sources is not None
+                    rejected = self._output_rejections(teacher.check_output(text))
+                    if rejected:
+                        value.text = messages[1] if "ANSWER_SAFETY_REJECTED" in rejected else messages[2]
+                        value.playback_action = None
+                        value.warnings.extend(rejected)
                     else:
-                        # v2 teaching support returns the teacher turn directly.
-                        # These references describe the supplied course context;
-                        # no independent factual verification is claimed.
+                        # Temporary v2-style response: sources describe supplied
+                        # context, and grounded remains null (not verified).
                         value.text = text
-                        sources = [LessonSource(document_id=item["document_id"],
+                        value.sources = [LessonSource(document_id=item["document_id"],
                             document_version_id=item["document_version_id"], pages=item["pages"],
                             source_chunk_ids=[item["chunk_id"]], quality_status=item["quality_status"])
                             for item in chunks]
-                value.sources = sources or []
-                if sources and any(source.quality_status != "AUTO_CHECKED" for source in sources):
-                    value.warnings.append("SOURCE_REQUIRES_REVIEW")
-                if sources is None:
-                    value.playback_action = None
-                    value.warnings.append("ANSWER_NOT_SUPPORTED")
+                        value.warnings.append("GROUNDING_NOT_VERIFIED")
+                        if any(source.quality_status != "AUTO_CHECKED" for source in value.sources):
+                            value.warnings.append("SOURCE_REQUIRES_REVIEW")
             return {"response": value}
 
         def player(state):

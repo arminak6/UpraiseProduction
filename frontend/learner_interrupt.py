@@ -121,10 +121,13 @@ def render_learner_interrupt(connection, show_response):
         if body.get("grounded") is not None:
             st.caption(f"Supported by course sources: {'yes' if body['grounded'] else 'no'}")
         if body.get("sources"):
-            with st.expander("Supporting source references"):
+            with st.expander("Course sources used"):
                 st.json(body["sources"])
         for warning in body.get("warnings", []):
-            st.warning(warning)
+            if warning == "GROUNDING_NOT_VERIFIED":
+                st.caption("This reply has not been independently verified against the course sources.")
+            else:
+                st.warning(warning)
     if value and value.successful and isinstance(value.body, dict) and value.body.get("audio"):
         # The HTTP response carries the actual WAV; avoid rendering megabytes of
         # base64 into the JSON inspector after the audio widget has decoded it.

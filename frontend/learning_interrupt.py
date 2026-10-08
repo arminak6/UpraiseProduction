@@ -132,10 +132,13 @@ def render_interrupt(connection, player, *, local_testing=False):
                 if body.get("grounded") is not None:
                     st.caption("Supported by course sources: " + ("yes" if body["grounded"] else "no"))
                 if body.get("sources"):
-                    with st.expander("Answer sources"):
+                    with st.expander("Course sources used"):
                         st.json(body["sources"])
                 for warning in body.get("warnings", []):
-                    st.warning(warning)
+                    if warning == "GROUNDING_NOT_VERIFIED":
+                        st.caption("This reply has not been independently verified against the course sources.")
+                    else:
+                        st.warning(warning)
                 action = body.get("playback_action")
                 if action:
                     labels = {"REPLAY": "Replay this part", "RESUME": "Resume this part",

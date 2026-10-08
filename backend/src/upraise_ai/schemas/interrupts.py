@@ -46,19 +46,12 @@ class LearnerIntent(BaseModel):
         return self
 
 
-class Evidence(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    source_chunk_id: str = Field(min_length=1, max_length=120)
-    quote: str = Field(min_length=1, max_length=2000)
-    claim: str = Field(min_length=1, max_length=2000)
+class OutputCheck(BaseModel):
+    """Internal safety/language verdict; factual grounding is deferred."""
 
-
-class AnswerCheck(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    supported: StrictBool
     safe: StrictBool
     in_language: StrictBool
-    evidence: list[Evidence] = Field(max_length=30)
 
 
 class InlineAudio(BaseModel):

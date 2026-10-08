@@ -24,8 +24,8 @@ class LearnerInterruptTests(unittest.TestCase):
         self.calls = []
         self.session_id, self.chunk_id = str(uuid4()), str(uuid4())
         self.response = {"request_id": str(uuid4()), "chunk_id": self.chunk_id, "answer_id": str(uuid4()),
-                         "text": "Here is another explanation. [p. 1]", "grounded": True,
-                         "sources": [], "audio": None, "warnings": []}
+                         "text": "Here is another explanation. [p. 1]", "grounded": None,
+                         "sources": [], "audio": None, "warnings": ["GROUNDING_NOT_VERIFIED"]}
 
     def send(self, connection, method, path, **kwargs):
         self.calls.append((connection, method, path, kwargs))
@@ -55,6 +55,8 @@ class LearnerInterruptTests(unittest.TestCase):
             first = self.calls[0][3]["json_body"]
             self.assertEqual(first["text"], "Explain in other words")
             self.assertTrue(any("another explanation" in item.value for item in app.markdown))
+            self.assertTrue(any("not been independently verified" in item.value for item in app.caption))
+            self.assertFalse(any("Supported by course sources: yes" in item.value for item in app.caption))
             app.run()
             app.radio(key="page").set_value("Health").run()
             app.radio(key="page").set_value("Learner interrupt (B4)").run()
