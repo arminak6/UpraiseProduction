@@ -67,6 +67,10 @@ class JobRepository:
         from upraise_ai.storage.lessons import LessonRepository
 
         LessonRepository(self.dsn).migrate()
+        from upraise_ai.storage.operations import SCHEMA as OPERATIONS_SCHEMA
+
+        with self.connect() as conn:
+            conn.execute(OPERATIONS_SCHEMA)
 
     def accept(
         self, job_id, document_id, client_id, key, fingerprint, metadata, pipeline_version,
@@ -173,7 +177,7 @@ class JobRepository:
                 AND deleted_at IS NULL ORDER BY deletion_requested_at LIMIT 1"""
             ).fetchone()
 
-    def claim(self, lease_seconds, pipeline_version=None):
+    def claim(self, lease_seconds, pipeline_version=None, *, excluded_courses=()):
         token = uuid4()
         with self.connect() as conn:
             return conn.execute(
@@ -183,13 +187,14 @@ class JobRepository:
                        OR (status='RUNNING' AND lease_until < clock_timestamp()))
                     AND (%s::text IS NULL OR pipeline_version=%s)
                     AND deletion_requested_at IS NULL
+                    AND NOT (metadata->>'course_id'=ANY(%s))
                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
                 ) UPDATE ingestion_jobs j SET status='RUNNING', step='PARSE',
                     attempts=attempts+1, lease_token=%s,
                     lease_until=clock_timestamp() + %s * interval '1 second',
                     error_code=NULL, updated_at=clock_timestamp()
                   FROM candidate c WHERE j.job_id=c.job_id RETURNING j.*""",
-                (pipeline_version, pipeline_version, token, lease_seconds),
+                (pipeline_version, pipeline_version, list(excluded_courses), token, lease_seconds),
             ).fetchone()
 
     def renew(self, job_id, token, lease_seconds):

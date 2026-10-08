@@ -6,6 +6,7 @@ import wave
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.services.aws import aws_session
+from upraise_ai.storage.operations import configuration_id, observe
 
 LANGUAGES = {"en": "en-US", "it": "it-IT", "fr": "fr-FR", "de": "de-DE", "es": "es-ES",
              "pt": "pt-PT", "nl": "nl-NL", "ja": "ja-JP", "ko": "ko-KR", "zh": "zh-CN"}
@@ -35,12 +36,14 @@ class InterruptSTT:
         self.settings = settings
 
     def transcribe(self, pcm, rate, language):
+        identity = configuration_id(self.settings)
         try:
             return asyncio.run(asyncio.wait_for(self._transcribe(pcm, rate, language),
                 timeout=self.settings.interrupt_max_audio_seconds + self.settings.interrupt_provider_timeout_seconds))
         except IngestionError:
             raise
         except Exception:
+            observe(self.settings, ["transcribe"], "UNAVAILABLE", "STT_PROVIDER_UNAVAILABLE", configuration=identity)
             raise IngestionError("INTERRUPT_STT_UNAVAILABLE", status=503, retryable=True) from None
 
     async def _transcribe(self, pcm, rate, language):
@@ -51,7 +54,9 @@ class InterruptSTT:
         code = LANGUAGES.get(language.split("-")[0].lower())
         if code is None:
             raise IngestionError("INTERRUPT_STT_LANGUAGE_UNSUPPORTED", status=422)
-        credentials = aws_session(self.settings).get_credentials().get_frozen_credentials()
+        session = aws_session(self.settings)
+        observed_configuration = getattr(session, "_upraise_operations_configuration", None)
+        credentials = session.get_credentials().get_frozen_credentials()
         client = TranscribeStreamingClient(region=self.settings.aws_region, credential_resolver=StaticCredentialResolver(
             credentials.access_key, credentials.secret_key, credentials.token))
         stream = await client.start_stream_transcription(language_code=code, media_sample_rate_hz=rate,
@@ -85,6 +90,8 @@ class InterruptSTT:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         transcript = " ".join(final.values()).strip()
+        observe(self.settings, ["transcribe"], "AVAILABLE", "PROVIDER_CALL_SUCCEEDED",
+                configuration=observed_configuration)
         if not transcript or len(transcript) > 6000:
             raise IngestionError("INTERRUPT_TRANSCRIPT_INVALID", status=422)
         return transcript

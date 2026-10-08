@@ -1,7 +1,8 @@
 # UPRAISE AI Module
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
-A8 ready-lesson listing, B1 lesson start, B4 learner interruption and B5 session end are implemented.
+A8 ready-lesson listing, B1 lesson start, B4 learner interruption, B5 session end,
+C1 health/readiness and C2 feature status are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -73,6 +74,9 @@ overrides for passwords that need URI encoding.
 
 - API docs: http://localhost:8000/docs
 - Liveness: http://localhost:8000/health
+- Readiness: http://localhost:8000/ready; feature status: http://localhost:8000/v1/status
+  (C2 uses INGRESS and jobs:read). See [C1/C2](backend/docs/c1-c2.md) for UNKNOWN
+  provider evidence, partial outages and shared API/worker operator controls.
 - Optional Streamlit Learning and API Testbench: http://localhost:8501
 
 Streamlit is a testing tool in frontend/, separate from the final product.

@@ -168,18 +168,19 @@ class LessonRepository(JobRepository):
                 raise LeaseLost()
             yield conn
 
-    def claim(self, lease_seconds, pipeline_version):
+    def claim(self, lease_seconds, pipeline_version, *, excluded_courses=()):
         with self.connect() as conn:
             return conn.execute(
                 """WITH c AS (SELECT job_id FROM lesson_jobs WHERE
                 ((status='QUEUED' AND available_at<=clock_timestamp()) OR
                  (status='RUNNING' AND lease_until<clock_timestamp()))
                 AND cleanup_requested_at IS NULL AND pipeline_version=%s
+                AND NOT (metadata->>'course_id'=ANY(%s))
                 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
                 UPDATE lesson_jobs j SET status='RUNNING', step='SOURCE', attempts=attempts+1,
                 lease_token=%s, lease_until=clock_timestamp()+%s*interval '1 second',
                 error_code=NULL, updated_at=clock_timestamp() FROM c WHERE j.job_id=c.job_id RETURNING j.*""",
-                (pipeline_version, uuid4(), lease_seconds),
+                (pipeline_version, list(excluded_courses), uuid4(), lease_seconds),
             ).fetchone()
 
     def renew(self, job_id, token, lease_seconds):

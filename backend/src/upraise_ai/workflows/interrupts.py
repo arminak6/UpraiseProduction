@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.guards.operations import feature_enabled, require_feature
 from upraise_ai.schemas.interrupts import InlineAudio, InterruptResponse, LearnerIntent
 from upraise_ai.schemas.lessons import LessonSource
 from upraise_ai.services.aws import aws_session
@@ -61,6 +62,7 @@ class InterruptService:
         session = authorize_session(self.settings, self.store, session_id, principal, token)
         if "questions" not in session.binding.consent_scope:
             raise HTTPException(403, "QUESTIONS_CONSENT_REQUIRED")
+        require_feature(self.settings, "answers", session.binding.course_id)
         return session
 
     def _lesson(self, session, data, principal):
@@ -165,6 +167,8 @@ class InterruptService:
 
         def transcribe(state):
             self.store.ensure_current(session)
+            if audio is not None:
+                require_feature(self.settings, "stt", session.binding.course_id)
             if audio is None:
                 return {"message": data.text}
             pcm, rate = wav_pcm(audio, self.settings)
@@ -230,6 +234,9 @@ class InterruptService:
         def speak(state):
             value = state["response"]
             self.store.ensure_current(session)
+            if not feature_enabled(self.settings, "tts", session.binding.course_id):
+                value.warnings.append("AUDIO_DISABLED")
+                return {"response": value}
             try:
                 speech = self.speech_factory(self.settings, teacher)
                 language_code = speech.validate_voice(session.response.voice, session.binding.language)

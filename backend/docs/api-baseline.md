@@ -6,7 +6,8 @@ conversation is context. References remain drafts; changes require an explicit
 project decision. The inventory below preserves the original Word baseline;
 the differences table records explicit implementation decisions separately.
 
-C1 `GET /health`, A1-A6, A8 ready-lesson listing and B1 lesson start are implemented.
+A1-A6/A8, B1/B4/B5 and C1/C2 are implemented. C1/C2's user-approved 2026-10-08
+contract is in [c1-c2.md](c1-c2.md), including cached evidence and UNKNOWN state.
 Other endpoints remain reserved for their original responsibility. A3/A5's approved
 contract is in `a3.md`; B1's integration details are in `b1.md`.
 A/B/C grouping is preserved. The original Word was supplied again and checked
@@ -46,7 +47,7 @@ User reaffirmed v2 teacher responses and on 2026-10-07 temporarily disabled the
 strict factual grounding gate. Safety/language review remains; native response
 text feeds speech, `grounded=null`, and sources identify context. Replacement
 evidence validation is deferred in the ignored root `FUTURE_UPDATES.md`.
-See [B4's contract](b4.md). B2/B3/B5/B6 remain reserved. The following table keeps
+See [B4's contract](b4.md) and [B5](b5.md). B2/B3/B6 remain reserved. The following table keeps
 the original Word inventory for reference.
 
 ## B runtime APIs
@@ -109,7 +110,7 @@ A1 decisions.
 | Spoken answer transport | Word gives SSE event order for B4 while common conventions/open points leave SSE versus WebSocket unresolved | User approved initial synchronous B4 response with inline temporary audio on 2026-10-07; streaming remains future work |
 | Runtime providers | Word A3/B4 refer to AWS EU-region speech/LLM. The scaffold prompt leaves providers undecided; diagram's Speech Services is generic | A3 uses original V3 GPT OSS/Qwen and EU-region Polly. B4 reuses those models/speech plus Titan retrieval and in-memory Transcribe Streaming |
 | Audit scope | Common convention says every API ends in AUDIT, but A2 lists audit for delete only, A4 omits an audit step, and B6 says no data are persisted | A1 lifecycle and A2 deletion audit are implemented; A2 list has no audit per the explicit request. Broader API/read/rejection audit scope and retention need clarification |
-| Liveness payload | Word defines C1 purpose/status but no `/health` JSON schema | Scaffold returns `{"status":"alive"}` with 200, without claiming integration or AI readiness |
+| C1/C2 monitoring | Word defines liveness/readiness and feature flags without JSON schemas | On 2026-10-08 user approved C1/C2. `/health` stays dependency-free; `/ready` reports core readiness and feature degradation. `/v1/status` uses jobs:read/course authorization, nullable availability, content-free recent provider evidence and operator controls shared with workers. C3 remains reserved |
 | A1 enrichment | Earlier Word A1 overview says LLM=No; old extraction uses generative Nova math/figure enrichment | User explicitly approved the old pipeline including Nova on 2026-10-02; applies to A1 extraction only |
 | A1 Ingestion Guard | Original A1 requires instruction scanning and origin/MIME/hash provenance checks | User explicitly removed this stage on 2026-10-02. No instruction/active-content, expected-hash, magic/declared MIME/extension or source-host allowlist checks remain. PDF readability/encryption/size/page support limits, OAuth/mTLS INGRESS and HTTPS/TLS/DNS network handling remain |
 | A1 accepted response | Original Word A1 returns document_id and job_id | User requested job_id removal on 2026-10-02, then restored it on 2026-10-06 after checking the Word specification. A1 now returns both document_id and job_id. Location identifies the A4 route for the same ingestion job; use that job_id with A4/A6. A5 uses the lesson job_id returned by A3 |

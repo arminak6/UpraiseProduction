@@ -1,6 +1,7 @@
 **
 !requirements.txt
 !app.py
+!operations.py
 !api_client.py
 !learning.py
 !session_start.py

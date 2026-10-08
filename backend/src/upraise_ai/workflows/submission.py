@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.core.utils import sha256_file
+from upraise_ai.guards.operations import require_ai
 from upraise_ai.services.pdf.input import validate_pdf_input
 from upraise_ai.services.pdf.languages import ocr_languages
 
@@ -15,6 +16,7 @@ class SubmissionService:
 
     def submit(self, metadata, stream, principal, key):
         principal.require_course(metadata.course_id)
+        require_ai(self.settings, metadata.course_id)
         ocr_languages(metadata.language)
         if key and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", key):
             raise IngestionError("INVALID_IDEMPOTENCY_KEY", status=400)

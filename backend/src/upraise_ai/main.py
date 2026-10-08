@@ -12,6 +12,7 @@ from upraise_ai.api.runtime import router as runtime_router
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.body_limit import UploadLimitMiddleware
+from upraise_ai.services.operations import OperationsMonitor
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
@@ -28,6 +29,7 @@ from upraise_ai.workflows.submission import SubmissionService
 @asynccontextmanager
 async def lifespan(app):
     settings = get_settings()
+    app.state.operations = OperationsMonitor(settings)
     app.state.submission = None
     app.state.documents = None
     app.state.jobs = None
@@ -55,9 +57,20 @@ async def lifespan(app):
             await asyncio.to_thread(app.state.sessions.prune)
 
     sweeper = asyncio.create_task(sweep_sessions())
+    async def refresh_operations():
+        while True:
+            await asyncio.sleep(settings.operations_refresh_seconds)
+            await asyncio.to_thread(app.state.operations.refresh)
+
+    await asyncio.to_thread(app.state.operations.refresh)
+    operations_task = asyncio.create_task(refresh_operations())
     try:
         yield
     finally:
+        operations_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await operations_task
+        app.state.operations.close()
         sweeper.cancel()
         with suppress(asyncio.CancelledError):
             await sweeper
@@ -69,7 +82,7 @@ async def lifespan(app):
 app = FastAPI(
     title="UPRAISE AI Module",
     version="0.1.0",
-    description="UPRAISE A1-A6 authoring, A8 ready lessons, B1 session start and B4 learner interruptions.",
+    description="UPRAISE A1-A6/A8 authoring, B1/B4/B5 learning and C1/C2 operations.",
     lifespan=lifespan,
 )
 

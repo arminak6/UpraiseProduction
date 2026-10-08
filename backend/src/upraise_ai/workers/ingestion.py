@@ -9,6 +9,7 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
+from upraise_ai.guards.operations import require_ai
 from upraise_ai.schemas.documents import IngestionMetadata, QualityStatus
 from upraise_ai.services.formats import get_processor
 from upraise_ai.storage.audit import AuditRepository
@@ -172,6 +173,7 @@ class IngestionWorker:
                 raise IngestionError("PIPELINE_CONFIGURATION_CHANGED")
             self.audit.record(job, "ACCEPTED", {"pipeline_version": job["pipeline_version"]})
             metadata = IngestionMetadata.model_validate(job["metadata"])
+            require_ai(self.settings, metadata.course_id)
             processed, embeddings = self.processor.prepare(
                 self.staging.source_path(job_id),
                 metadata,
@@ -221,7 +223,12 @@ class IngestionWorker:
                 except Exception:
                     log.warning("Document deletion pending; recovery will retry")
                 self.job_control.recover_cleanup()
-                job = self.jobs.claim(self.settings.lease_seconds, self.settings.pipeline_signature)
+                if self.settings.operations_kill_switch:
+                    self.stop.wait(self.settings.worker_poll_seconds)
+                    continue
+                blocked = sorted(self.settings.operations_kill_switch_courses)
+                filters = {"excluded_courses": blocked} if blocked else {}
+                job = self.jobs.claim(self.settings.lease_seconds, self.settings.pipeline_signature, **filters)
                 if job:
                     self.supervise(job)
                     continue

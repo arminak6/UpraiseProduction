@@ -7,6 +7,7 @@ import streamlit as st
 from api_client import Connection, normalize_base_url, request, status_path
 from learner_interrupt import render_learner_interrupt
 from learning import render_learning
+from operations import render_operations
 from session_end import render_session_end
 from session_start import render_session_start
 
@@ -399,11 +400,7 @@ elif page == "Processing status":
         st.info("Cancellation is recorded. The worker is finishing its current operation before cleanup. Retry the same action for the final 204 response.")
 
 elif page == "Health":
-    st.subheader("C1 · Backend health")
-    st.caption("GET /health · Application liveness")
-    if st.button("Check backend health", type="primary"):
-        st.session_state["health_response"] = request(connection, "GET", "/health", timeout=5)
-    show_response(st.session_state.get("health_response"))
+    render_operations(connection, show_response)
 
 else:
     st.subheader("API explorer")

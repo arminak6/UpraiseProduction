@@ -116,7 +116,9 @@ not an automatically loaded file.
   A1 pre-fills the latest accepted document/course. Deletion requires an explicit
   button click and does not resubmit on navigation. Invalid UUIDs are rejected
   locally; failed deletes retain their HTTP response for retry.
-- **Health — C1**: actual GET /health response and timing.
+- **Health — C1/C2**: explicit GET /health and /ready checks, plus optional-course
+  GET /v1/status. Shows feature states/reasons including UNKNOWN. Credential/course
+  changes clear old C2 results; checks do not invoke AI. See [C1/C2](../backend/docs/c1-c2.md).
 - **API explorer**: load live OpenAPI and send GET/POST/PUT/PATCH/DELETE requests
   with query parameters and JSON bodies, including negative tests. Use A1's
   dedicated form for multipart delivery.

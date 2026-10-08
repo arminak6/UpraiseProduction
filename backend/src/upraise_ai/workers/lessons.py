@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
+from upraise_ai.guards.operations import blocked_generation_courses, feature_enabled, require_feature
 from upraise_ai.services.lesson_callback import CallbackClient
 from upraise_ai.services.lesson_models import LessonModels
 from upraise_ai.services.lesson_pipeline import LessonPipeline
@@ -20,6 +21,7 @@ from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
 from upraise_ai.storage.lessons import LessonRepository
+from upraise_ai.storage.operations import lesson_worker_heartbeat
 from upraise_ai.storage.vectors import VectorStore
 from upraise_ai.workers.ingestion import classify_error
 from upraise_ai.workers.supervision import ChildTerminationError, JobSupervisor, prepare_child
@@ -142,6 +144,8 @@ class LessonWorker:
             with self.staging.artifact_lock(job_id):
                 try:
                     progress("SOURCE", 0.01)
+                    require_feature(self.settings, "generation", job["metadata"]["course_id"])
+                    require_feature(self.settings, "tts", job["metadata"]["course_id"])
                     if job["attempts"] > self.settings.max_attempts:
                         raise IngestionError("RETRY_LIMIT_REACHED")
                     if job["pipeline_version"] != self.settings.lesson_signature:
@@ -199,7 +203,7 @@ class LessonWorker:
                 log.warning("Lesson %s output cleanup deferred", job_id)
 
     def supervise(self, job):
-        result = self.supervisor.run(job, self.stop, heartbeat=HEARTBEAT.touch)
+        result = self.supervisor.run(job, self.stop, heartbeat=lambda: lesson_worker_heartbeat(self.settings))
         if result.reason == "WORKER_STOPPED":
             return
         limit = min(self.settings.worker_phase_timeout_seconds, self.settings.lease_seconds)
@@ -207,15 +211,21 @@ class LessonWorker:
                                                     "worker_startup_timeout_seconds": limit})
         JobSupervisor(settings, child_target=run_lesson_recovery, check_ownership=False).run(
             {**job, "supervision_error": None if result.reason == "LEASE_LOST" else
-             result.reason or "WORKER_PROCESS_EXITED"}, self.stop, heartbeat=HEARTBEAT.touch,
+             result.reason or "WORKER_PROCESS_EXITED"}, self.stop,
+            heartbeat=lambda: lesson_worker_heartbeat(self.settings),
         )
 
     def run(self):
         try:
             while not self.stop.is_set():
-                HEARTBEAT.touch()
+                lesson_worker_heartbeat(self.settings)
                 try:
-                    job = self.jobs.claim(self.settings.lease_seconds, self.settings.lesson_signature)
+                    if not (feature_enabled(self.settings, "generation") and feature_enabled(self.settings, "tts")):
+                        self.stop.wait(self.settings.worker_poll_seconds)
+                        continue
+                    blocked = blocked_generation_courses(self.settings)
+                    filters = {"excluded_courses": blocked} if blocked else {}
+                    job = self.jobs.claim(self.settings.lease_seconds, self.settings.lesson_signature, **filters)
                     if job:
                         self.supervise(job)
                         continue

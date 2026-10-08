@@ -7,6 +7,7 @@ import psycopg
 from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.guards.operations import require_feature
 from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import LessonResult
 from upraise_ai.services.lesson_callback import validate_callback_config
@@ -19,6 +20,8 @@ class LessonService:
 
     def submit(self, data, principal, key=None):
         principal.require_course(data.course_id)
+        require_feature(self.settings, "generation", data.course_id)
+        require_feature(self.settings, "tts", data.course_id)
         if key is not None and (not key.strip() or len(key) > 200):
             raise IngestionError("INVALID_IDEMPOTENCY_KEY", status=400)
         if data.callback_url:

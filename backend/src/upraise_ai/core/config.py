@@ -131,6 +131,25 @@ class Settings(BaseSettings):
     interrupt_source_characters: int = Field(24000, ge=2000, le=60000)
     interrupt_provider_timeout_seconds: int = Field(45, ge=5, le=120)
 
+    # C1/C2 use bounded local checks and observed provider calls, never synthetic inference.
+    operations_refresh_seconds: float = Field(10, ge=5, le=60, allow_inf_nan=False)
+    operations_probe_timeout_seconds: int = Field(2, ge=1, le=5)
+    operations_provider_ttl_seconds: int = Field(900, ge=60, le=3600)
+    operations_worker_ttl_seconds: int = Field(150, ge=30, le=600)
+    operations_kill_switch: bool = False
+    operations_kill_switch_courses: set[str] = Field(default_factory=set)
+    operations_disabled_features: set[Literal["answers", "stt", "tts", "generation"]] = Field(default_factory=set)
+    operations_course_disabled_features: dict[
+        str, set[Literal["answers", "stt", "tts", "generation"]]
+    ] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def operations_courses_are_bounded(self):
+        courses = self.operations_kill_switch_courses | self.operations_course_disabled_features.keys()
+        if len(courses) > 1000 or any(not key.strip() or key != key.strip() or len(key) > 120 for key in courses):
+            raise ValueError("operations course controls require up to 1000 nonempty course IDs of at most 120 characters")
+        return self
+
     @property
     def project_root(self) -> Path:
         return self.data_dir
