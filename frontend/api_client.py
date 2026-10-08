@@ -150,6 +150,8 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
             result.error = "Request timed out. The session may already be open; use Retry session start to resend the same session request."
         elif result.method == "POST" and path.endswith("/interrupts"):
             result.error = "Request timed out. Use Retry interruption with the same request ID; do not submit a new ID while it is running."
+        elif result.method == "POST" and path.endswith("/end"):
+            result.error = "Request timed out. The session may already be ended; retry the same session ID and reason."
         else:
             result.error = "Request timed out. Check the backend and retry."
     except httpx.RequestError:

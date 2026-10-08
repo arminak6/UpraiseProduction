@@ -37,6 +37,7 @@ class PlayerInterruptTests(unittest.TestCase):
         self.answer = {"text": "Un'altra spiegazione.", "audio": {"data": base64.b64encode(b"RIFF-answer").decode()},
                        "grounded": None, "sources": [], "warnings": ["GROUNDING_NOT_VERIFIED"], "playback_action": None}
         self.start_status, self.result_status = 201, 200
+        self.end_status = 204
 
     def response(self, connection, method, path, **kwargs):
         if method == "POST":
@@ -44,6 +45,10 @@ class PlayerInterruptTests(unittest.TestCase):
             if path == "/v1/sessions":
                 return api_client.Result(method, path, self.start_status, 1, copy.deepcopy(self.started), True,
                                          error="Request timed out" if self.start_status is None else None)
+            if path == f"/v1/sessions/{self.session}/end":
+                return api_client.Result(method, path, self.end_status, 1,
+                    {"detail": "AUDIT_STORAGE_UNAVAILABLE"} if self.end_status == 503 else "",
+                    error="Request timed out" if self.end_status is None else None)
             self.assertEqual(path, f"/v1/sessions/{self.session}/interrupts")
             fields = kwargs.get("json_body", kwargs.get("fields"))
             body = {**self.answer, **{key: fields[key] for key in ("request_id", "chunk_id")}}
@@ -230,6 +235,73 @@ class PlayerInterruptTests(unittest.TestCase):
             button(app, "Continue course").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.session_state["learning_state"]["index"], 0)
+
+    def test_back_ends_session_and_drops_reply_audio_but_course_can_restart(self):
+        with patch("api_client.request", side_effect=self.response), patch.dict(os.environ, {"UPRAISE_LOCAL_TEST_MODE": "true"}):
+            app = self.app()
+            self.open(app)
+            self.ask(app)
+            old_id = self.posts[0][1]["json_body"]["session_id"]
+            button(app, "Back to courses").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(self.posts[-1][0], f"/v1/sessions/{self.session}/end")
+            self.assertEqual(self.posts[-1][1]["json_body"], {"reason": "STOPPED_BY_LEARNER"})
+            state = app.session_state["learning_state"]
+            self.assertIsNone(state["active"])
+            self.assertFalse(state["interrupt"])
+            self.assertFalse(app.get("audio"))
+            self.assertFalse(any("Un'altra" in item.value for item in app.markdown))
+            button(app, "Start course").click().run()
+            self.assertEqual(len(app.get("audio")), 1)
+            self.open(app)
+            self.ask(app)
+            new_id = next(kwargs["json_body"]["session_id"] for path, kwargs in reversed(self.posts) if path == "/v1/sessions")
+            self.assertNotEqual(old_id, new_id)
+
+    def test_finish_course_ends_completed_session(self):
+        with patch("api_client.request", side_effect=self.response), patch.dict(os.environ, {"UPRAISE_LOCAL_TEST_MODE": "true"}):
+            app = self.app()
+            self.open(app)
+            self.ask(app)
+            button(app, "Continue course").click().run()
+            button(app, "Next").click().run()
+            button(app, "Finish course").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(self.posts[-1][1]["json_body"], {"reason": "COMPLETED"})
+            self.assertTrue(app.session_state["learning_state"]["complete"])
+            self.assertFalse(app.session_state["learning_state"]["interrupt"])
+            self.assertFalse(app.get("audio"))
+            button(app, "Restart course").click().run()
+            self.assertEqual(len(app.get("audio")), 1)
+
+    def test_end_failure_clears_audio_immediately_and_retries_same_end(self):
+        with patch("api_client.request", side_effect=self.response), patch.dict(os.environ, {"UPRAISE_LOCAL_TEST_MODE": "true"}):
+            app = self.app()
+            self.open(app)
+            self.ask(app)
+            self.end_status = 503
+            button(app, "Back to courses").click().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(app.get("audio"))
+            self.assertFalse(app.session_state["learning_state"]["interrupt"])
+            self.assertTrue(app.error)
+            first = self.posts[-1]
+            self.end_status = 204
+            button(app, "Retry session end").click().run()
+            self.assertEqual(self.posts[-1], first)
+            self.assertIsNone(app.session_state["learning_state"]["active"])
+            self.assertFalse(app.exception)
+
+    def test_signed_session_end_keeps_original_jwt_after_widgets_are_cleared(self):
+        with patch("api_client.request", side_effect=self.response), patch.dict(os.environ, {"UPRAISE_LOCAL_TEST_MODE": "false"}):
+            app = self.app()
+            self.open(app)
+            app.text_input(key="learning_question_jwt").set_value("private-jwt")
+            app.text_area(key="learning_question_text").set_value("Explain this")
+            button(app, "Ask teacher").click().run()
+            button(app, "Back to courses").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(self.posts[-1][1]["headers"], {"X-UPRAISE-Session-JWT": "private-jwt"})
 
 
 if __name__ == "__main__":

@@ -92,7 +92,7 @@ def render_interrupt(connection, player, *, local_testing=False):
                         body.update(session_id=state["local_id"], consent_scope=["questions"])
                     result = api_client.request(connection, "POST", "/v1/sessions", json_body=body, headers=headers)
                     if result.successful and not result.error and isinstance(result.body, dict):
-                        state.update(session=result.body, start_error=None)
+                        state.update(session=result.body, session_token=token, start_error=None)
                         started = result.body
                     else:
                         state["start_error"] = result

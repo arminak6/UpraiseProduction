@@ -42,6 +42,7 @@ async def lifespan(app):
         if settings.audit_dsn.get_secret_value():
             vectors = VectorStore(settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension)
             audit = AuditRepository(settings.audit_dsn.get_secret_value())
+            app.state.sessions.end_audit = audit.session_ended
             app.state.documents = DocumentService(jobs, vectors, audit)
             app.state.jobs = JobService(jobs, vectors, audit, staging)
             app.state.lessons = LessonService(
@@ -51,7 +52,7 @@ async def lifespan(app):
     async def sweep_sessions():
         while True:
             await asyncio.sleep(settings.session_sweep_seconds)
-            app.state.sessions.prune()
+            await asyncio.to_thread(app.state.sessions.prune)
 
     sweeper = asyncio.create_task(sweep_sessions())
     try:

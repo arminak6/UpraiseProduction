@@ -74,6 +74,10 @@ def render_learner_interrupt(connection, show_response):
     context = hashlib.sha256(json.dumps({"session": session_id, "chunk": chunk_id, "mode": mode,
         "text": message, "audio_hash": hashlib.sha256(audio).hexdigest() if audio is not None else None,
         "token_hash": hashlib.sha256(token.encode()).hexdigest()}, sort_keys=True).encode()).hexdigest()
+    try:
+        state["session_id"] = str(UUID(session_id.strip()))
+    except ValueError:
+        state["session_id"] = None
     if state["context"] != context:
         state.update(context=context, request_id=str(uuid4()), response=None, attempted=False)
     st.caption("Message request ID (kept for retries)")

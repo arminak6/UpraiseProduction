@@ -20,9 +20,33 @@ AI_NOTICES = {
 }
 
 
+def authorize_session(settings, store, session_id, principal, token=None, *, include_ended=False):
+    """Shared B4/B5 binding authorization; questions consent is specific to B4."""
+    principal.require_scope("sessions:write")
+    session = store.get(session_id, principal.client_id, include_ended=include_ended)
+    binding = session.binding
+    principal.require_course(binding.course_id)
+    local = principal.local_test and settings.environment == "development" and settings.local_test_mode
+    if not (local and token is None and binding.preview):
+        claims = validate_session_jwt(token, settings)
+        expected = (str(session.response.session_id), binding.client_id, binding.subject, binding.lesson_job_id,
+                    binding.course_id, binding.activity_id, binding.lesson_id, binding.result_sha256,
+                    binding.consent_scope)
+        actual = (str(claims.session_id), claims.client_id, claims.sub, str(claims.lesson_job_id),
+                  claims.course_id, claims.activity_id, claims.lesson_id, claims.result_sha256,
+                  tuple(sorted(claims.consent_scope)))
+        if actual != expected or not claims.lesson_approved:
+            raise HTTPException(403, "SESSION_SCOPE_MISMATCH")
+    return session
+
+
 class SessionService:
     def __init__(self, settings, lessons, store):
         self.settings, self.lessons, self.store = settings, lessons, store
+
+    def end(self, session_id, data, principal, token=None):
+        authorize_session(self.settings, self.store, session_id, principal, token, include_ended=True)
+        self.store.end(session_id, principal.client_id, data.reason, audit=self.lessons.audit.session_ended)
 
     def start(self, data, principal, token=None):
         principal.require_scope("sessions:write")

@@ -4,5 +4,6 @@
 !api_client.py
 !learning.py
 !session_start.py
+!session_end.py
 !learner_interrupt.py
 !learning_interrupt.py

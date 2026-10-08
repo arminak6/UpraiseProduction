@@ -7,6 +7,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
 
 Consent = Literal["questions", "telemetry"]
+EndReason = Literal["COMPLETED", "STOPPED_BY_LEARNER", "TIMEOUT", "ERROR"]
+
+
+class EndSessionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: EndReason
 
 
 class SessionInput(BaseModel):

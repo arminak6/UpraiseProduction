@@ -1,7 +1,7 @@
 # UPRAISE AI Module
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
-A8 ready-lesson listing, B1 lesson start and B4 learner interruption are implemented.
+A8 ready-lesson listing, B1 lesson start, B4 learner interruption and B5 session end are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -34,7 +34,9 @@ responses with safety/language checks. Factual grounding verification is tempora
 disabled: `grounded=null`, with contextual source references. Reply text is the
 input to its speech; see [B4](backend/docs/b4.md). Its replacement is in the ignored
 `FUTURE_UPDATES.md` backlog.
-B2/B3/B5/B6 remain reserved. Existing 24-hour lesson retention remains.
+B5 clears learner history and interruption audio and records session_ended;
+course text/audio and source vectors keep their existing retention. See [B5](backend/docs/b5.md).
+B2/B3/B6 remain reserved. Existing 24-hour lesson retention remains.
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,
 matching the Word specification. A1 retains processor readability/resource limits and
@@ -82,6 +84,8 @@ audio pause/resume, Replay, Finish and Restart control session-only progress.
 panel for the current part. With Questions consent (or the signed session JWT),
 the first message starts B1 and sends B4; later messages reuse the session.
 **Continue course** returns to this part and applies replay/speed instructions.
+**Finish course** and **Back to courses** end an open question session through
+B5 and clear its temporary replies. **End session (B5)** offers explicit API tests.
 All lessons remain drafts requiring human review, and temporary playback expires
 after the configured A5 TTL (24 hours by default).
 It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,

@@ -1,4 +1,4 @@
-"""B1 session start and B4 learner interruption."""
+"""B1 session start, B4 learner interruption and B5 session end."""
 
 from fastapi import APIRouter
 

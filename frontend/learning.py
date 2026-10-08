@@ -149,6 +149,15 @@ def render_lesson_audio(state):
 
 
 def render_player(connection, state, *, local_testing=False):
+    from session_end import end_learning, finish_learning_end
+    if state.get("end_pending"):
+        st.info("Playback stopped. Session cleanup needs a retry.")
+        from learning_interrupt import show_error
+        show_error(state["end_error"])
+        if st.button("Retry session end", type="primary"):
+            finish_learning_end(connection, state)
+            st.rerun()
+        return
     lesson = state["active"]
     if expired(lesson):
         state.update(active=None, audio=None, items=[], loaded=False, interrupt={}, interrupt_open=False,
@@ -222,12 +231,10 @@ def render_player(connection, state, *, local_testing=False):
                 load_part(connection, state, lesson["job_id"], index)
                 st.rerun()
         if not interrupted and index == len(chunks) - 1 and st.button("Finish course", type="primary"):
-            state.update(complete=True, audio=None)
+            end_learning(connection, state, "COMPLETED")
             st.rerun()
     if st.button("Back to courses"):
-        from learning_interrupt import clear_question_widgets
-        clear_question_widgets()
-        state.update(active=None, audio=None, error=None, loaded=False, interrupt={}, interrupt_open=False)
+        end_learning(connection, state, "STOPPED_BY_LEARNER", back=True)
         st.rerun()
 
 

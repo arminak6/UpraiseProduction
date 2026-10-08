@@ -49,6 +49,10 @@ not an automatically loaded file.
   rechecks A5 and resumes this part, applying any replay/speed instruction.
   Playback-position inputs are omitted; Continue replays the current part from
   its beginning. Expired sessions require an explicit new session.
+  **Finish course** ends an open B1 session through B5 with `COMPLETED`;
+  **Back to courses** sends `STOPPED_BY_LEARNER`. Both clear interruption replies
+  and stop playback. If closure fails, **Retry session end** preserves the same
+  session/reason without retaining its answer audio. A3 course WAVs are preserved.
   No generation or A6 receipt happens automatically. Each explicit playback action
   rechecks A5, and changing the backend/authentication clears cached playback.
   Ready means a DRAFT preview requiring human approval. Expired/acknowledged jobs
@@ -69,7 +73,7 @@ not an automatically loaded file.
   Middleware session JWT in addition to the sidebar service token/mTLS settings;
   it sends no body session/consent claims. Requests only run after explicit clicks.
   The page initializes backend RAM state; Learning remains the separate text/voice
-  player. B2/B3/B5/B6 remain reserved. See [B1](../backend/docs/b1.md).
+  player. B2/B3/B6 remain reserved. See [B1](../backend/docs/b1.md).
 - **Learner interrupt (B4)**: start B1 with Questions consent, load A5 teaching
   chunks, choose the interrupted chunk, and submit free text or a PCM WAV recording.
   Displays/plays inline answer text/audio and source references, or displays a
@@ -79,6 +83,12 @@ not an automatically loaded file.
   ends availability. This separate API test page remains available alongside
   the integrated interruption panel in Learning.
   See [B4](../backend/docs/b4.md) for limits, consent and temporary storage.
+- **End session (B5)**: enter the B1 session UUID and choose its end reason.
+  Production also supplies the matching masked session JWT. Explicit submission
+  returns empty 204 and clears matching frontend B1/B4 state and answer audio.
+  Retry with the same session ID/reason after a timeout. No A2/A6 action occurs;
+  generated course text/audio and source material retain their existing policies.
+  See [B5](../backend/docs/b5.md).
 - **Lesson result/audio — A5**: on Processing status, fetch DRAFT JSON and
   authenticated chunk audio, play or download the WAV. Download needed artifacts
   before A6 RECEIVED removes the temporary lesson copy. Expiry defaults to 24 hours.

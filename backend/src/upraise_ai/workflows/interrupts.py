@@ -16,7 +16,6 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
 from upraise_ai.core.errors import IngestionError
-from upraise_ai.guards.session_jwt import validate_session_jwt
 from upraise_ai.schemas.interrupts import InlineAudio, InterruptResponse, LearnerIntent
 from upraise_ai.schemas.lessons import LessonSource
 from upraise_ai.services.aws import aws_session
@@ -24,6 +23,7 @@ from upraise_ai.services.embeddings import BedrockTitanEmbeddingProvider
 from upraise_ai.services.interrupt_models import InterruptTeacher
 from upraise_ai.services.interrupt_stt import InterruptSTT, wav_pcm
 from upraise_ai.services.lesson_speech import LessonSpeech
+from upraise_ai.workflows.sessions import authorize_session
 
 
 def interrupt_speech(settings, models):
@@ -58,26 +58,13 @@ class InterruptService:
         self.input_capacity = BoundedSemaphore(settings.interrupt_max_concurrent)
 
     def authorized_session(self, session_id, principal, token):
-        principal.require_scope("sessions:write")
-        session = self.store.get(session_id, principal.client_id)
-        binding = session.binding
-        principal.require_course(binding.course_id)
-        local = principal.local_test and self.settings.environment == "development" and self.settings.local_test_mode
-        if not (local and token is None and binding.preview):
-            claims = validate_session_jwt(token, self.settings)
-            expected = (str(session.response.session_id), binding.client_id, binding.subject, binding.lesson_job_id,
-                        binding.course_id, binding.activity_id, binding.lesson_id, binding.result_sha256,
-                        binding.consent_scope)
-            actual = (str(claims.session_id), claims.client_id, claims.sub, str(claims.lesson_job_id),
-                      claims.course_id, claims.activity_id, claims.lesson_id, claims.result_sha256,
-                      tuple(sorted(claims.consent_scope)))
-            if actual != expected or not claims.lesson_approved:
-                raise HTTPException(403, "SESSION_SCOPE_MISMATCH")
-        if "questions" not in binding.consent_scope:
+        session = authorize_session(self.settings, self.store, session_id, principal, token)
+        if "questions" not in session.binding.consent_scope:
             raise HTTPException(403, "QUESTIONS_CONSENT_REQUIRED")
         return session
 
     def _lesson(self, session, data, principal):
+        self.store.ensure_current(session)
         row = self.lessons.authorized(session.binding.lesson_job_id, principal)
         with self.lessons.staging.artifact_lock(session.binding.lesson_job_id, shared=True):
             result = self.lessons.result(row)
@@ -132,7 +119,10 @@ class InterruptService:
             try:
                 for language, scope in groups.items():
                     query = teacher.rewrite_query(intent.retrieval_query or message, language)
-                    chunks.extend(self.vectors.search_session(provider.embed_query(query), session.binding.course_id,
+                    self.store.ensure_current(session)
+                    vector = provider.embed_query(query)
+                    self.store.ensure_current(session)
+                    chunks.extend(self.vectors.search_session(vector, session.binding.course_id,
                                                               scope, limit=6))
             except IngestionError:
                 raise
@@ -174,16 +164,23 @@ class InterruptService:
         messages = MESSAGES.get(session.binding.language.split("-")[0], MESSAGES["en"])
 
         def transcribe(state):
+            self.store.ensure_current(session)
             if audio is None:
                 return {"message": data.text}
             pcm, rate = wav_pcm(audio, self.settings)
-            return {"message": self.stt.transcribe(pcm, rate, session.binding.language)}
+            self.store.ensure_current(session)
+            message = self.stt.transcribe(pcm, rate, session.binding.language)
+            self.store.ensure_current(session)
+            return {"message": message}
 
         def classify(state):
             self.store.ensure_current(session)
-            return {"intent": LearnerIntent.model_validate(teacher.classify(state["message"], context, history))}
+            intent = teacher.classify(state["message"], context, history)
+            self.store.ensure_current(session)
+            return {"intent": LearnerIntent.model_validate(intent)}
 
         def response(state):
+            self.store.ensure_current(session)
             intent = state["intent"]
             value = InterruptResponse(request_id=data.request_id, chunk_id=data.chunk_id,
                 playback_action=intent.playback_action,
@@ -193,6 +190,7 @@ class InterruptService:
                 value.warnings.append("INPUT_BLOCKED")
             elif intent.operation == "clarify":
                 text = teacher.clarify(state["message"], context, history)
+                self.store.ensure_current(session)
                 rejected = self._output_rejections(teacher.check_output(text))
                 value.text = text if not rejected else messages[2]
                 value.warnings.extend(rejected)
@@ -203,7 +201,9 @@ class InterruptService:
                     value.playback_action = None
                     value.warnings.append("ANSWER_NOT_SUPPORTED")
                 else:
+                    self.store.ensure_current(session)
                     text = teacher.respond(state["message"], intent.student_goal, context, history, chunks)
+                    self.store.ensure_current(session)
                     rejected = self._output_rejections(teacher.check_output(text))
                     if rejected:
                         value.text = messages[1] if "ANSWER_SAFETY_REJECTED" in rejected else messages[2]
@@ -223,6 +223,7 @@ class InterruptService:
             return {"response": value}
 
         def player(state):
+            self.store.ensure_current(session)
             return {"response": InterruptResponse(request_id=data.request_id, chunk_id=data.chunk_id,
                                                    playback_action=state["intent"].playback_action)}
 
@@ -233,13 +234,17 @@ class InterruptService:
                 speech = self.speech_factory(self.settings, teacher)
                 language_code = speech.validate_voice(session.response.voice, session.binding.language)
                 ssml, parts, issues = speech.prepare(value.text, session.binding.language)
+                self.store.ensure_current(session)
                 audio_bytes, marks, _, _ = speech.synthesize(parts, session.response.voice, language_code)
+                self.store.ensure_current(session)
                 if len(audio_bytes) > 4_000_000:
                     raise ValueError("Reply audio limit")
                 value.ssml, value.visemes = ssml, marks
                 value.audio = InlineAudio(data=base64.b64encode(audio_bytes).decode("ascii"))
                 if issues or getattr(speech, "last_timing_issues", []):
                     value.warnings.append("SPEECH_REQUIRES_REVIEW")
+            except HTTPException:
+                raise
             except Exception:
                 value.ssml, value.audio, value.visemes = None, None, []
                 value.warnings.append("AUDIO_UNAVAILABLE")
@@ -272,6 +277,7 @@ class InterruptService:
         with self.store.interrupt(session_id, principal.client_id, request_id, fingerprint) as (session, cached):
             row, chunk, context, versions = self._lesson(session, data, principal)
             if cached is not None:
+                self.store.ensure_current(session)
                 return cached
             if not self.capacity.acquire(blocking=False):
                 raise HTTPException(503, "INTERRUPT_CAPACITY_REACHED", headers={"Retry-After": "2"})

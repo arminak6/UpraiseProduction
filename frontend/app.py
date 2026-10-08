@@ -7,6 +7,7 @@ import streamlit as st
 from api_client import Connection, normalize_base_url, request, status_path
 from learner_interrupt import render_learner_interrupt
 from learning import render_learning
+from session_end import render_session_end
 from session_start import render_session_start
 
 st.set_page_config(page_title="UPRAISE", page_icon="🧪", layout="wide")
@@ -69,7 +70,7 @@ with st.sidebar:
         st.caption("Use your HTTPS mTLS gateway. Certificate files and tokens are session-only.")
     timeout = st.number_input("Request timeout (seconds)", min_value=5, max_value=600, value=180, step=5)
     st.divider()
-    page = st.radio("Pages", ["Learning", "Start session (B1)", "Learner interrupt (B4)", "Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
+    page = st.radio("Pages", ["Learning", "Start session (B1)", "Learner interrupt (B4)", "End session (B5)", "Ingest material", "Manage material", "Generate lesson", "Processing status", "Health", "API explorer"], key="page")
     st.button("Clear session data", on_click=clear_session, width="stretch")
 
 try:
@@ -106,7 +107,7 @@ for name in ("submission_key", "course_id", "activity_id", "language", "source_r
 for name, default in {"language": "en", "mime": "application/pdf", "fill_hash": True}.items():
     st.session_state.setdefault(name, default)
 for name in list(st.session_state):
-    if name.startswith(("b1_field_", "b4_field_", "learning_question_")):
+    if name.startswith(("b1_field_", "b4_field_", "b5_field_", "learning_question_")):
         st.session_state[name] = st.session_state[name]
 
 connection = Connection(
@@ -169,6 +170,8 @@ elif page == "Start session (B1)":
     render_session_start(connection, show_response, local_testing=local_testing)
 elif page == "Learner interrupt (B4)":
     render_learner_interrupt(connection, show_response)
+elif page == "End session (B5)":
+    render_session_end(connection, show_response)
 
 elif page == "Ingest material":
     st.subheader("A1 · Ingest teaching material")
