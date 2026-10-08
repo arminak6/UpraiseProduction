@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
+from upraise_ai.schemas.revisions import LessonRevision, RevisionRequest
+
 
 class LessonOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -39,6 +41,11 @@ class LessonInput(BaseModel):
 
 class AcceptedLesson(BaseModel):
     job_id: str
+
+
+class StoredLessonInput(LessonInput):
+    """Worker-only metadata extension; A3's public request remains unchanged."""
+    revision_request: RevisionRequest | None = None
 
 
 class ReviewIssue(BaseModel):
@@ -121,3 +128,4 @@ class LessonResult(BaseModel):
     reviewer_report: ReviewReport
     versions: dict[str, str]
     expires_at: str | None = None
+    revision: LessonRevision | None = None

@@ -62,6 +62,7 @@ class LessonService:
             chunk_count=row["result"]["chunk_count"], requires_review=True,
             review_issue_count=row["result"].get("review_issue_count", 0),
             created_at=row["created_at"], expires_at=row["expires_at"],
+            revision=row["result"].get("revision"),
         ) for row in rows]
 
     def result(self, row):

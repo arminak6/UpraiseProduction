@@ -17,6 +17,7 @@ from upraise_ai.services.lesson_callback import CallbackClient
 from upraise_ai.services.lesson_models import LessonModels
 from upraise_ai.services.lesson_pipeline import LessonPipeline
 from upraise_ai.services.lesson_speech import LessonSpeech
+from upraise_ai.services.revision_pipeline import RevisionPipeline
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
@@ -153,7 +154,8 @@ class LessonWorker:
                     if self.settings.aws_region not in {"eu-central-1", "eu-central-2", "eu-west-1", "eu-west-3",
                                                        "eu-north-1", "eu-south-1", "eu-south-2"}:
                         raise IngestionError("LESSON_EU_REGION_REQUIRED")
-                    pipeline = LessonPipeline(self.settings, self.documents, self.vectors, self.staging, None, None)
+                    pipeline_class = RevisionPipeline if job["metadata"].get("revision_request") else LessonPipeline
+                    pipeline = pipeline_class(self.settings, self.documents, self.vectors, self.staging, None, None)
                     documents = pipeline.load_documents(job)
                     if documents is None:
                         with self.jobs.owned_transaction(job_id, token) as conn:
@@ -161,6 +163,10 @@ class LessonWorker:
                                                    self.settings.lesson_ttl_seconds)
                         return
                     self.audit.lesson(job, "ACCEPTED", {"pipeline_version": job["pipeline_version"]})
+                    if job["metadata"].get("revision_request"):
+                        revision = job["metadata"]["revision_request"]
+                        self.audit.lesson(job, "REVISION_ACCEPTED", {key: revision[key]
+                            for key in ("parent_job_id", "chunk_id", "number")})
                     pipeline.models = self.models or LessonModels(
                         self.settings, diagnostic_dir=self.staging.job_dir(job_id) / "model-diagnostics")
                     pipeline.speech = self.speech or LessonSpeech(self.settings, pipeline.models)
@@ -184,9 +190,14 @@ class LessonWorker:
                                    "chunk_count": len(result.chunks), "requires_review": True,
                                    "review_approved": result.reviewer_report.approved,
                                    "review_issue_count": len(result.reviewer_report.issues), "label": "AI-generated"}
+                        if result.revision:
+                            summary["revision"] = result.revision.model_dump(mode="json")
                         with (self.staging.job_dir(job_id) / "result.json").open("rb") as stream:
                             summary["result_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
                         self.audit.lesson(job, "DRAFT_CREATED", summary, attempt=True)
+                        if result.revision:
+                            self.audit.lesson(job, "CHUNK_REVISED", {**result.revision.model_dump(mode="json"),
+                                "result_sha256": summary["result_sha256"]}, attempt=True)
                         self.jobs.done(conn, job_id, token, summary, self.settings.lesson_ttl_seconds)
                 except LeaseLost:
                     pass

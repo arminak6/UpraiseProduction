@@ -77,6 +77,15 @@ class LessonRepository(JobRepository):
         with self.connect() as conn:
             return conn.execute("SELECT * FROM lesson_jobs WHERE job_id=%s", (job_id,)).fetchone()
 
+    def accept_revision(self, conn, job_id, client_id, fingerprint, metadata, pipeline_version):
+        # Caller stages independent artifacts while holding the parent snapshot
+        # lock. Visibility starts only when that transaction commits.
+        return conn.execute(
+            """INSERT INTO lesson_jobs(job_id,client_id,request_fingerprint,metadata,pipeline_version)
+            VALUES (%s,%s,%s,%s,%s) RETURNING *""",
+            (job_id, client_id, fingerprint, Jsonb(metadata), pipeline_version),
+        ).fetchone()
+
     def list_ready(self, client_id, courses, course_id, limit, offset):
         # Apply ownership/course/availability filters BEFORE pagination. A8
         # exposes metadata only; A5 rechecks artifacts and audits playback.

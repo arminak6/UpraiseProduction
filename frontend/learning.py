@@ -107,7 +107,9 @@ def course_label(item):
     language = LANGUAGES.get(language.lower().split("-", 1)[0], language)
     title = item.get("lesson_id", "Lesson").replace("-", " ").replace("_", " ")
     created = item.get("created_at", "")[:16].replace("T", " ")
-    return f"{title} · {language} · {item.get('learner_level', 'intermediate')} · {created}"
+    revision = item.get("revision") or {}
+    version = f" · revision {revision['number']}" if revision.get("number") else ""
+    return f"{title}{version} · {language} · {item.get('learner_level', 'intermediate')} · {created}"
 
 
 def refresh_courses(connection, state, *, more=False):

@@ -63,6 +63,12 @@ not an automatically loaded file.
   level. Optional MW callback requires outbound OAuth/mTLS configuration.
   Submission returns job_id and remembers A4 Location; the retry key survives
   navigation. Start a new lesson generation to request fresh output.
+- **Revise chunk (A7)**: load a ready lesson by catalog or job ID, select its
+  teaching chunk and describe the teacher's requested changes. Language, level
+  and voice are inherited. Submission creates a new complete lesson version;
+  Processing status checks progress/text/audio, and Learning lists completed
+  revisions. No automatic submission retry; A7 request idempotency is deferred.
+  See [A7](../backend/docs/a7.md).
 - **Start session (B1)**: choose an available A8 lesson, then **Start session**.
   Displays the B1 HTTP response, session UUID, AI notice, language/level
   and expiry. **Retry session start** reuses the same local UUID

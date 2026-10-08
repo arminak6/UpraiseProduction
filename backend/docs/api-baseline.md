@@ -6,7 +6,8 @@ conversation is context. References remain drafts; changes require an explicit
 project decision. The inventory below preserves the original Word baseline;
 the differences table records explicit implementation decisions separately.
 
-A1-A6/A8, B1/B4/B5 and C1/C2 are implemented. C1/C2's user-approved 2026-10-08
+A1-A8, B1/B4/B5 and C1/C2 are implemented. A7's user-approved 2026-10-08
+teacher-feedback/new-version contract is in [a7.md](a7.md). C1/C2's approved
 contract is in [c1-c2.md](c1-c2.md), including cached evidence and UNKNOWN state.
 Other endpoints remain reserved for their original responsibility. A3/A5's approved
 contract is in `a3.md`; B1's integration details are in `b1.md`.
@@ -31,7 +32,7 @@ the user-requested A2 contract and operational interpretation are in `a2.md`.
 
 A8 is a user-approved extension dated 2026-10-07, separate from the original
 Word inventory: `GET /v1/lesson-jobs` lists ready generated lessons for frontend
-selection. See [A8's contract](a8.md). A7 remains reserved as above.
+selection. See [A8's contract](a8.md). A7 now uses the approved contract in [a7.md](a7.md).
 
 B1 was approved on 2026-10-07 with process-local temporary state and the existing
 24-hour lesson-output retention. Its implemented contract adds an exact
@@ -111,6 +112,7 @@ A1 decisions.
 | Runtime providers | Word A3/B4 refer to AWS EU-region speech/LLM. The scaffold prompt leaves providers undecided; diagram's Speech Services is generic | A3 uses original V3 GPT OSS/Qwen and EU-region Polly. B4 reuses those models/speech plus Titan retrieval and in-memory Transcribe Streaming |
 | Audit scope | Common convention says every API ends in AUDIT, but A2 lists audit for delete only, A4 omits an audit step, and B6 says no data are persisted | A1 lifecycle and A2 deletion audit are implemented; A2 list has no audit per the explicit request. Broader API/read/rejection audit scope and retention need clarification |
 | C1/C2 monitoring | Word defines liveness/readiness and feature flags without JSON schemas | On 2026-10-08 user approved C1/C2. `/health` stays dependency-free; `/ready` reports core readiness and feature degradation. `/v1/status` uses jobs:read/course authorization, nullable availability, content-free recent provider evidence and operator controls shared with workers. C3 remains reserved |
+| A7 author revisions | Word proposes edited text and audio-only regeneration | On 2026-10-08 user approved lesson_job_id, chunk_id and teacher_review; retrieve PG text and Qdrant sources, reuse the three A3 roles, and publish one revised chunk in a new complete lesson version with A4/A5/A8 handling. Language/level/voice are inherited. Request idempotency is deferred; existing versions/sessions remain unchanged. See a7.md |
 | A1 enrichment | Earlier Word A1 overview says LLM=No; old extraction uses generative Nova math/figure enrichment | User explicitly approved the old pipeline including Nova on 2026-10-02; applies to A1 extraction only |
 | A1 Ingestion Guard | Original A1 requires instruction scanning and origin/MIME/hash provenance checks | User explicitly removed this stage on 2026-10-02. No instruction/active-content, expected-hash, magic/declared MIME/extension or source-host allowlist checks remain. PDF readability/encryption/size/page support limits, OAuth/mTLS INGRESS and HTTPS/TLS/DNS network handling remain |
 | A1 accepted response | Original Word A1 returns document_id and job_id | User requested job_id removal on 2026-10-02, then restored it on 2026-10-06 after checking the Word specification. A1 now returns both document_id and job_id. Location identifies the A4 route for the same ingestion job; use that job_id with A4/A6. A5 uses the lesson job_id returned by A3 |

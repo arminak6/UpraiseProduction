@@ -1,7 +1,7 @@
 # UPRAISE AI Module
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
-A8 ready-lesson listing, B1 lesson start, B4 learner interruption, B5 session end,
+A7 chunk revision/audio regeneration, A8 ready-lesson listing, B1 lesson start, B4 learner interruption, B5 session end,
 C1 health/readiness and C2 feature status are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
@@ -25,6 +25,7 @@ See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
 [A5 pull downloads, auditing and TTL](backend/docs/a5.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
+See [A7's teacher-feedback revisions and matching audio](backend/docs/a7.md).
 See [B1's temporary sessions, JWT/consent contract and local curl](backend/docs/b1.md).
 B1 opens process-local learner state for one selected A3 generation; restarts
 clear sessions. Its default 30-minute TTL is capped by lesson/token expiry.

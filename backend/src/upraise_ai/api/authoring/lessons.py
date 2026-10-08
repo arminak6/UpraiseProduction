@@ -8,6 +8,8 @@ from starlette.background import BackgroundTask
 from upraise_ai.guards.ingress import Principal, ingress
 from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import AcceptedLesson, LessonInput, LessonResult
+from upraise_ai.schemas.revisions import ChunkRevisionInput
+from upraise_ai.workflows.revisions import submit_revision
 
 router = APIRouter()
 
@@ -19,7 +21,8 @@ def service(request):
     return value
 
 
-@router.get("/v1/lesson-jobs", response_model=list[ReadyLesson], summary="A8 - List ready generated lessons")
+@router.get("/v1/lesson-jobs", response_model=list[ReadyLesson], response_model_exclude_none=True,
+            summary="A8 - List ready generated lessons")
 def ready_lessons(request: Request, response: Response,
                   course_id: str | None = Query(None, min_length=1, max_length=120),
                   limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
@@ -39,7 +42,8 @@ def generate_lesson(data: LessonInput, request: Request, response: Response,
     return result
 
 
-@router.get("/v1/jobs/{job_id}/result", response_model=LessonResult, summary="A5 - Fetch a draft lesson")
+@router.get("/v1/jobs/{job_id}/result", response_model=LessonResult, response_model_exclude_none=True,
+            summary="A5 - Fetch a draft lesson")
 def lesson_result(job_id: UUID, request: Request, response: Response, principal: Principal = Depends(ingress)):
     principal.require_scope("jobs:read")
     lessons = service(request)
@@ -47,6 +51,18 @@ def lesson_result(job_id: UUID, request: Request, response: Response, principal:
     with lessons.staging.artifact_lock(str(job_id), shared=True):
         result = lessons.result(row)
         lessons.audit_download(row)
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.post("/v1/audio:regenerate", response_model=AcceptedLesson, status_code=202,
+             summary="A7 - Revise one teaching chunk and regenerate its audio")
+def regenerate_audio(data: ChunkRevisionInput, request: Request, response: Response,
+                     principal: Principal = Depends(ingress)):
+    principal.require_scope("lessons:write")
+    # Request idempotency is explicitly deferred for A7. Every submission is new.
+    result = submit_revision(service(request), data, principal)
+    response.headers["Location"] = f"/v1/jobs/{result['job_id']}"
     response.headers["Cache-Control"] = "no-store"
     return result
 

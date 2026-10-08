@@ -162,3 +162,8 @@ class LessonModels:
 
     def math_narration(self, latex, context, language):
         return self.narrate_math_fallback([MathNarrationRequest(latex, context)], language)[0]
+
+    def revise_chunk(self, section, original, feedback, neighbours, *, learner_level, notify):
+        from upraise_ai.services.revision_models import revise_chunk
+
+        return revise_chunk(self, section, original, feedback, neighbours, learner_level=learner_level, notify=notify)

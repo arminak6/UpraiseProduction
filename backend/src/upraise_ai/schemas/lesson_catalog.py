@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from upraise_ai.schemas.revisions import LessonRevision
+
 
 class ReadyLesson(BaseModel):
     job_id: str
@@ -21,3 +23,4 @@ class ReadyLesson(BaseModel):
     review_issue_count: int
     created_at: datetime
     expires_at: datetime | None
+    revision: LessonRevision | None = None

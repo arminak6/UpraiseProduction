@@ -14,6 +14,7 @@ from upraise_ai.schemas.lessons import (
     ReviewIssue,
     ReviewReport,
     SectionDraft,
+    StoredLessonInput,
 )
 from upraise_ai.services.lesson_models import (
     DRAFT_PROMPT,
@@ -123,7 +124,7 @@ class LessonPipeline:
         self.models, self.speech = models, speech
 
     def load_documents(self, job):
-        data = LessonInput.model_validate(job["metadata"])
+        data = StoredLessonInput.model_validate(job["metadata"])
         rows, waiting = [], False
         for document_id in data.document_ids:
             with self.documents.document_transaction(str(document_id)) as (_, row):
