@@ -276,6 +276,26 @@ class SessionStore:
         with self._lock:
             self._ensure_current_locked(session)
 
+    def chunk_end(self, session, lesson_id, chunk_id, score, audit):
+        """Keep only the latest consented score in RAM; never extend the TTL.
+
+        Audit does not receive the measurement or decision. Do not hold the
+        global session lock during storage I/O, and fence B5/expiry before commit.
+        """
+        with self._lock:
+            self._ensure_current_locked(session)
+            if lesson_id != session.binding.lesson_id:
+                raise HTTPException(409, "SESSION_LESSON_MISMATCH")
+            if chunk_id not in session.chunk_ids:
+                raise HTTPException(404, "LESSON_CHUNK_NOT_FOUND")
+            index = session.chunk_ids.index(chunk_id)
+        audit(session, chunk_id)
+        with self._lock:
+            self._ensure_current_locked(session)
+            session.current_chunk_index = index
+            session.cognitive_load_state = score if "telemetry" in session.binding.consent_scope else None
+            return "HIGH_COGNITIVE_LOAD" if session.cognitive_load_state is not None and score > 0.5 else "PROCEED"
+
     def finish_interrupt(self, session, request_id, fingerprint, response, message):
         # Caller owns interrupt_lock. This is RAM only; content never enters audit.
         size = len(response.model_dump_json().encode())

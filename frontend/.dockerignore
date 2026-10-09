@@ -3,6 +3,7 @@
 !app.py
 !operations.py
 !chunk_revision.py
+!chunk_end.py
 !api_client.py
 !learning.py
 !session_start.py

@@ -6,7 +6,7 @@ conversation is context. References remain drafts; changes require an explicit
 project decision. The inventory below preserves the original Word baseline;
 the differences table records explicit implementation decisions separately.
 
-A1-A8, B1/B4/B5 and C1/C2 are implemented. A7's user-approved 2026-10-08
+A1-A8, B1/B2/B4/B5 and C1/C2 are implemented. A7's user-approved 2026-10-08
 teacher-feedback/new-version contract is in [a7.md](a7.md). C1/C2's approved
 contract is in [c1-c2.md](c1-c2.md), including cached evidence and UNKNOWN state.
 Other endpoints remain reserved for their original responsibility. A3/A5's approved
@@ -48,7 +48,11 @@ User reaffirmed v2 teacher responses and on 2026-10-07 temporarily disabled the
 strict factual grounding gate. Safety/language review remains; native response
 text feeds speech, `grounded=null`, and sources identify context. Replacement
 evidence validation is deferred in the ignored root `FUTURE_UPDATES.md`.
-See [B4's contract](b4.md) and [B5](b5.md). B2/B3/B6 remain reserved. The following table keeps
+See [B4's contract](b4.md) and [B5](b5.md). B2 was approved on 2026-10-09 with
+lesson_id, chunk_id and cognitive_load_score: an input score >0.5 returns
+HIGH_COGNITIVE_LOAD, otherwise PROCEED; absent telemetry consent always proceeds.
+The score stays in session RAM and B5 clears it. See [B2](b2.md). B3/B6 remain
+reserved. The following table keeps
 the original Word inventory for reference.
 
 ## B runtime APIs
@@ -106,7 +110,7 @@ A1 decisions.
 | Interrupt intents | Diagram's Agent 2 says ask/repeat/continue/pause/stop. Word B4 classifies question/repeat and returns REPEAT/ANSWER | On 2026-10-07 user approved open-ended V2-style semantic B4 with one response shape and bounded player instructions. On 2026-10-08 user approved B5 explicit session end: clear learner history/reply audio, retain course WAVs and PG text, audit once; B3 remains reserved |
 | Temporary lesson output | Diagram says no lesson storage inside the module. Word A3/A5/A6 allow a temporary local result/audio copy until acknowledgement/TTL for pull mode | On 2026-10-05 the user approved A3/A5, temporary output until explicit A6 receipt or configurable 24-hour TTL. On 2026-10-06 the user requested permanent retention of finalized lesson text as in Uprise/v2. Text/SSML and provenance/review/versions now survive cleanup in PostgreSQL; A5 JSON/audio remain temporary and audit stays content-free |
 | Job/checkpoint state | Word open point 4 suggests Redis or a job table, to check against audit-only PostgreSQL; diagram shows no job store | User approved durable PostgreSQL ingestion jobs on 2026-10-02. Separate worker, database roles and processing artifacts implement recovery; no learner-session checkpoints |
-| Placeholder names | Word overview uses `{id}` for A2 and B2-B6; detailed sections use `{document_id}` and `{session_id}` | User's 2026-10-02 A2 request explicitly uses document_id; implemented that detailed form. Runtime placeholders remain reserved |
+| Placeholder names | Word overview uses `{id}` for A2 and B2-B6; detailed sections use `{document_id}` and `{session_id}` | User's 2026-10-02 A2 request uses document_id; implemented that detailed form. B1/B2/B4/B5 use session_id; B3/B6 remain reserved |
 | Telemetry path | Diagram draws Middleware telemetry. Word B6 leaves direct versus Middleware routing open and suggests a possible `/v1/sessions/{session_id}/telemetry/ws` | Preserve original REST B6. WebSocket is an open possibility, not an added contract |
 | Spoken answer transport | Word gives SSE event order for B4 while common conventions/open points leave SSE versus WebSocket unresolved | User approved initial synchronous B4 response with inline temporary audio on 2026-10-07; streaming remains future work |
 | Runtime providers | Word A3/B4 refer to AWS EU-region speech/LLM. The scaffold prompt leaves providers undecided; diagram's Speech Services is generic | A3 uses original V3 GPT OSS/Qwen and EU-region Polly. B4 reuses those models/speech plus Titan retrieval and in-memory Transcribe Streaming |

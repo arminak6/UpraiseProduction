@@ -1,8 +1,11 @@
 import asyncio
+import math
 from contextlib import asynccontextmanager, suppress
 
 import psycopg
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -82,7 +85,7 @@ async def lifespan(app):
 app = FastAPI(
     title="UPRAISE AI Module",
     version="0.1.0",
-    description="UPRAISE A1-A8 authoring, B1/B4/B5 learning and C1/C2 operations.",
+    description="UPRAISE A1-A8 authoring, B1/B2/B4/B5 learning and C1/C2 operations.",
     lifespan=lifespan,
 )
 
@@ -102,6 +105,16 @@ async def local_auth_notice(request, call_next):
 async def ingestion_error(request, error):
     headers = {"Retry-After": "2"} if error.code == "JOB_CLEANUP_PENDING" else None
     return JSONResponse({"detail": error.code}, status_code=error.status, headers=headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_input_error(request, error):
+    # Invalid JSON numbers such as NaN must produce 422, not crash while the
+    # validation response is serialized. Preserve ordinary FastAPI error shapes.
+    details = jsonable_encoder(error.errors(), custom_encoder={
+        float: lambda value: value if math.isfinite(value) else str(value),
+    })
+    return JSONResponse({"detail": details}, status_code=422)
 
 
 @app.exception_handler(ValidationError)

@@ -82,6 +82,16 @@ class AuditRepository:
                 (event_id, job["job_id"], Jsonb({"session_id": session_id, "request_id": request_id, **details})),
             )
 
+    def chunk_ended(self, session, chunk_id):
+        # IDs only: no cognitive-load measurement, decision, text or credentials.
+        with psycopg.connect(self.dsn, connect_timeout=5, options="-c statement_timeout=5000") as conn:
+            conn.execute(
+                """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
+                VALUES (%s,%s,'chunk_ended',%s)""",
+                (uuid4(), session.binding.lesson_job_id,
+                 Jsonb({"session_id": str(session.response.session_id), "chunk_id": chunk_id})),
+            )
+
     def session_ended(self, ended):
         event_id = uuid5(NAMESPACE_URL, f"session-ended:{ended.start_event_id}")
         details = {"session_id": str(ended.response.session_id), "lesson_id": ended.binding.lesson_id,

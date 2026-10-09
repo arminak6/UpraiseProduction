@@ -1,7 +1,7 @@
 # UPRAISE AI Module
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
-A7 chunk revision/audio regeneration, A8 ready-lesson listing, B1 lesson start, B4 learner interruption, B5 session end,
+A7 chunk revision/audio regeneration, A8 ready-lesson listing, B1 lesson start, B2 chunk-end decisions, B4 learner interruption, B5 session end,
 C1 health/readiness and C2 feature status are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
@@ -38,7 +38,11 @@ input to its speech; see [B4](backend/docs/b4.md). Its replacement is in the ign
 `FUTURE_UPDATES.md` backlog.
 B5 clears learner history and interruption audio and records session_ended;
 course text/audio and source vectors keep their existing retention. See [B5](backend/docs/b5.md).
-B2/B3/B6 remain reserved. Existing 24-hour lesson retention remains.
+B2 accepts lesson_id/chunk_id/cognitive_load_score and returns a synchronous
+PROCEED/HIGH_COGNITIVE_LOAD decision using the test threshold 0.5. Telemetry
+consent is required for a high-load reply; the latest score stays in RAM only.
+See [B2's contract and local curl tests](backend/docs/b2.md).
+B3/B6 remain reserved. Existing 24-hour lesson retention remains.
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,
 matching the Word specification. A1 retains processor readability/resource limits and

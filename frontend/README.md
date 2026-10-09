@@ -79,7 +79,14 @@ not an automatically loaded file.
   Middleware session JWT in addition to the sidebar service token/mTLS settings;
   it sends no body session/consent claims. Requests only run after explicit clicks.
   The page initializes backend RAM state; Learning remains the separate text/voice
-  player. B2/B3/B6 remain reserved. See [B1](../backend/docs/b1.md).
+  player. B3/B6 remain reserved. See [B1](../backend/docs/b1.md).
+- **Chunk end (B2)**: enter the active B1 session, lesson and completed chunk IDs
+  and a cognitive-load test measurement between 0 and 1. B1 session/lesson fields
+  prefill when available. An explicit click sends B2 and displays PROCEED at or
+  below 0.5, HIGH_COGNITIVE_LOAD above 0.5. Without Telemetry consent in B1, B2
+  always proceeds. The page does not move the Learning player automatically.
+  Credential, B1 session or input changes clear previous results; B5 clears
+  matching cached measurement/decision. See [B2](../backend/docs/b2.md).
 - **Learner interrupt (B4)**: start B1 with Questions consent, load A5 teaching
   chunks, choose the interrupted chunk, and submit free text or a PCM WAV recording.
   Displays/plays inline answer text/audio and source references, or displays a

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.session_jwt import validate_session_jwt
+from upraise_ai.schemas.chunk_end import ChunkEndResponse
 from upraise_ai.schemas.sessions import StartedSession
 from upraise_ai.storage.sessions import RuntimeSession, SessionBinding
 
@@ -21,7 +22,7 @@ AI_NOTICES = {
 
 
 def authorize_session(settings, store, session_id, principal, token=None, *, include_ended=False):
-    """Shared B4/B5 binding authorization; questions consent is specific to B4."""
+    """Shared B2/B4/B5 authorization; feature consent is enforced separately."""
     principal.require_scope("sessions:write")
     session = store.get(session_id, principal.client_id, include_ended=include_ended)
     binding = session.binding
@@ -43,6 +44,15 @@ def authorize_session(settings, store, session_id, principal, token=None, *, inc
 class SessionService:
     def __init__(self, settings, lessons, store):
         self.settings, self.lessons, self.store = settings, lessons, store
+
+    def chunk_end(self, session_id, data, principal, token=None):
+        session = authorize_session(self.settings, self.store, session_id, principal, token)
+        try:
+            decision = self.store.chunk_end(session, data.lesson_id, str(data.chunk_id),
+                                            data.cognitive_load_score, self.lessons.audit.chunk_ended)
+        except psycopg.Error:
+            raise IngestionError("AUDIT_STORAGE_UNAVAILABLE", status=503, retryable=True) from None
+        return ChunkEndResponse(decision=decision)
 
     def end(self, session_id, data, principal, token=None):
         authorize_session(self.settings, self.store, session_id, principal, token, include_ended=True)

@@ -2,15 +2,14 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 AI implements A1-A8, B1/B4/B5 and C1/C2 with a Streamlit testbench.
-V3 supports levels/translation (lesson-v3-a3-8); human approval is external.
+UPRAISE WP7 AI implements A1-A8, B1/B2/B4/B5 and C1/C2 with a Streamlit testbench.
 PG retains text/SSML; A5 JSON/audio is temporary. Streamlit offers course playback.
 
 ## Architecture and data flow
 
 - FastAPI exposes authoring, learning and operations APIs.
   MW owns pace/human approval; PG retains DRAFT text/SSML, Qdrant only sources.
-  B2/B3/B6 and C3 remain reserved.
+  B3/B6 and C3 remain reserved.
 - B1 POST /v1/sessions: sessions:write + exact lesson_job_id. Separate production
   JWT binds client/subject/context/hash/approval; local DRAFT preview. RAM consent,
   no capabilities. session_started audit precedes visibility; new201/retry200,
@@ -22,23 +21,28 @@ PG retains text/SSML; A5 JSON/audio is temporary. Streamlit offers course playba
   Text/RAM WAV -> EU Transcribe; consent/JWT. Text/WAV/SSML/visemes or player control;
   TTS failure keeps text. Content-free audit; one turn/session, default4 concurrent,
   32MiB cache/100 messages, no renewal. Contract: backend/docs/b4.md.
+- B2 POST /v1/sessions/{id}/chunk-end: lesson_id/chunk_id/cognitive_load_score
+  (finite0..1), B1 version/client/course/JWT binding. Telemetry consent: >0.5 HIGH_COGNITIVE_LOAD,
+  else PROCEED; no consent discards score. Latest score/index in RAM, fixed TTL;
+  B5/expiry fences late commits. Audit IDs only; no AI/retrieval/speech. B6 future.
 - B5 POST /v1/sessions/{id}/end: shared B1/B4 auth without questions consent;
   COMPLETED/STOPPED_BY_LEARNER/TIMEOUT/ERROR ->204. Clears RAM/B4 reply audio/counters,
   fences late delivery; idempotent content-free session_ended audit. Fixed TTL uses
   TIMEOUT cleanup; course WAVs/PG text/Qdrant keep independent retention.
 - C1 /health is dependency-free; /ready checks core PG/Qdrant/artifacts (200/503)
-  and AWS/worker degradation; missing collection allows initial A1. C2 /v1/status:
-  jobs:read/course scope; nullable features/reasons/kill switch. No AWS polling;
-  operational_observations stores SDK outcomes/worker heartbeat. Evidence15min,
-  transient failures30s, heartbeat150s; model/region/credential hash isolates clients.
-  UNKNOWN intentional. Startup controls pause global/course jobs without attempts;
-  TTS disable keeps B4 text, A3/A7 need TTS; playback/management/B5 remain. C3 future.
+  and AWS/worker degradation; absent collection allows initial A1. C2 /v1/status:
+  jobs:read/course scope, nullable features/reasons/kill switch. No AWS polling;
+  shared operational_observations: evidence15min/transient30s/heartbeat150s,
+  isolated by model/region/credential hash; UNKNOWN intentional. Startup disables
+  pause jobs without attempts; TTS-off keeps B4 text, blocks A3/A7. Playback/B5
+  remain available; runtime C3 future.
 - A8 GET /v1/lesson-jobs requires jobs:read. Client/course/active-source/DONE/
   unexpired/no-cleanup filters precede pagination; returns DRAFT metadata only.
 - Learning uses A8/A5 identity/expiry checks. First Interrupt starts B1 then B4;
   Continue replays the part with player instructions, no position input. Finish/
-  Back send B5, clear players/replies; failures retain retry metadata. B1/B4/B5
-  test pages support JWT/consent, text/WAV and stable-ID retries.
+  Back send B5, clear players/replies; failures retain retry metadata.
+  B1/B4/B5 pages support JWT/consent, text/WAV and stable-ID retries. B2 has an
+  explicit score-test page; it does not move Learning playback automatically.
   Health page tests C1/C2 explicitly; credential/course changes clear old results.
 - INGRESS enforces OAuth/client/course/scopes/mTLS; no proxy headers. Explicit
   development + local_test_mode grants authoring/B1 preview to private/loopback peers.
@@ -53,12 +57,11 @@ PG retains text/SSML; A5 JSON/audio is temporary. Streamlit offers course playba
 - A3 V3 explain -> review_explanation -> finalize_explanation: citation/math checks,
   one edit. Reports retain pre-edit/source/speech findings; no post-edit review.
 - A7 POST /v1/audio:regenerate: lessons:write; lesson_job_id/chunk_id/teacher_review.
-  Exact PG/pinned Qdrant -> chunk generator/reviewer/editor; inherited settings,
-  A3 translation when needed. Returns202; A4/A5/A8 expose full DRAFT/revision.
-  Same chunk IDs/order, selected speech only; WAV links/copies survive parent cleanup.
-  Parent/sessions remain; parent must be unexpired at acceptance. Checkpoints fence
-  PG/TTS retries; duplicate POSTs create new jobs (idempotency deferred). UI page:
-  Revise chunk (A7), then Processing status/Learning.
+  Exact PG/pinned Qdrant -> three roles/inherited settings/A3 translation ->202.
+  A4/A5/A8 expose complete DRAFT/revision; same chunk IDs/order, selected speech
+  only. WAV links/copies survive parent cleanup; original/sessions preserved.
+  Parent must be unexpired at acceptance. Checkpoints fence PG/TTS retries;
+  POST duplicates create jobs (idempotency deferred). UI: Revise chunk (A7).
 - A3 generates in declared A1 language; differing primary tags trigger translation/
   review before splitting/PG/target speech. Notation/citations/code/pages/order
   immutable; checkpoints avoid repeats, no parser repair; one evidenced recheck.
@@ -86,7 +89,8 @@ PG retains text/SSML; A5 JSON/audio is temporary. Streamlit offers course playba
 - backend/src/upraise_ai/: api/, schemas/, guards/, main.py expose/wire APIs;
   core/config.py owns signatures, budgets, providers and OAuth/TLS.
 - api/runtime/, schemas/, workflows/{sessions,interrupts}.py, storage/sessions.py,
-  guards/session_jwt.py, services/interrupt_{models,stt}.py: B1/B4/B5 runtime.
+  guards/session_jwt.py, services/interrupt_{models,stt}.py: B1/B2/B4/B5 runtime.
+  schemas/chunk_end.py, docs/b2.md, tests/test_b2*: B2; frontend/chunk_end.py: UI.
 - {services,storage,api,schemas,guards}/operations*: C1/C2;
   backend/docs/c1-c2.md and tests/test_c_operations*.
 - services/pdf/: A1; lesson_*.py: A3/A5; v3/: original code/provenance.
@@ -167,21 +171,18 @@ reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501
 
 ## Recent decisions
 
-- 2026-10-07: A8/B1/B4 approved: v2 support, 24h playback, RAM learner state;
-  factual grounding deferred, safety/language review/security preserved.
-- 2026-10-08: A7 approved: teacher feedback/three roles/new version; inherit settings,
-  preserve sessions. Idempotency-Key deferred in ignored FUTURE_UPDATES.md section3.
+- 2026-10-09: B2 approved: caller's cognitive_load_score, test threshold0.5;
+  lesson/chunk validation and existing telemetry-consent rule retained.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-08: A7/A8 focused43 passed plus old/new B1/B4 context1 passed; broader343
-passed before fixing A8's extra null revision field. Frontend59 passed. Ruff/Compose/
-diff/build passed; isolated PG/Qdrant/fake AWS only. Logs: codex_helper/a7-*. No schema
-migration. API/UI/workers refreshed, all7 healthy. Live A7 schema has3 inputs, invalid
-422/unknown404; health/ready200 (DEGRADED). PG counts unchanged:9 DONE ingestion,
-8 DONE/9 FAILED lessons, none active; job3bb82b5e's12 chunks/text/result/WAV hashes unchanged.
-User B4 power-grid18.7/12.4/page4 verified in Qdrant/PDF (rag-source-page4.png).
-Expired job47194bc7 retains14 PG chunks. B1 requires unexpired A5; busy artifact locks
-may say JOB_CLEANUP_PENDING. PowerShell5.1 needs Get-Content -Encoding UTF8.
+2026-10-09: schemas/chunk_end.py, runtime/sessions.py, storage/{sessions,audit}.py,
+frontend/{chunk_end,session_end,app}.py and docs/b2.md checked. Runtime130 and
+isolated integration31 passed (fake AWS); frontend62 plus final focused5 passed.
+Changed-file Ruff/Compose/diff/build passed. API/UI refreshed; all7 healthy.
+Live B2 verified both decisions, exact0.5, consent, B5 and IDs-only audit; no AWS
+calls. Job51e8c520's12 PG chunks/result/WAV hashes preserved;10 DONE/9 FAILED,
+none active. Logs: codex_helper/b2-*. No migration. B4 power-grid18.7/12.4/page4
+verified in Qdrant/PDF (rag-source-page4.png). PowerShell5.1 needs UTF8 reads.

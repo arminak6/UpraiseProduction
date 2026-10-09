@@ -15,6 +15,11 @@ def end_session(connection, session_id, reason, token=""):
 
 
 def clear_interruption_views(session_id):
+    if st.session_state.get("b2_state", {}).get("session_id") == session_id:
+        st.session_state.pop("b2_state", None)
+        for key in list(st.session_state):
+            if key.startswith("b2_field_"):
+                del st.session_state[key]
     player = st.session_state.get("learning_state", {})
     interruption = player.get("interrupt", {})
     if (interruption.get("session") or {}).get("session_id") == session_id:
