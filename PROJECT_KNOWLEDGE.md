@@ -5,6 +5,7 @@
 UPRAISE WP7 implements A1-A8, A3 v2, B1/B2/B4/B5 and C1/C2/C5. Streamlit is an
 HTTP testbench/player, defaulting to its A-series ingestion workspace.
 PostgreSQL retains DRAFT text/SSML; Qdrant holds sources;
+Qdrant/PG text have no expiry; explicit A2 source/course deletion cascades content.
 A5 JSON/WAV expires independently (24h). Middleware/Moodle owns human approval.
 Live v2.5 job8d97f91e DONE/attempt1:7units/level,21 PG chunks/WAVs verified.
 It remains DRAFT; semantic quality needs review. Earlier job6c8d3bc5 text review
@@ -23,6 +24,15 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   Manual UUID/poll/A6 in Advanced job tracking; A7 remains. Retry keys survive navigation/
   renewed signed URLs; changed context resets inputs, credential binding clears
   workspace. Last100 sanitized calls in captured trace list. No auto mutations.
+- A2 document deletion fences/removes all dependent generation text/SSML/plans,
+  temporary lessons and embedded A7 feedback/material (all languages/levels/statuses,
+  including expired/A6-received). Course DELETE /v1/courses/{course_id} applies
+  owner+course scope to all sources/generations. Minimal IDs/audit and original
+  ingestion evidence retain independent policy. Course deletion barrier blocks
+  A1/A3/A7 until completion; source locks at acceptance prevent orphan races.
+  Busy writer/outage503 durable/retryable; worker recovers, UI drops cached content. Sessions
+  revoked; sweeper catches worker recovery. Fresh ingestion after deletion allowed.
+  storage/courses.py + lesson content_deletion_* fields/indexes, additive migration.
 - A1 Docling/vision/math extraction once -> ordered Qdrant chunks; active attempt
   prevents mixing source revisions. Returns document_id and job_id; A2 list/delete.
 - A3 v1 POST /v1/lesson-jobs: one requested level; ordered5page windows -> original
@@ -54,30 +64,23 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   REPLAY/PAUSE/SET_SPEED. WAV hash checked. B5 finish/end/error; no automatic B2
   measurement. Browser positions/session/replies RAM-only. lesson_audio.{py,js},
   learning_session.py; Docker includes assets. Standalone API tools preserved.
-- B1 exact job/context/hash/approval JWT plus selected v2 learner_level; fixed30min
-  RAM-only max10000, audit before visibility, no capabilities. Local DRAFT preview.
-  Inherits language/voice/profile/source scope and only selected variant's chunks.
-  Service OAuth/mTLS and separate session JWT are both required in production.
-- B2 chunk-end: lesson_id/chunk_id/cognitive_load_score finite0..1; telemetry consent,
-  >.5 HIGH_COGNITIVE_LOAD else PROCEED. No consent discards score. RAM-only score/
-  index, content-free ID/version audit; test-v1 threshold, fusion/B6 absent.
-- B4 request-local LangGraph classify/retrieve/respond; current PG chunk and
-  Qdrant paired document/attempt scopes, source-language query rewrite. Questions
-  consent/JWT required; text/WAV-STT -> text/SSML/WAVbase64/visemes or playback
-  control. TTS failure keeps text. User deferred grounding: grounded=null and
-  GROUNDING_NOT_VERIFIED; safety/language remain. One turn/session, max4concurrent,
-  32MiB/100-message RAM cache, WAV60s/6MB; no learner disk/tracing.
-- B5 reason COMPLETED/STOPPED_BY_LEARNER/TIMEOUT/ERROR ->204; clears RAM/B4 audio/
-  chat/counters, fences late commits. Idempotent audit and30min retry metadata;
-  course WAV/PG/Qdrant keep independent retention. Fixed TTL uses same cleanup.
-- C1 /health dependency-free; /ready corePG/Qdrant/artifacts200/503 plus degradation.
-  C2 /v1/status nullable feature reasons/kill switch; UNKNOWN intentional without
-  recent provider evidence. Shared observations provider15min/transient30s/worker150s;
-  no AWS polling. Gates block A3/A7, TTS-off keeps B4 text; B5 remains available.
-- C5 GET /v1/version: jobs:read startup metadata; no provider/storage GET calls.
-  Build/model/prompt/pipeline/profile hashes, threshold .5/fusion absent; common
-  configuration_id API/workers. New-job provenance and full content-free audit
-  snapshots. A7 keeps parent refs/adds revision refs. Checkpoints bind config refs.
+- B1 binds exact job/context/hash/level; local DRAFT preview or production service
+  OAuth/mTLS + separate signed session JWT with approval/consent. Fixed30min TTL
+  capped by lesson/token; bounded RAM only, cleared on restart. No capabilities.
+- B2 chunk-end consumes supplied finite0..1 score; telemetry consent required
+  to retain it, >.5 HIGH_COGNITIVE_LOAD else PROCEED. No model/automatic measurement.
+- B4 LangGraph classify/retrieve/respond: PG chunk/Qdrant document+attempt scope,
+  source-language rewrite, questions consent/JWT, text/WAV-STT -> text/SSML/WAV
+  base64/visemes or player action. TTS outage keeps text. Grounding user-deferred:
+  grounded=null/GROUNDING_NOT_VERIFIED; safety/language stay. RAM only, one turn/
+  session, max4 concurrent,32MiB/100-message cache, WAV60s/6MB.
+- B5 ends/clears RAM chat/reply audio/counters and fences late replies. Idempotent
+  content-free audit/retry metadata30min; course artifacts keep independent policy.
+- C1 health/ready; C2 cached feature reasons/kill switches, UNKNOWN without recent
+  evidence. No AWS polling; A3/A7 gated, TTS-off keeps B4 text/B5. docs/c1-c2.md.
+- C5 jobs:read startup version/config/build hashes, immutable generation provenance
+  and content-free audit. API/worker config matches; A7 adds revision references;
+  checkpoints bind configuration. docs/c5.md.
 
 ## Key files and artifacts
 
@@ -137,8 +140,8 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   switching future. Gateway/Moodle callbacks/model access, HA/backups/erasure/orphan
   cleanup/cross-host storage unverified. Beginner control-char SSML issue diagnosed
   in beginner-retry-diagnosis.md; original warns while A3 fails.
-- Real-course AWS egress test auto-review rejected; agent checks use invented
-  data/fake providers. User initiates real curl/UI generation. Grounding backlog4.
+- Agent checks use invented data/fake providers; real-course AWS egress previously
+  auto-review rejected. User initiates live generation. Grounding backlog4.
 - Failed A3 v2 retains checkpoints, no published PG/audio; uncaptured model
   responses cannot be reconstructed. Post-edit independent A3 review deferred;
   A7 retains alignment review. Earlier6c8d3bc5 had source gaps, weak difficulty
@@ -149,28 +152,26 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 
 ## Last verified
 
-2026-10-12 Learning session update: learning/player/session/interrupt modules,
-Docker assets, frontend tests and B1/B4/UI docs checked.87tests/Ruff/diff/build
-passed; frontend deployed/healthy. Chromium fake-provider flow captured11432ms,
-resumed11.827s with playback elapsed; unrelated rerun kept14.321s. One B1/B4/B5,
-answer-only audio during interruption. Live existing8d97f91e advanced parts1/2
-A8/A5/B1(201)/B5(204) passed; temporary session closed, no provider calls.
-Evidence codex_helper/learning-session-verification.md, learning-browser-verification.json,
-learning-live-verification.json, learning-session-tests.log and browser PNGs.
+2026-10-12 coordinated deletion: source/course workflows/storage/API, B1 fence/
+RAM revocation, recovery worker, frontend controls and docs checked.213isolated
+backend tests/90frontend tests, Ruff/diff/build passed. New course DELETE and
+schema deployed; no live course deleted. Before/after protected383861 retained
+28PG text rows/2plans/53Qdrant vectors. Runtime lessonTTL86400/artifact retention0.
+Evidence codex_helper/course-deletion-{backend-tests.log,frontend-tests.log,
+verification.md,before.json,after.json}; check-deletion-deploy.py/UI guard GET-only.
 
-2026-10-12 A7 job61a2c008 DONE/attempt1: beginner part1 revision1 of8d97f91e.
-Tables/numeric rows removed; changed WAV hash/PCM/duration valid; other6 texts/
-SSML/audio hashes unchanged.9checks; DRAFT. a7-61a2c008-verification.{md,json}.
+2026-10-12 Learning session update:87tests/build, Chromium fake B4 captured11432ms,
+resumed11.827s including elapsed playback, unrelated rerun kept14.321s. Live8d
+advanced A8/A5/B1/B5 passed/closed; no providers. learning-session-verification.md.
+A7 61a2c008 beginner part1 revision1 of8d removed tables/numbers;9checks/WAV hash
+passed, other6unchanged, DRAFT. a7-61a2c008-verification.{md,json}.
 
-2026-10-12 v2.5/promptv6 fix:196isolated checks/build passed, C5 API/workers
-match; alignment-recovery-fix.md. User8d97f91e DONE/attempt1 at11:38:31UTC,
-IDs/MAX_TOKENS recovered:7units/level,21PG/WAVs,17checks, DRAFT/170findings.
-A5 expires2026-10-13 11:38:31UTC; no semantic/audio listening review.
-job-8d97f91e-completion-verification.{md,json}; old5da7620d v2.4 FAILED.
-
-2026-10-12 A1 fa70751d/course383861 DONE/31pages/53Qdrant chunks;26checks passed.
-NEEDS_REVIEW:19flagged/18unverified/16auto chunks;6provider validation warnings;
-pages5/10 title-only/blank. latest-ingestion-verification.{md,json}.
-Course voice picker:89tests/build/live part7 hash passed; course-voice-picker-verification.md.
-A2:12integration checks. Named evidence above is under codex_helper/; dated
-checks do not imply permanent output availability or semantic approval.
+2026-10-12 v2.5/promptv6:196checks/build, C5 aligned. alignment-recovery-fix.md.
+8d97f91e DONE/attempt1 at11:38:31UTC, IDs/MAX_TOKENS recovered:7units/level,
+21PG/WAVs,17checks, DRAFT/170findings; A5 expires2026-10-13 11:38:31UTC.
+No semantic/audio listening review. job-8d97f91e-completion-verification.{md,json}.
+Old5da7620d v2.4 FAILED. A1 fa70751d/course38386131pages/53vectors/26checks;
+19flagged/18unverified/16auto chunks,6provider warnings, p5/10 title-only/blank:
+latest-ingestion-verification.{md,json}. Voice picker89tests/live part7 hash
+passed: course-voice-picker-verification.md. A2 prior12checks. Named evidence
+is under codex_helper/; dates do not imply permanent output availability or approval.

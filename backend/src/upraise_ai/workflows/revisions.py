@@ -18,6 +18,12 @@ log = logging.getLogger("upraise.revisions")
 
 
 def submit_revision(lessons, data, principal):
+    row = lessons.authorized(str(data.lesson_job_id), principal)
+    with lessons.jobs.course_admission(principal.client_id, row["metadata"]["course_id"]):
+        return _submit_revision(lessons, data, principal)
+
+
+def _submit_revision(lessons, data, principal):
     parent_id = str(data.lesson_job_id)
     lessons.authorized(parent_id, principal)
     job_id = str(uuid4())

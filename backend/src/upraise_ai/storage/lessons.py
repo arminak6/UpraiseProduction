@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS lesson_chunk_plans (
     plan JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
+ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS content_deletion_requested_at TIMESTAMPTZ;
+ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS content_deleted_at TIMESTAMPTZ;
+ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS content_deletion_reason TEXT;
+CREATE INDEX IF NOT EXISTS lesson_jobs_course ON lesson_jobs(client_id,(metadata->>'course_id'));
+CREATE INDEX IF NOT EXISTS lesson_jobs_documents ON lesson_jobs USING gin ((metadata->'document_ids'));
 """
 
 
@@ -66,6 +71,15 @@ class LessonRepository(JobRepository):
 
     def accept(self, client_id, key, fingerprint, metadata, pipeline_version):
         with self.connect() as conn:
+            from upraise_ai.storage.courses import admit_course
+            admit_course(conn, client_id, metadata["course_id"])
+            # Lock the sources until acceptance commits: a concurrent document
+            # deletion must see this job, or this acceptance must see its fence.
+            for document_id in sorted(metadata["document_ids"]):
+                source = conn.execute("SELECT * FROM ingestion_jobs WHERE document_id=%s FOR SHARE", (document_id,)).fetchone()
+                if (not source or source["client_id"] != client_id or source["deletion_requested_at"]
+                        or source["metadata"]["course_id"] != metadata["course_id"]):
+                    raise IngestionError("DOCUMENT_NOT_FOUND", status=404)
             row = conn.execute(
                 """INSERT INTO lesson_jobs(job_id,client_id,idempotency_key,request_fingerprint,
                 metadata,pipeline_version) VALUES (%s,%s,%s,%s,%s,%s)
@@ -86,6 +100,46 @@ class LessonRepository(JobRepository):
     def get(self, job_id):
         with self.connect() as conn:
             return conn.execute("SELECT * FROM lesson_jobs WHERE job_id=%s", (job_id,)).fetchone()
+
+    def request_content_deletion(self, client_id, course_id, *, document_id=None):
+        condition = " AND metadata->'document_ids' ? %s::text" if document_id else ""
+        values = (client_id, course_id, document_id) if document_id else (client_id, course_id)
+        with self.connect() as conn:
+            conn.execute("SET LOCAL lock_timeout = '5s'")
+            rows = conn.execute("SELECT * FROM lesson_jobs WHERE client_id=%s AND metadata->>'course_id'=%s"
+                                + condition + " ORDER BY job_id FOR UPDATE", values).fetchall()
+            for row in rows:
+                if not row["content_deletion_requested_at"]:
+                    conn.execute("""UPDATE lesson_jobs SET content_deletion_requested_at=clock_timestamp(),
+                        content_deletion_reason=%s,cleanup_completed_at=NULL,
+                        cleanup_requested_at=coalesce(cleanup_requested_at,clock_timestamp()),
+                        cleanup_reason=coalesce(cleanup_reason,CASE WHEN status IN ('QUEUED','RUNNING') THEN 'CANCEL' ELSE 'RECEIVED' END),
+                        status=CASE WHEN status IN ('QUEUED','RUNNING') THEN 'CANCELLED' ELSE status END,
+                        step=CASE WHEN status IN ('QUEUED','RUNNING') THEN 'CANCELLED' ELSE step END,
+                        lease_token=NULL,lease_until=NULL,callback_token=NULL,callback_until=NULL,
+                        callback_status=CASE WHEN callback_status IN ('PENDING','SENDING') THEN 'DISPOSED' ELSE callback_status END,
+                        updated_at=clock_timestamp() WHERE job_id=%s""",
+                        ("DOCUMENT_DELETED" if document_id else "COURSE_DELETED", row["job_id"]))
+                self.erase_content(conn, row["job_id"])
+            return [str(row["job_id"]) for row in rows]
+
+    @staticmethod
+    def erase_content(conn, job_id):
+        conn.execute("DELETE FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,))
+        conn.execute("DELETE FROM lesson_chunk_plans WHERE job_id=%s", (job_id,))
+        # Revision metadata embeds teacher feedback and canonical material. Keep
+        # identifiers for ownership/retries/audit, never that content after deletion.
+        conn.execute("""UPDATE lesson_jobs SET result=NULL,metadata=jsonb_build_object(
+            'course_id',metadata->'course_id','activity_id',metadata->'activity_id',
+            'lesson_id',metadata->'lesson_id','document_ids',metadata->'document_ids',
+            'language',metadata->'language','voice',metadata->'voice') WHERE job_id=%s""", (job_id,))
+
+    def revoked_jobs(self, job_ids):
+        if not job_ids:
+            return []
+        with self.connect() as conn:
+            return [str(row["job_id"]) for row in conn.execute("""SELECT job_id FROM lesson_jobs
+                WHERE job_id=ANY(%s::uuid[]) AND content_deletion_requested_at IS NOT NULL""", (job_ids,)).fetchall()]
 
     def accept_revision(self, conn, job_id, client_id, fingerprint, metadata, pipeline_version):
         # Caller stages independent artifacts while holding the parent snapshot

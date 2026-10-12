@@ -50,7 +50,7 @@ class LessonService:
 
     def authorized(self, job_id, principal):
         row = self.jobs.get(str(job_id))
-        if (not row or row["client_id"] != principal.client_id
+        if (not row or row.get("content_deletion_requested_at") or row["client_id"] != principal.client_id
                 or not principal.can_access_course(row["metadata"]["course_id"])):
             raise HTTPException(404, "JOB_NOT_FOUND")
         return row
@@ -136,7 +136,13 @@ class LessonService:
             if not row or not row["cleanup_requested_at"] or row["cleanup_completed_at"]:
                 return
             self.staging.remove(job_id)
-            self.audit.lesson(row, "OUTPUT_" + row["cleanup_reason"], {"reason": row["cleanup_reason"]})
+            if row.get("content_deletion_requested_at"):
+                self.jobs.erase_content(conn, job_id)
+                self.audit.lesson(row, "CONTENT_DELETED", {"course_id": row["metadata"]["course_id"],
+                                                          "reason": row["content_deletion_reason"]})
+                conn.execute("UPDATE lesson_jobs SET content_deleted_at=clock_timestamp() WHERE job_id=%s", (job_id,))
+            else:
+                self.audit.lesson(row, "OUTPUT_" + row["cleanup_reason"], {"reason": row["cleanup_reason"]})
             conn.execute(
                 """UPDATE lesson_jobs SET cleanup_completed_at=clock_timestamp(),
                 updated_at=clock_timestamp() WHERE job_id=%s""", (job_id,),

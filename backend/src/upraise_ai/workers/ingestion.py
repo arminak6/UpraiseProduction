@@ -16,10 +16,12 @@ from upraise_ai.services.versions import VersionCatalog
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
+from upraise_ai.storage.lessons import LessonRepository
 from upraise_ai.storage.vectors import VectorStore
 from upraise_ai.workers.supervision import ChildTerminationError, JobSupervisor, run_recovery_child
 from upraise_ai.workflows.documents import DocumentService
 from upraise_ai.workflows.jobs import JobService
+from upraise_ai.workflows.lessons import LessonService
 
 log = logging.getLogger("upraise.worker")
 
@@ -63,7 +65,8 @@ class IngestionWorker:
         self.stop = threading.Event()
         self.notify = notify
         self.supervisor = JobSupervisor(settings)
-        self.documents = DocumentService(self.jobs, self.vectors, self.audit)
+        lessons = LessonService(settings, LessonRepository(self.jobs.dsn), self.jobs, self.staging, self.audit)
+        self.documents = DocumentService(self.jobs, self.vectors, self.audit, lessons=lessons)
         self.job_control = JobService(self.jobs, self.vectors, self.audit, self.staging)
 
     def _notify(self, *event):

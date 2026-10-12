@@ -104,6 +104,11 @@ at that position. **Finish lesson** and **End lesson** close B1 through B5 and
 clear temporary replies. **End session (B5)** also offers explicit API tests.
 All lessons remain drafts requiring human review, and temporary playback expires
 after the configured A5 TTL (24 hours by default).
+Qdrant sources and PostgreSQL lesson text have no automatic expiry. Explicit
+A2 document deletion removes dependent lesson text across levels/languages;
+`DELETE /v1/courses/{course_id}` removes all the caller's source vectors and
+generated lesson content for that course. The Manage material removal panel
+provides this course-wide operation. See [A2](backend/docs/a2.md).
 It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,
 A4 status polling, A5 downloads, A6 job actions, health and a general API
 request panel. Enter the real OAuth token and HTTPS mTLS gateway credentials

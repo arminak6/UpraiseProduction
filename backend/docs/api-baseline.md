@@ -16,6 +16,9 @@ A/B/C grouping is preserved. The original Word was supplied again and checked
 directly on 2026-10-06; this inventory preserves its draft contract. Current
 A1 wire details and approved extensions are in `a1.md` and `a1-design.md`;
 the user-requested A2 contract and operational interpretation are in `a2.md`.
+A2's 2026-10-12 extension adds `DELETE /v1/courses/{course_id}` and coordinated
+permanent lesson-content deletion when a source/course is deleted. Qdrant and
+PostgreSQL text have no scheduled expiry; temporary A5 output keeps its TTL.
 
 ## A authoring APIs
 

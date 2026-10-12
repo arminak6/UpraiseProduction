@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import Path as PathParameter
 from starlette.datastructures import UploadFile
 
 from upraise_ai.core.config import get_settings
@@ -72,6 +73,14 @@ def list_documents(
 def delete_document(document_id: UUID, request: Request, principal: Principal = Depends(ingress)):
     principal.require_scope("documents:write")
     document_service(request).delete(str(document_id), principal)
+    return Response(status_code=204)
+
+
+@router.delete("/v1/courses/{course_id:path}", status_code=204, summary="A2 - Remove a course and its generated lessons")
+def delete_course(request: Request, course_id: str = PathParameter(min_length=1, max_length=120),
+                  principal: Principal = Depends(ingress)):
+    principal.require_scope("documents:write")
+    document_service(request).delete_course(course_id, principal)
     return Response(status_code=204)
 
 

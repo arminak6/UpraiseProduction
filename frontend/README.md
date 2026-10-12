@@ -52,6 +52,13 @@ not an automatically loaded file.
      documents accessible to the caller across authorized courses. Remove by
      selecting a loaded document or entering its UUID. Status and progress are
      shown in the material table; progress uses two decimal places, e.g. `12.35%`.
+     Removing a document also deletes every generated lesson that used it,
+     including all levels, languages and revisions. **Delete an entire course**
+     inside Remove material takes a course ID and explicit confirmation, then
+     calls `DELETE /v1/courses/{course_id}` to remove its vectors and all generated
+     text/SSML/plans/temporary lesson output. Other owners/courses are preserved.
+     Qdrant material and saved lesson text have no automatic expiry; A6 receipt
+     and the 24h voice/JSON TTL are separate from this permanent-content deletion.
   3. **Draft lesson** loads the current source table when opened. Its generation
      box fixes the version to **A3 v2 · All aligned levels** and provides a single
      **Course material** selector. Course/activity/document IDs fill automatically

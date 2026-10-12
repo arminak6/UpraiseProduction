@@ -532,5 +532,60 @@ class IngestionWorkspaceTests(unittest.TestCase):
             self.assertFalse(app.exception)
 
 
+    def test_delete_course_is_explicit_requires_confirmation_and_clears_cached_views(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.stage(app, 1)
+            button(app, "Show all ingested material").click().run()
+            app.text_input(key="iw_field_delete_course").set_value("123456")
+            button(app, "Delete entire course · A2").click().run()
+            self.assertTrue(app.error)
+            self.assertFalse(any(call.args[1] == "DELETE" for call in send.call_args_list))
+            app.session_state["learning_state"] = {"private": "old answer"}
+            app.session_state["b4_state"] = {"response": "old voice"}
+            app.checkbox(key="iw_field_delete_course_confirm").check()
+            button(app, "Delete entire course · A2").click().run()
+            self.assertFalse(app.exception)
+            deletion = next(call for call in send.call_args_list if call.args[1] == "DELETE")
+            self.assertEqual(deletion.args[2], "/v1/courses/123456")
+            state = app.session_state["ingestion_workspace"]
+            self.assertFalse(state["documents"])
+            self.assertFalse(state["catalog"])
+            self.assertEqual(state["trace"][-1]["api"], "A2")
+            self.assertNotIn("learning_state", app.session_state)
+            self.assertNotIn("b4_state", app.session_state)
+
+    def test_document_delete_clears_related_results_and_never_calls_course_delete(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.stage(app, 1)
+            button(app, "Show all ingested material").click().run()
+            button(app, "Remove material · A2").click().run()
+            self.assertFalse(app.exception)
+            deletes = [call for call in send.call_args_list if call.args[1] == "DELETE"]
+            self.assertEqual(len(deletes), 1)
+            self.assertEqual(deletes[0].args[2], "/v1/documents/" + self.document)
+            self.assertFalse(app.session_state["ingestion_workspace"]["documents"])
+
+    def test_pending_course_deletion_clears_text_voice_cache_without_claiming_success(self):
+        def response(connection, method, path, **options):
+            if method == "DELETE":
+                return api_client.Result(method, path, 503, 1, {"detail": "JOB_CLEANUP_PENDING"}, True)
+            return self.response(connection, method, path, **options)
+        with patch("api_client.request", side_effect=response):
+            app = self.app()
+            self.stage(app, 1)
+            button(app, "Show all ingested material").click().run()
+            app.session_state["learning_state"] = {"active": "old text", "audio": b"old voice"}
+            app.text_input(key="iw_field_delete_course").set_value("123456")
+            app.checkbox(key="iw_field_delete_course_confirm").check()
+            button(app, "Delete entire course · A2").click().run()
+            self.assertFalse(app.exception)
+            self.assertNotIn("learning_state", app.session_state)
+            state = app.session_state["ingestion_workspace"]
+            self.assertTrue(state["documents"])
+            self.assertEqual(state["delete_course_response"].status, 503)
+
+
 if __name__ == "__main__":
     unittest.main()

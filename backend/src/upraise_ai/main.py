@@ -51,16 +51,23 @@ async def lifespan(app):
             vectors = VectorStore(settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension)
             audit = AuditRepository(settings.audit_dsn.get_secret_value(), settings=settings)
             app.state.sessions.end_audit = audit.session_ended
-            app.state.documents = DocumentService(jobs, vectors, audit)
             app.state.jobs = JobService(jobs, vectors, audit, staging)
             app.state.lessons = LessonService(
                 settings, LessonRepository(settings.jobs_dsn.get_secret_value()), jobs, staging, audit,
             )
+            app.state.documents = DocumentService(jobs, vectors, audit, lessons=app.state.lessons, sessions=app.state.sessions)
             app.state.interrupts = InterruptService(settings, app.state.lessons, app.state.sessions, vectors)
     async def sweep_sessions():
         while True:
             await asyncio.sleep(settings.session_sweep_seconds)
             await asyncio.to_thread(app.state.sessions.prune)
+            if app.state.lessons:
+                try:
+                    revoked = await asyncio.to_thread(app.state.lessons.jobs.revoked_jobs, app.state.sessions.active_job_ids())
+                    await asyncio.to_thread(app.state.sessions.revoke_jobs, revoked)
+                except (psycopg.Error, IngestionError):
+                    # Keep the sweep alive across transient storage/audit outages.
+                    pass
 
     sweeper = asyncio.create_task(sweep_sessions())
     async def refresh_operations():

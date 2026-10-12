@@ -160,4 +160,12 @@ class SessionService:
                 except psycopg.Error:
                     raise IngestionError("AUDIT_STORAGE_UNAVAILABLE", status=503, retryable=True) from None
 
-            return self.store.start(session, audit)
+            # Fence a B1 start that raced deletion: publish RAM state only while
+            # the exact job and all its sources are still available.
+            with self.lessons.jobs.job_transaction(str(data.lesson_job_id)) as (conn, current):
+                if not current or current["cleanup_requested_at"] or current.get("content_deletion_requested_at"):
+                    raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
+                from upraise_ai.services.lesson_pipeline import LessonPipeline
+                LessonPipeline(self.settings, self.lessons.documents, None, self.lessons.staging, None, None).check_sources(
+                    current, result.source_attempts, conn)
+                return self.store.start(session, audit)

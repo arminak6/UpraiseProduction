@@ -62,8 +62,10 @@ class JobRepository:
         return psycopg.connect(self.dsn, row_factory=dict_row, connect_timeout=5)
 
     def migrate(self):
+        from upraise_ai.storage.courses import SCHEMA as COURSE_SCHEMA
         with self.connect() as conn:
             conn.execute(SCHEMA)
+            conn.execute(COURSE_SCHEMA)
         from upraise_ai.storage.lessons import LessonRepository
 
         LessonRepository(self.dsn).migrate()
@@ -77,6 +79,8 @@ class JobRepository:
         *, legacy_fingerprint=None,
     ):
         with self.connect() as conn:
+            from upraise_ai.storage.courses import admit_course
+            admit_course(conn, client_id, metadata["course_id"])
             row = conn.execute(
                 """INSERT INTO ingestion_jobs
                 (job_id, document_id, client_id, idempotency_key, request_fingerprint, metadata, pipeline_version)
@@ -102,6 +106,17 @@ class JobRepository:
     def get(self, job_id):
         with self.connect() as conn:
             return conn.execute("SELECT * FROM ingestion_jobs WHERE job_id=%s", (job_id,)).fetchone()
+
+    @contextmanager
+    def course_admission(self, client_id, course_id):
+        from upraise_ai.storage.courses import admit_course
+        with self.connect() as conn:
+            admit_course(conn, client_id, course_id)
+            yield
+
+    def get_document(self, document_id):
+        with self.connect() as conn:
+            return conn.execute("SELECT * FROM ingestion_jobs WHERE document_id=%s", (document_id,)).fetchone()
 
     def list_documents(self, client_id, course_id=None):
         course_filter = " AND metadata->>'course_id'=%s" if course_id is not None else ""

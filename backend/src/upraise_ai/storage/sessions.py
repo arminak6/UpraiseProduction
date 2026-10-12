@@ -160,6 +160,19 @@ class SessionStore:
             self._interrupt_cache.clear()
             self._interrupt_cache_bytes = 0
 
+    def active_job_ids(self):
+        with self._lock:
+            return list({session.binding.lesson_job_id for session in self._sessions.values()})
+
+    def revoke_jobs(self, job_ids):
+        """Close all affected levels/languages and fence in-flight B4 replies."""
+        job_ids = set(job_ids)
+        with self._lock:
+            ended = [self._end_locked(session, "ERROR") for session in list(self._sessions.values())
+                     if session.binding.lesson_job_id in job_ids]
+        for session in ended:
+            self._audit_end(session)
+
     def start(self, session, audit):
         key = str(session.response.session_id)
         with self._lock:

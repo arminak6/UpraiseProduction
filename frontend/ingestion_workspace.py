@@ -6,6 +6,7 @@ import math
 import secrets
 from datetime import datetime, timezone
 from functools import partial
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import api_client
@@ -70,7 +71,7 @@ def record_request(trace, result, method, path, **kwargs):
         "api": {"/v1/documents": "A1" if method == "POST" else "A2",
                 "/v1/lesson-jobs": "A3" if method == "POST" else "A8",
                 "/v2/lesson-jobs": "A3 v2", "/v1/audio:regenerate": "A7"}.get(
-                    path, "A2" if path.startswith("/v1/documents/") else
+                    path, "A2" if path.startswith(("/v1/documents/", "/v1/courses/")) else
                     "A6" if method == "DELETE" else "A5" if "/result" in path or "/audio/" in path else "A4"),
         "method": method, "path": path, "status": result.status, "elapsed_ms": result.elapsed_ms,
         "error": result.error, "params": kwargs.get("params", {}), "body": payload,
@@ -276,6 +277,7 @@ def render_documents(connection, state, show_response):
                 show_response(result)
     with removal:
         rows = list(state["documents"].values())
+        st.caption("Removing a document also deletes every lesson generated from it, across all levels, languages and revisions.")
         with st.form("iw_remove_material"):
             if rows:
                 labels = {row["document_id"]: f"{row.get('filename', row['document_id'])} · {row.get('course_id', '')}"
@@ -293,18 +295,51 @@ def render_documents(connection, state, show_response):
             else:
                 result = send(connection, state, "DELETE", "/v1/documents/" + document)
                 state["delete_response"] = result
+                # A timeout/503 can follow a committed deletion fence. Discard
+                # cached text/voice now; a fresh API read decides availability.
+                clear_deleted_views(state)
                 if result.status == 204:
                     state["documents"].pop(document, None)
                     st.session_state["iw_field_document_ids"] = "\n".join(
                         value for value in st.session_state["iw_field_document_ids"].splitlines() if value.strip() != document)
-                    for job in state["jobs"].values():
-                        for key in ("result", "result_response", "export", "audio", "audio_response"):
-                            job.pop(key, None)
-                    st.session_state.pop("learning_state", None)
-                    st.session_state.pop("b1_state", None)
                     st.rerun()
         if state.get("delete_response"):
             show_response(state["delete_response"])
+        with st.expander("Delete an entire course"):
+            with st.form("iw_remove_course"):
+                course = st.text_input("Course ID to delete", key="iw_field_delete_course", max_chars=120)
+                selected_courses = sorted({row["course_id"] for row in rows})
+                if selected_courses:
+                    st.caption("Available course IDs: " + ", ".join(selected_courses))
+                confirmed = st.checkbox("Delete all this course's ingested material and generated lessons", key="iw_field_delete_course_confirm")
+                remove_course = st.form_submit_button("Delete entire course · A2")
+            if remove_course:
+                course = course.strip()
+                if not course or not confirmed:
+                    st.error("Enter the course ID and confirm deletion of its material and lessons.")
+                else:
+                    result = send(connection, state, "DELETE", "/v1/courses/" + quote(course, safe=""))
+                    state["delete_course_response"] = result
+                    clear_deleted_views(state)
+                    if result.status == 204:
+                        removed = {key for key, row in state["documents"].items() if row.get("course_id") == course}
+                        state["documents"] = {key: row for key, row in state["documents"].items() if key not in removed}
+                        st.session_state["iw_field_document_ids"] = "\n".join(
+                            value for value in st.session_state["iw_field_document_ids"].splitlines() if value.strip() not in removed)
+                        st.rerun()
+            if state.get("delete_course_response"):
+                show_response(state["delete_course_response"])
+
+
+def clear_deleted_views(state):
+    for job in state["jobs"].values():
+        for key in ("result", "result_response", "export", "audio", "audio_response"):
+            job.pop(key, None)
+    state["catalog"] = []
+    for key in ("catalog_response", "catalog_context", "download_course"):
+        state.pop(key, None)
+    for key in ("learning_state", "b1_state", "b2_state", "b4_state", "lesson_result", "lesson_audio"):
+        st.session_state.pop(key, None)
 
 
 def render_generation(connection, state, show_response, *, refresh_on_open=False):
