@@ -1,6 +1,5 @@
 """A session-only lesson preview player using the backend's HTTP APIs."""
 
-import base64
 import hashlib
 import math
 import re
@@ -57,7 +56,14 @@ def failure(result):
     return result.error or "The lesson could not be loaded. Refresh the list or try again."
 
 
-def load_part(connection, state, job_id, index, learner_level=None):
+def clear_unavailable(connection, state, message):
+    from session_end import end_learning
+    if state.get("interrupt", {}).get("session"):
+        end_learning(connection, state, "ERROR", back=True)
+    state.update(active=None, audio=None, error=message, interrupt={}, interrupt_open=False)
+
+
+def load_part(connection, state, job_id, index, learner_level=None, *, offset_ms=0, autoplay=True):
     """Recheck A5 on every explicit playback action, including after A6/expiry."""
     job_id = str(UUID(job_id))
     path = f"/v1/jobs/{job_id}"
@@ -68,7 +74,7 @@ def load_part(connection, state, job_id, index, learner_level=None):
     result = api_client.request(connection, "GET", path + "/result", **options)
     state.update(audio=None, audio_error=None, error=None)
     if not result.successful or result.error:
-        state.update(active=None, error=failure(result), interrupt={}, interrupt_open=False)
+        clear_unavailable(connection, state, failure(result))
         return
     lesson = result.body
     if isinstance(lesson, dict) and lesson.get('variants'):
@@ -83,8 +89,7 @@ def load_part(connection, state, job_id, index, learner_level=None):
             raise ValueError
         index = max(0, min(index, len(chunks) - 1))
     except (KeyError, TypeError, ValueError, AttributeError):
-        state.update(active=None, interrupt={}, interrupt_open=False,
-                     error="This lesson has expired or its content cannot be displayed.")
+        clear_unavailable(connection, state, "This lesson has expired or its content cannot be displayed.")
         return
     from learning_interrupt import clear_question_widgets
     old = state.get("active") or {}
@@ -96,27 +101,29 @@ def load_part(connection, state, job_id, index, learner_level=None):
         state.get("interrupt", {}).update(turn=None)
     state.update(active=lesson, index=index, complete=False,
                  playback=state.get("playback", 0) + 1, interrupt_open=False,
-                 pending_action=None)
+                 pending_action=None, resume_offset_ms=offset_ms, autoplay=autoplay)
     if state["voice"]:
         # Construct the authenticated same-backend path rather than following
         # a URL supplied by lesson text or an external gateway's response.
         audio = api_client.request(connection, "GET", path + "/audio/" + str(UUID(chunks[index]["chunk_id"])))
-        if audio.successful and not audio.error and audio.binary:
+        if (audio.successful and not audio.error and audio.binary
+                and hashlib.sha256(audio.binary).hexdigest() == chunks[index].get("audio_sha256")):
             state["audio"] = audio.binary
         else:
             state["audio_error"] = failure(audio)
             if audio.status in (401, 403, 404, 409, 410):
-                state.update(active=None, error=failure(audio), interrupt={}, interrupt_open=False)
+                clear_unavailable(connection, state, failure(audio))
 
 
-def course_label(item):
+def course_label(item, *, include_level=True):
     language = item.get("language", "")
     language = LANGUAGES.get(language.lower().split("-", 1)[0], language)
     title = item.get("lesson_id", "Lesson").replace("-", " ").replace("_", " ")
     created = item.get("created_at", "")[:16].replace("T", " ")
     revision = item.get("revision") or {}
     version = f" · revision {revision['number']}" if revision.get("number") else ""
-    return f"{title}{version} · {language} · {item.get('learner_level', 'intermediate')} · {created}"
+    level = f" · {item.get('learner_level', 'intermediate')}" if include_level else ""
+    return f"{title}{version} · {language}{level} · {created}"
 
 
 def catalog_key(item):
@@ -134,7 +141,7 @@ def refresh_courses(connection, state, *, more=False):
                 item["job_id"] = str(UUID(item["job_id"]))
             combined = [*state["items"], *items] if more else items
             state.update(items=list({(item["job_id"], item.get('learner_level')): item for item in combined}.values()),
-                         catalog_error=None, error=None, more=len(result.body) == 100,
+                         catalog_error=None, more=len(result.body) == 100,
                          offset=offset + len(result.body))
             return
         except (KeyError, TypeError, ValueError, AttributeError):
@@ -145,21 +152,40 @@ def refresh_courses(connection, state, *, more=False):
                                 if result.status in (404, 405) else failure(result)))
 
 
-def render_lesson_audio(state):
-    rate = state.get("playback_rate", 1.0)
-    with st.container(key=f"lesson_audio_{state['playback']}"):
-        if rate == 1.0:
-            st.audio(state["audio"], format="audio/wav", autoplay=True)
-        else:
-            # The native Streamlit audio widget has no playback-rate argument.
-            # A sandboxed player only embeds trusted WAV bytes and bounded numbers.
-            data = base64.b64encode(state["audio"]).decode("ascii")
-            st.iframe(f'<audio id="lesson" controls autoplay style="width:100%" '
-                f'src="data:audio/wav;base64,{data}"></audio><script>'
-                f'const a=document.getElementById("lesson");a.playbackRate={rate};'
-                '</script>', height=65)
-    if rate != 1.0:
-        st.caption(f"Playback speed: {rate}×")
+def open_interruption(state, event):
+    """Accept positions only from the currently displayed chunk/player instance."""
+    chunk = state["active"]["chunks"][state["index"]]
+    if not isinstance(event, dict) or event.get("chunk_id") != chunk["chunk_id"] or event.get("playback") != state["playback"]:
+        return False
+    position = event.get("offset_ms")
+    if isinstance(position, bool) or not isinstance(position, (float, int)) or not math.isfinite(position) or position < 0:
+        return False
+    duration = chunk.get("duration_seconds")
+    if isinstance(duration, (int, float)) and math.isfinite(duration):
+        position = min(position, max(0, duration * 1000))
+    from learning_interrupt import clear_question_widgets
+    clear_question_widgets(keep_session=True)
+    state.get("interrupt", {}).update(turn=None)
+    state.update(interrupt_open=True, pending_action=None, resume_offset_ms=round(position))
+    return True
+
+
+def return_to_course(connection, state):
+    action = state.get("pending_action") or {}
+    offset = state.get("resume_offset_ms", 0)
+    if action.get("action") == "REPLAY":
+        offset = 0
+    if action.get("action") == "SET_SPEED":
+        rate = action.get("rate")
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate) or not 0.5 <= rate <= 2:
+            st.error("The teacher returned an invalid playback speed.")
+            return False
+        state["playback_rate"] = rate
+    load_part(connection, state, state["active"]["job_id"], state["index"],
+              offset_ms=offset, autoplay=action.get("action") != "PAUSE")
+    if state.get("interrupt", {}).get("session"):
+        state["interrupt"]["turn"] = None
+    return True
 
 
 def render_player(connection, state, *, local_testing=False):
@@ -173,48 +199,40 @@ def render_player(connection, state, *, local_testing=False):
             st.rerun()
         return
     lesson = state["active"]
-    if expired(lesson):
-        state.update(active=None, audio=None, items=[], loaded=False, interrupt={}, interrupt_open=False,
-                     error="This lesson's temporary playback has expired. Refresh the available courses.")
-        st.rerun()
+    session = state.get("interrupt", {}).get("session")
+    if not state.get("complete") and (expired(lesson) or not session or expired(session)):
+        state.update(audio=None, interrupt_open=False)
+        state.get("interrupt", {}).update(turn=None)
+        st.warning("This lesson session has expired or is unavailable. Start a new session from the lesson list.")
+        if st.button("Back to lessons", type="primary"):
+            end_learning(connection, state, "TIMEOUT", back=True)
+            st.rerun()
+        return
     chunks, index = lesson["chunks"], state["index"]
     st.subheader(lesson["lesson_id"].replace("-", " ").replace("_", " "))
     language = lesson["language"]
     st.caption(f"{LANGUAGES.get(language.split('-')[0], language)} · "
                f"{lesson['learner_level'].title()} · Voice: {lesson['voice']}")
     st.caption("AI-generated draft · Human review is required.")
+    if session:
+        st.info(session.get("ai_notice", "You are interacting with an AI teacher."))
+        with st.expander("Session details"):
+            st.caption("Session · " + session["session_id"])
+            st.caption("Expires · " + str(session.get("expires_at", "")))
     if state["complete"]:
         st.success("You reached the end of this lesson.")
-        if st.button("Restart course", type="primary"):
-            load_part(connection, state, lesson["job_id"], 0)
+        if st.button("Back to lessons", type="primary"):
+            state.update(active=None, loaded=False)
             st.rerun()
     else:
         st.progress((index + 1) / len(chunks), text=f"Part {index + 1} of {len(chunks)}")
-        previous, following, replay = st.columns(3)
+        following, replay = st.columns(2)
         interrupted = state.get("interrupt_open", False)
-        if previous.button("Previous", disabled=index == 0 or interrupted, width="stretch"):
-            load_part(connection, state, lesson["job_id"], index - 1)
-            st.rerun()
-        if following.button("Next", disabled=index == len(chunks) - 1 or interrupted, width="stretch", type="primary"):
+        if following.button("Next chunk", disabled=index == len(chunks) - 1 or interrupted, width="stretch", type="primary"):
             load_part(connection, state, lesson["job_id"], index + 1)
             st.rerun()
-        if replay.button("Replay audio", disabled=not state["voice"] or interrupted, width="stretch"):
+        if replay.button("Replay voice", disabled=interrupted, width="stretch"):
             load_part(connection, state, lesson["job_id"], index)
-            st.rerun()
-        st.session_state.setdefault("learning_read_aloud", state["voice"])
-        voice = st.toggle("Read aloud", key="learning_read_aloud", disabled=interrupted)
-        if voice != state["voice"]:
-            state["voice"] = voice
-            if voice:
-                load_part(connection, state, lesson["job_id"], index)
-            else:
-                state["audio"] = None
-            st.rerun()
-        if not interrupted and st.button("Interrupt / ask teacher", type="primary"):
-            from learning_interrupt import clear_question_widgets
-            clear_question_widgets(keep_session=True)
-            state.get("interrupt", {}).update(turn=None)
-            state.update(interrupt_open=True, pending_action=None)
             st.rerun()
         with st.chat_message("assistant"):
             st.markdown(readable_text(chunks[index]["text"]))
@@ -222,32 +240,25 @@ def render_player(connection, state, *, local_testing=False):
             if pages:
                 st.caption("Source pages: " + ", ".join(map(str, pages)))
             if state.get("audio_error"):
-                st.warning("The text is available, but audio could not be loaded. Try Replay audio.")
+                st.warning("The text is available, but voice could not be loaded or verified. Try Replay voice.")
             if state["voice"] and state.get("audio") and not interrupted:
-                # A fresh keyed container remounts the controls for Replay even
-                # when Streamlit reuses the same media URL for identical bytes.
-                render_lesson_audio(state)
-                st.caption("Use the audio controls to pause or resume. Select Next when you are ready.")
+                from lesson_audio import render_audio
+                event = render_audio(state, chunks[index])
+                if event and open_interruption(state, event):
+                    st.rerun()
+            elif not interrupted and st.button("User interruption", type="primary"):
+                open_interruption(state, {"chunk_id": chunks[index]["chunk_id"], "playback": state["playback"],
+                                          "offset_ms": state.get("resume_offset_ms", 0)})
+                st.rerun()
         if interrupted:
             from learning_interrupt import render_interrupt
             render_interrupt(connection, state, local_testing=local_testing)
-            if st.button("Continue course", type="primary"):
-                action = state.get("pending_action") or {}
-                if action.get("action") == "SET_SPEED":
-                    try:
-                        rate = float(action["rate"])
-                        if not math.isfinite(rate) or not 0.5 <= rate <= 2.0:
-                            raise ValueError
-                        state["playback_rate"] = rate
-                    except (KeyError, TypeError, ValueError):
-                        st.error("The teacher returned an invalid playback speed.")
-                        return
-                load_part(connection, state, lesson["job_id"], index)
+            if st.button("Back to course", type="primary") and return_to_course(connection, state):
                 st.rerun()
-        if not interrupted and index == len(chunks) - 1 and st.button("Finish course", type="primary"):
+        if not interrupted and index == len(chunks) - 1 and st.button("Finish lesson", type="primary"):
             end_learning(connection, state, "COMPLETED")
             st.rerun()
-    if st.button("Back to courses"):
+    if not state["complete"] and st.button("End lesson"):
         end_learning(connection, state, "STOPPED_BY_LEARNER", back=True)
         st.rerun()
 
@@ -259,15 +270,16 @@ def render_learning(connection, *, local_testing=False):
         state = {"binding": current, "items": [], "loaded": False, "active": None,
                  "audio": None, "error": None, "voice": True, "more": False}
         st.session_state["learning_state"] = state
-        for key in ("learning_selected", "learning_read_aloud", "learning_manual_id"):
-            st.session_state.pop(key, None)
+        for key in list(st.session_state):
+            if key.startswith("learning_") and key != "learning_state":
+                del st.session_state[key]
         from learning_interrupt import clear_question_widgets
         clear_question_widgets()
     st.header("Learning")
-    if state["active"]:
+    if state["active"] or state.get("end_pending"):
         render_player(connection, state, local_testing=local_testing)
         return
-    st.write("Choose a ready lesson and start learning with its text and teacher voice.")
+    st.write("Choose a lesson and difficulty, then start your text and voice session.")
     if st.button("Refresh courses") or not state["loaded"]:
         with st.spinner("Loading available courses…"):
             refresh_courses(connection, state)
@@ -276,26 +288,34 @@ def render_learning(connection, *, local_testing=False):
         st.error(state["error"])
     if state.get("catalog_error"):
         st.info(state["catalog_error"])
+    from learning_session import session_options, start_lesson
+    options = session_options(local_testing=local_testing)
     if state.get('pending_bundle'):
         bundle = state['pending_bundle']
         level = st.selectbox('Difficulty level', list(bundle['variants']))
-        if st.button('Open selected level', type='primary'):
+        if st.button('Start selected level', type='primary'):
             state.pop('pending_bundle')
-            load_part(connection, state, bundle['job_id'], 0, level)
+            start_lesson(connection, state, bundle['job_id'], level, options)
             st.rerun()
-    items = {catalog_key(item): item for item in state["items"] if not expired(item)}
+    groups = {}
+    for item in state["items"]:
+        if not expired(item):
+            groups.setdefault(item["job_id"], {})[item.get("learner_level", "intermediate")] = item
+    items = {job: next(iter(levels.values())) for job, levels in groups.items()}
     if items:
         if st.session_state.get("learning_selected") not in items:
             st.session_state.pop("learning_selected", None)
-        selected = st.selectbox("Available course", list(items), format_func=lambda key: course_label(items[key]),
+        selected = st.selectbox("Available lesson", list(items), format_func=lambda key:
+                                f"Course {items[key].get('course_id', '')} · {course_label(items[key], include_level=False)}",
                                 key="learning_selected")
-        item = items[selected]
+        level = st.selectbox("Difficulty level", list(groups[selected]), key=f"learning_level_{selected}")
+        item = groups[selected][level]
         st.caption(f"{item.get('chunk_count', '?')} parts · Course: {item.get('course_id', '')}")
         st.caption("Ready for draft preview. Human approval remains separate.")
-        if st.button("Start course", type="primary"):
+        if st.button("Start lesson", type="primary"):
             with st.spinner("Opening your lesson…"):
-                load_part(connection, state, item['job_id'], 0,
-                          item.get('learner_level') if item.get('generation_version') == 'a3-v2' else None)
+                start_lesson(connection, state, item['job_id'],
+                             item.get('learner_level') if item.get('generation_version') == 'a3-v2' else None, options)
             st.rerun()
     elif not state.get("catalog_error"):
         st.info("No ready lessons are available. Generate a lesson, then refresh this list.")
@@ -312,5 +332,5 @@ def render_learning(connection, *, local_testing=False):
             except ValueError:
                 st.error("Enter the job UUID returned when the lesson was generated.")
             else:
-                load_part(connection, state, job_id, 0)
+                start_lesson(connection, state, job_id, None, options)
                 st.rerun()

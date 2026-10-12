@@ -5,7 +5,8 @@ from the final product. It sends HTTP requests to the backend and has no direct
 database, PDF processing or AWS access. It preserves the backend API contracts.
 
 The ingestion workspace uses A3 v2 (all aligned difficulty levels); the individual
-Generate lesson API tool also supports v1. Learning and B1 list each variant
+Generate lesson API tool also supports v1. Learning groups variants by lesson
+with a separate difficulty selector; the standalone B1 tool lists each variant
 separately; A5 and A7 offer a level
 selector for a bundle opened by job ID. Text lengths and audio durations may vary,
 while the chunk count/order and teaching-unit IDs remain aligned across levels.
@@ -86,27 +87,29 @@ not an automatically loaded file.
   credentials and signed Moodle/callback URLs are omitted. Workspace data and
   downloads are session-only. This simulates the API caller; it requires a running
   backend for real ingestion/generation. No offline provider simulation is added.
-- **Learning — A8 + A5**: lists completed lessons whose temporary
+- **Learning — A8/A5 + B1/B4/B5**: lists completed lessons whose temporary
   outputs are still available and whose source documents remain active. Select
-  an available course, then **Start course** for its text and teacher voice.
-  Previous/Next select parts; the audio controls pause/resume; Replay restarts
-  the audio; Finish/Restart and Back to courses control session-only progress.
-  Read aloud can be disabled. The selector includes language, explanation level
-  and creation time so separate generations can be distinguished. It also accepts
-  a job UUID when automatic listing is unavailable.
-  **Interrupt / ask teacher** stops lesson audio and opens a question panel for
-  the current part. Enable questions in local preview (or supply the signed
-  Middleware session JWT), then **Ask teacher** sends text or a WAV recording.
-  B1 starts on the first question; later messages reuse that session and B4
-  automatically receives the current chunk. Replies display text, audio and
-  sources; **Retry question** preserves the request ID. **Continue course**
-  rechecks A5 and resumes this part, applying any replay/speed instruction.
-  Playback-position inputs are omitted; Continue replays the current part from
-  its beginning. Expired sessions require an explicit new session.
-  **Finish course** ends an open B1 session through B5 with `COMPLETED`;
-  **Back to courses** sends `STOPPED_BY_LEARNER`. Both clear interruption replies
+  an **Available lesson** and **Difficulty level**, then **Start lesson** creates
+  B1 before displaying its first chunk's text and voice. Settings allow local
+  questions consent (enabled by default) or a signed Middleware session JWT.
+  A3 v2 levels share one lesson choice; A7 revisions remain separate choices.
+  **Next chunk** advances; **Replay voice** restarts the current chunk.
+  A custom Streamlit component plays checksum-verified WAV bytes and handles
+  **User interruption** in the browser: pause first, capture exact currentTime,
+  then open the text question box. **Send question** uses B4 with the same B1
+  session, current chunk and captured playback offset. Replies display text and
+  voice; **Retry question** preserves the request ID and payload.
+  **Back to course** rechecks A5 and resumes the same chunk at the saved position.
+  Explicit teacher REPLAY/PAUSE/SET_SPEED instructions override playback as requested.
+  Browsers that block autoplay show native Play controls. Positions stay in RAM;
+  no continuous telemetry or browser storage is introduced.
+  **Finish lesson** sends B5 `COMPLETED`; **End lesson** sends
+  `STOPPED_BY_LEARNER`. Both clear interruption replies
   and stop playback. If closure fails, **Retry session end** preserves the same
   session/reason without retaining its answer audio. A3 course WAVs are preserved.
+  Session expiry stops playback and requires an explicit fresh start. Unavailable
+  A5 output closes the session with ERROR. Next chunk is player navigation; B2's
+  cognitive-load measurement remains in the dedicated test page.
   No generation or A6 receipt happens automatically. Each explicit playback action
   rechecks A5, and changing the backend/authentication clears cached playback.
   Ready means a DRAFT preview requiring human approval. Expired/acknowledged jobs

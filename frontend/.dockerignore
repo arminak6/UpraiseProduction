@@ -7,6 +7,9 @@
 !chunk_end.py
 !api_client.py
 !learning.py
+!learning_session.py
+!lesson_audio.py
+!lesson_audio.js
 !session_start.py
 !session_end.py
 !learner_interrupt.py

@@ -1,6 +1,8 @@
 """Exercise the course selector/player without generating lessons or contacting AWS."""
 
 import copy
+import hashlib
+import os
 import sys
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -23,23 +25,37 @@ def button(app, label):
 
 class LearningTests(unittest.TestCase):
     def setUp(self):
-        self.job = str(uuid4())
+        self.job, self.session = str(uuid4()), str(uuid4())
         self.chunks = [str(uuid4()), str(uuid4())]
         expires = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         self.catalog = [{"job_id": self.job, "lesson_id": "example-course", "course_id": "course-1",
-                         "language": "it", "voice": "Bianca", "learner_level": "beginner",
+                         "activity_id": "activity", "language": "it", "voice": "Bianca", "learner_level": "beginner",
                          "chunk_count": 2, "status": "DRAFT", "requires_review": True,
                          "created_at": datetime.now(UTC).isoformat(), "expires_at": expires}]
         self.lesson = {**self.catalog[0], "chunks": [
             {"index": index, "chunk_id": chunk, "text": f"Teaching part {index + 1}: \\(x+1\\).",
-             "sources": [{"pages": [index + 1]}], "audio_url": "https://external.invalid/steal-token"}
+             "sources": [{"pages": [index + 1]}], "duration_seconds": 60,
+             "audio_sha256": hashlib.sha256(b"RIFF-test-audio").hexdigest(), "audio_url": "https://external.invalid/steal-token"}
             for index, chunk in enumerate(self.chunks)
         ]}
         self.audio_status = 200
         self.result_status = 200
+        self.start_status = 201
+        environment = patch.dict(os.environ, {"UPRAISE_LOCAL_TEST_MODE": "true"})
+        environment.start()
+        self.addCleanup(environment.stop)
+        renderer = patch("lesson_audio.render_audio", side_effect=lambda state, chunk: __import__("streamlit").audio(state["audio"]))
+        renderer.start()
+        self.addCleanup(renderer.stop)
 
     def response(self, connection, method, path, **kwargs):
-        self.assertEqual(method, "GET", "Learning must not submit, delete or regenerate anything")
+        if path == "/v1/sessions":
+            body = dict(self.catalog[0] if self.catalog else self.lesson)
+            body.update(session_id=self.session, lesson_job_id=self.job, ai_notice="AI teacher")
+            return api_client.Result(method, path, self.start_status, 1, body, True)
+        if path == f"/v1/sessions/{self.session}/end":
+            return api_client.Result(method, path, 204, 1, "")
+        self.assertEqual(method, "GET")
         if path == "/v1/lesson-jobs":
             return api_client.Result(method, path, 200, 1, copy.deepcopy(self.catalog), True)
         if path == f"/v1/jobs/{self.job}/result":
@@ -56,59 +72,56 @@ class LearningTests(unittest.TestCase):
         return app
 
     def start(self, app):
-        button(app, "Start course").click().run()
+        button(app, "Start lesson").click().run()
         self.assertFalse(app.exception)
         self.assertTrue(any("Teaching part 1" in m.value for m in app.markdown))
 
-    def test_select_start_navigate_finish_restart_and_replay_use_a8_a5_only(self):
+    def test_start_next_finish_and_new_session(self):
         with patch("api_client.request", side_effect=self.response) as send:
             app = self.app()
             self.assertEqual(send.call_count, 1)
             self.start(app)
+            self.assertEqual(send.call_args.args[2], "/v1/sessions")
+            self.assertEqual(send.call_args.kwargs["json_body"]["consent_scope"], ["questions"])
             self.assertEqual(app.session_state["learning_state"]["audio"], b"RIFF-test-audio")
-            self.assertEqual(len(app.get("audio")), 1)
-            self.assertTrue(button(app, "Previous").disabled)
             sequence = app.session_state["learning_state"]["playback"]
-            button(app, "Replay audio").click().run()
+            button(app, "Replay voice").click().run()
             self.assertGreater(app.session_state["learning_state"]["playback"], sequence)
-            button(app, "Next").click().run()
+            button(app, "Next chunk").click().run()
             self.assertTrue(any("Teaching part 2" in m.value for m in app.markdown))
-            self.assertEqual(send.call_args.args[2], f"/v1/jobs/{self.job}/audio/{self.chunks[1]}")
-            self.assertTrue(button(app, "Next").disabled)
-            button(app, "Previous").click().run()
-            self.assertEqual(app.session_state["learning_state"]["index"], 0)
-            button(app, "Next").click().run()
-            button(app, "Finish course").click().run()
+            self.assertTrue(button(app, "Next chunk").disabled)
+            self.assertEqual(sum(c.args[2] == "/v1/sessions" for c in send.call_args_list), 1)
+            button(app, "Finish lesson").click().run()
+            self.assertEqual(send.call_args.kwargs["json_body"], {"reason": "COMPLETED"})
+            self.assertFalse(app.exception)
             self.assertTrue(app.success)
             self.assertFalse(app.get("audio"))
-            button(app, "Restart course").click().run()
-            self.assertEqual(app.session_state["learning_state"]["index"], 0)
-            app.run()
-            self.assertFalse(app.exception)
-            self.assertEqual(send.call_count, 13)
-
-    def test_read_aloud_toggle_and_navigation_preserve_progress(self):
-        with patch("api_client.request", side_effect=self.response) as send:
-            app = self.app()
+            button(app, "Back to lessons").click().run()
             self.start(app)
-            app.toggle(key="learning_read_aloud").set_value(False).run()
+            self.assertEqual(sum(c.args[2] == "/v1/sessions" for c in send.call_args_list), 2)
+
+    def test_b1_failure_blocks_player_and_explicit_retry_keeps_session_uuid(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            self.start_status = 503
+            app = self.app()
+            button(app, "Start lesson").click().run()
+            first = send.call_args.kwargs["json_body"]
+            self.assertIsNone(app.session_state["learning_state"]["active"])
             self.assertFalse(app.get("audio"))
-            button(app, "Next").click().run()
-            self.assertEqual(send.call_args.args[2], f"/v1/jobs/{self.job}/result")
-            app.radio(key="page").set_value("Health").run()
-            app.radio(key="page").set_value("Learning").run()
-            self.assertEqual(app.session_state["learning_state"]["index"], 1)
-            self.assertFalse(app.toggle(key="learning_read_aloud").value)
-            app.toggle(key="learning_read_aloud").set_value(True).run()
-            self.assertEqual(len(app.get("audio")), 1)
-            self.assertFalse(app.exception)
+            self.assertTrue(app.error)
+            count = send.call_count
+            app.run()
+            self.assertEqual(send.call_count, count)
+            self.start_status = 201
+            self.start(app)
+            self.assertEqual(send.call_args.kwargs["json_body"], first)
 
     def test_expired_or_acknowledged_result_clears_cached_text_and_audio(self):
         with patch("api_client.request", side_effect=self.response):
             app = self.app()
             self.start(app)
             self.result_status = 410
-            button(app, "Next").click().run()
+            button(app, "Next chunk").click().run()
             self.assertFalse(app.exception)
             self.assertIsNone(app.session_state["learning_state"]["active"])
             self.assertIsNone(app.session_state["learning_state"]["audio"])
@@ -123,7 +136,7 @@ class LearningTests(unittest.TestCase):
             self.assertTrue(app.warning)
             self.assertFalse(app.get("audio"))
             self.audio_status = 403
-            button(app, "Replay audio").click().run()
+            button(app, "Replay voice").click().run()
             self.assertIsNone(app.session_state["learning_state"]["active"])
             self.assertTrue(app.error)
             self.assertFalse(app.exception)
@@ -139,6 +152,18 @@ class LearningTests(unittest.TestCase):
             app.text_input(key="backend_url").set_value("http://another-backend:8000").run()
             self.assertFalse(app.exception)
             self.assertFalse(app.session_state["learning_state"]["items"])
+
+    def test_voice_checksum_mismatch_keeps_text_without_playing_unverified_audio(self):
+        with patch("api_client.request", side_effect=self.response):
+            app = self.app()
+            self.start(app)
+            self.lesson["chunks"][0]["audio_sha256"] = "0" * 64
+            button(app, "Replay voice").click().run()
+            self.assertFalse(app.exception)
+            self.assertIsNone(app.session_state["learning_state"]["audio"])
+            self.assertFalse(app.get("audio"))
+            self.assertTrue(app.warning)
+            self.assertTrue(any("Teaching part 1" in m.value for m in app.markdown))
 
     def test_empty_catalog_manual_open_and_invalid_uuid(self):
         with patch("api_client.request", side_effect=self.response) as send:

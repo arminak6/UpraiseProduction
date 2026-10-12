@@ -94,15 +94,14 @@ submission with suggested IDs, a two-part A2 library for listing all accessible
 material or removing it, source selection with progress percentages, draft generation, job tracking,
 review/revision, complete JSON/WAV collection and explicit receipt/cancellation.
 Accepted document/job IDs are carried between steps; request sequences are
-available for inspection. The separate Learning page lists ready lessons through A8. Choose a course and
-select Start course to read its text and play its teacher voice. Previous/Next,
-audio pause/resume, Replay, Finish and Restart control session-only progress.
-**Interrupt / ask teacher** stops the lesson audio and opens a text/WAV question
-panel for the current part. With Questions consent (or the signed session JWT),
-the first message starts B1 and sends B4; later messages reuse the session.
-**Continue course** returns to this part and applies replay/speed instructions.
-**Finish course** and **Back to courses** end an open question session through
-B5 and clear its temporary replies. **End session (B5)** offers explicit API tests.
+available for inspection. Learning lists ready lessons through A8 with separate
+lesson/difficulty selectors. **Start lesson** creates B1 and displays the first
+chunk's generated text and voice; **Next chunk** advances through the lesson.
+**User interruption** pauses audio and captures its exact position, then opens
+a text question box. **Send question** uses B4 in the same session and shows
+the answer's text and voice. **Back to course** resumes the interrupted chunk
+at that position. **Finish lesson** and **End lesson** close B1 through B5 and
+clear temporary replies. **End session (B5)** also offers explicit API tests.
 All lessons remain drafts requiring human review, and temporary playback expires
 after the configured A5 TTL (24 hours by default).
 It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,

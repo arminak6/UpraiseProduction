@@ -1,6 +1,8 @@
 """V2 discovery, selected-level playback and session payloads through HTTP only."""
 
 import copy
+import hashlib
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -36,8 +38,13 @@ class AlignedLessonTests(unittest.TestCase):
 
     def test_learning_selects_level_and_keeps_it_on_next_chunk(self):
         calls = []
+        session_id = str(uuid4())
         def send(connection, method, path, **kwargs):
             calls.append((method, path, kwargs))
+            if path == '/v1/sessions':
+                level = kwargs['json_body']['learner_level']
+                return api_client.Result(method, path, 201, 1, {**self.items[2], 'learner_level': level,
+                    'session_id': session_id, 'lesson_job_id': self.job, 'ai_notice': 'AI teacher'}, True)
             if path == '/v1/lesson-jobs':
                 return api_client.Result(method, path, 200, 1, copy.deepcopy(self.items), True)
             if path.endswith('/result'):
@@ -45,16 +52,20 @@ class AlignedLessonTests(unittest.TestCase):
                 body = self.variants[level] if level else {'job_id': self.job, 'variants': self.variants}
                 return api_client.Result(method, path, 200, 1, copy.deepcopy(body), True)
             return api_client.Result(method, path, 200, 1, binary=b'RIFF-invented-audio')
-        with patch('api_client.request', side_effect=send):
+        for variant in self.variants.values():
+            for chunk in variant['chunks']:
+                chunk['audio_sha256'] = hashlib.sha256(b'RIFF-invented-audio').hexdigest()
+        with patch('api_client.request', side_effect=send), patch.dict(os.environ, {'UPRAISE_LOCAL_TEST_MODE': 'true'}):
             app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py'))
             app.session_state['page'] = 'Learning'
             app.run()
             self.assertFalse(app.exception)
-            app.selectbox(key='learning_selected').set_value(learning.catalog_key(self.items[2])).run()
-            next(button for button in app.button if button.label == 'Start course').click().run()
+            self.assertEqual(len(app.selectbox(key='learning_selected').options), 1)
+            app.selectbox(key=f'learning_level_{self.job}').set_value('advanced').run()
+            next(button for button in app.button if button.label == 'Start lesson').click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.session_state['learning_state']['active']['learner_level'], 'advanced')
-            next(button for button in app.button if button.label == 'Next').click().run()
+            next(button for button in app.button if button.label == 'Next chunk').click().run()
             results = [options for _, path, options in calls if path.endswith('/result')]
             self.assertEqual([value['params']['learner_level'] for value in results], ['advanced', 'advanced'])
             self.assertTrue(any('advanced teaching part 2' in value.value for value in app.markdown))

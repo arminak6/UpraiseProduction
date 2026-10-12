@@ -28,21 +28,17 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 - A3 v1 POST /v1/lesson-jobs: one requested level; ordered5page windows -> original
   V3 generator/reviewer/editor -> checked translation if A1/A3 languages differ ->
   ~200word chunks -> PG text before Polly, exact SSML before TTS. docs/a3.md.
-- A3 v2 POST /v2/lesson-jobs: all configured levels, initially three. Canonical
-  material generated once, segmented into one shared plan; original three-role
-  generation/review/edit adapts each level. Approved drafts retained; negative
-  draft review goes to editor and remains in DRAFT reports for human approval.
-  Additional blocking post-edit material review deferred in FUTURE_UPDATES.md.
-  Unit IDs/order/pages/size enforced; original V3 math/speech recovery retained.
-  Semantic quality depends on draft reviewer/editor and human assessment.
-  A1 unchanged; safe JSON/ID recovery, ambiguous/truncated data fail closed. v2.5
-  checks IDs inside draft/review/edit/shorten response recovery, one correction;
-  max3calls if format fallback precedes ID failure, max2 otherwise. Stage/counts
-  in content-free logs/audit. Translation preserves units. Target200/max500;
-  bounded shortening, at most two shared plan refinements, never level-only splits.
-  One complete bundle/job; same count/index/content_unit_id/source scope, distinct
-  chunk_id/text/WAV/duration. All texts/plan saved before speech. Semantic quality
-  still needs human review. Old courses unchanged. docs/a3-v2.md.
+- A3 v2 /v2/lesson-jobs: canonical material once -> shared plan -> original
+  generator/reviewer/editor adapts all configured levels; approved draft retained,
+  negative review edited. Translation preserves units. Post-edit independent
+  material review deferred (FUTURE_UPDATES.md); DRAFT/human review always applies.
+  Same count/order/content_unit_id/pages/scope, distinct chunk IDs/text/audio.
+  All texts/plan saved before speech. Target200/max500; bounded shortening and
+  max2 shared plan refinements, never level-only splits. A1/old courses unchanged.
+  v2.5/promptv6 validates IDs inside draft/review/edit/shorten response recovery;
+  one correction, max3calls if format fallback precedes IDs, max2 otherwise.
+  Ambiguous/truncated data fail closed; content-free stage/count diagnostics.
+  Original V3 math/speech recovery retained. docs/a3-v2.md.
 - A4 v2 counts are per level plus total. A5 bundle or ?learner_level=beginner,
   one root integrity hash; audio IDs unique across levels. A8 expands levels before
   pagination. A6 receipt/cancel/TTL fences writers, removes all temporary artifacts;
@@ -51,6 +47,13 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   TTS -> new complete standalone revision of selected level. Parent unchanged;
   stable count/order/unit IDs, v2 material/max-size checked again. Structural
   changes need new A3 plan. Request idempotency explicitly deferred. docs/a7.md.
+- Learning: separate lesson/difficulty selectors; Start lesson creates B1 before
+  text/voice playback. Next chunk retains session; browser component pauses and
+  captures exact currentTime on User interruption. Text questions use B4 with
+  offset; Back to course rechecks A5/resumes saved position, honoring explicit
+  REPLAY/PAUSE/SET_SPEED. WAV hash checked. B5 finish/end/error; no automatic B2
+  measurement. Browser positions/session/replies RAM-only. lesson_audio.{py,js},
+  learning_session.py; Docker includes assets. Standalone API tools preserved.
 - B1 exact job/context/hash/approval JWT plus selected v2 learner_level; fixed30min
   RAM-only max10000, audit before visibility, no capabilities. Local DRAFT preview.
   Inherits language/voice/profile/source scope and only selected variant's chunks.
@@ -58,12 +61,12 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 - B2 chunk-end: lesson_id/chunk_id/cognitive_load_score finite0..1; telemetry consent,
   >.5 HIGH_COGNITIVE_LOAD else PROCEED. No consent discards score. RAM-only score/
   index, content-free ID/version audit; test-v1 threshold, fusion/B6 absent.
-- B4 request-local LangGraph classify -> scoped retrieval/support -> respond.
-  RAG paired document/attempt filtering and source-language query rewrite; support
-  uses selected PG chunk. Questions consent/JWT; text/WAV-STT -> text/SSML/WAVbase64/
-  visemes or playback control. TTS failure preserves text. No learner disk/tracing.
-  User deferred grounding: grounded=null, GROUNDING_NOT_VERIFIED; safety/language
-  remain. One turn/session, max4 concurrent,32MiB/100-message cache, WAV60s/6MB.
+- B4 request-local LangGraph classify/retrieve/respond; current PG chunk and
+  Qdrant paired document/attempt scopes, source-language query rewrite. Questions
+  consent/JWT required; text/WAV-STT -> text/SSML/WAVbase64/visemes or playback
+  control. TTS failure keeps text. User deferred grounding: grounded=null and
+  GROUNDING_NOT_VERIFIED; safety/language remain. One turn/session, max4concurrent,
+  32MiB/100-message RAM cache, WAV60s/6MB; no learner disk/tracing.
 - B5 reason COMPLETED/STOPPED_BY_LEARNER/TIMEOUT/ERROR ->204; clears RAM/B4 audio/
   chat/counters, fences late commits. Idempotent audit and30min retry metadata;
   course WAV/PG/Qdrant keep independent retention. Fixed TTL uses same cleanup.
@@ -88,7 +91,7 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   runtime; services/interrupt_{models,stt}.py. core/versions.py: actual B2 policy.
 - services/pdf/: A1; operations modules C1/C2; services/versions.py + schemas/versions.py C5.
 - backend/docs/{a1,a2,a3,a3-v2,a5,a6,a7,a8,b1,b2,b4,b5,c1-c2,c5}.md: full contracts.
-- frontend/{app,ingestion_workspace,learning,learning_interrupt,session_start,chunk_revision}.py: HTTP UI;
+- frontend/{app,ingestion_workspace,learning,learning_interrupt,learning_session,lesson_audio}.py: HTTP UI;
   frontend/tests/: AppTest/fake HTTP. No direct provider/DB use.
 - backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned builds/math.
 - codex_helper/: ignored scripts/logs/reports; FUTURE_UPDATES.md ignored backlog.
@@ -136,38 +139,38 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   in beginner-retry-diagnosis.md; original warns while A3 fails.
 - Real-course AWS egress test auto-review rejected; agent checks use invented
   data/fake providers. User initiates real curl/UI generation. Grounding backlog4.
-- Failed A3 v2 jobs retain checkpoints but no published PG/audio. Old rejected
-  responses were not captured, so exact causes cannot be proven retrospectively.
-  v2.5 uses original three-role flow; independent post-edit A3 verification is
-  deferred. Review findings remain visible, without claiming final/human approval.
-  A7 retains alignment review. Earlier job6c8d3bc5's45texts had source gaps,
-  escaped math/Unicode, incorrect SSML ('L empty'), weak difficulty separation,
-  unsupported advanced content and review/code leaks. Evidence codex_helper/
-  level-content-assessment.md. WAV integrity does not certify semantic quality.
+- Failed A3 v2 retains checkpoints, no published PG/audio; uncaptured model
+  responses cannot be reconstructed. Post-edit independent A3 review deferred;
+  A7 retains alignment review. Earlier6c8d3bc5 had source gaps, weak difficulty
+  separation, SSML/format/review leaks: level-content-assessment.md. WAV integrity
+  does not certify semantics; human review required.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-12 alignment fix: models/pipeline/workers/config/C5, A3v2 tests/docs checked.
-196offline/isolated regressions, Ruff/diff/build passed. v2.5/promptv6 deployed;
-API/three workers match C5 (full ID in alignment-recovery-fix.md).
-Health/readiness200, queues empty at deploy,53source chunks present. No agent model calls.
-Evidence codex_helper/alignment-recovery-fix.md + check-alignment-recovery-deployed.py.
-User job8d97f91e DONE100%/attempt1 at11:38:31UTC/17m52s; v2.5 recovered duplicate
-IDs/MAX_TOKENS. Seven units/level/21 PG/WAVs;17operational checks passed.
-DRAFT/170findings, semantic/audio listening not reviewed. Evidence codex_helper/
-job-8d97f91e-completion-verification.{md,json}; A5 expires2026-10-13 11:38:31UTC.
-Old5da7620d v2.4 FAILED; uncaptured response unknown. codex_helper/job-5da7620d-*.
+2026-10-12 Learning session update: learning/player/session/interrupt modules,
+Docker assets, frontend tests and B1/B4/UI docs checked.87tests/Ruff/diff/build
+passed; frontend deployed/healthy. Chromium fake-provider flow captured11432ms,
+resumed11.827s with playback elapsed; unrelated rerun kept14.321s. One B1/B4/B5,
+answer-only audio during interruption. Live existing8d97f91e advanced parts1/2
+A8/A5/B1(201)/B5(204) passed; temporary session closed, no provider calls.
+Evidence codex_helper/learning-session-verification.md, learning-browser-verification.json,
+learning-live-verification.json, learning-session-tests.log and browser PNGs.
 
-2026-10-12 A1 fa70751d/course383861 DONE/31pages/53chunks;26operational checks
-passed. NEEDS_REVIEW:19flagged/18unverified/16auto chunks; six fidelity-provider
-ValidationExceptions. Pages5/10 title-only/blank. Evidence codex_helper/
-latest-ingestion-verification.{md,json}.
+2026-10-12 A7 job61a2c008 DONE/attempt1: beginner part1 revision1 of8d97f91e.
+Tables/numeric rows removed; changed WAV hash/PCM/duration valid; other6 texts/
+SSML/audio hashes unchanged.9checks; DRAFT. a7-61a2c008-verification.{md,json}.
 
-2026-10-12 frontend course picker:89tests/changed-file Ruff/diff/build passed;
-frontend redeployed/healthy. Fresh live AppTest selected383861→advanced→part7,
-without UUID import;3.75MB WAV hash/PCM valid, only A8/result/audio GETs.
-Evidence codex_helper/course-voice-picker-verification.md + course-voice-picker-live-verification.json.
-Earlier A2:12isolated integration checks passed; Draft live check in
-codex_helper/check-draft-selector-ui.py. Deferred-download details: a5-one-click-voice.md.
+2026-10-12 v2.5/promptv6 fix:196isolated checks/build passed, C5 API/workers
+match; alignment-recovery-fix.md. User8d97f91e DONE/attempt1 at11:38:31UTC,
+IDs/MAX_TOKENS recovered:7units/level,21PG/WAVs,17checks, DRAFT/170findings.
+A5 expires2026-10-13 11:38:31UTC; no semantic/audio listening review.
+job-8d97f91e-completion-verification.{md,json}; old5da7620d v2.4 FAILED.
+
+2026-10-12 A1 fa70751d/course383861 DONE/31pages/53Qdrant chunks;26checks passed.
+NEEDS_REVIEW:19flagged/18unverified/16auto chunks;6provider validation warnings;
+pages5/10 title-only/blank. latest-ingestion-verification.{md,json}.
+Course voice picker:89tests/build/live part7 hash passed; course-voice-picker-verification.md.
+A2:12integration checks. Named evidence above is under codex_helper/; dated
+checks do not imply permanent output availability or semantic approval.
