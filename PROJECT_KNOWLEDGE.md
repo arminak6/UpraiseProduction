@@ -2,187 +2,169 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 AI implements A1-A8, B1/B2/B4/B5 and C1/C2 with a Streamlit testbench.
-PG retains text/SSML; A5 JSON/audio is temporary. Streamlit offers course playback.
+UPRAISE WP7 implements A1-A8, A3 v2, B1/B2/B4/B5 and C1/C2/C5. Streamlit is an
+HTTP testbench/player. PostgreSQL retains DRAFT text/SSML; Qdrant holds sources;
+A5 JSON/WAV expires independently (24h). Middleware/Moodle owns human approval.
+Live A3v2 job6c8d3bc5 completed once:15 units/level,45 PG chunks/WAVs verified.
+Full text review: same broad topics, partial coverage and uneven level separation.
+B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 
-## Architecture and data flow
+## Architecture and decisions
 
-- FastAPI exposes authoring, learning and operations APIs.
-  MW owns pace/human approval; PG retains DRAFT text/SSML, Qdrant only sources.
-  B3/B6 and C3 remain reserved.
-- B1 POST /v1/sessions: sessions:write + exact lesson_job_id. Separate production
-  JWT binds client/subject/context/hash/approval; local DRAFT preview. RAM consent,
-  no capabilities. session_started audit precedes visibility; new201/retry200,
-  preserved state/no expiry extension.
-- B4 POST /v1/sessions/{id}/interrupts: request-local LangGraph classify/retrieve/
-  respond, v2 teacher, exact PG context/pinned sources. Questions use paired document/
-  attempt filters and source-language rewriting. No tracing/checkpoints. Grounding
-  deferred (grounded=null, GROUNDING_NOT_VERIFIED); safety/language checks remain.
-  Text/RAM WAV -> EU Transcribe; consent/JWT. Text/WAV/SSML/visemes or player control;
-  TTS failure keeps text. Content-free audit; one turn/session, default4 concurrent,
-  32MiB cache/100 messages, no renewal. Contract: backend/docs/b4.md.
-- B2 POST /v1/sessions/{id}/chunk-end: lesson_id/chunk_id/cognitive_load_score
-  (finite0..1), B1 version/client/course/JWT binding. Telemetry consent: >0.5 HIGH_COGNITIVE_LOAD,
-  else PROCEED; no consent discards score. Latest score/index in RAM, fixed TTL;
-  B5/expiry fences late commits. Audit IDs only; no AI/retrieval/speech. B6 future.
-- B5 POST /v1/sessions/{id}/end: shared B1/B4 auth without questions consent;
-  COMPLETED/STOPPED_BY_LEARNER/TIMEOUT/ERROR ->204. Clears RAM/B4 reply audio/counters,
-  fences late delivery; idempotent content-free session_ended audit. Fixed TTL uses
-  TIMEOUT cleanup; course WAVs/PG text/Qdrant keep independent retention.
-- C1 /health is dependency-free; /ready checks core PG/Qdrant/artifacts (200/503)
-  and AWS/worker degradation; absent collection allows initial A1. C2 /v1/status:
-  jobs:read/course scope, nullable features/reasons/kill switch. No AWS polling;
-  shared operational_observations: evidence15min/transient30s/heartbeat150s,
-  isolated by model/region/credential hash; UNKNOWN intentional. Startup disables
-  pause jobs without attempts; TTS-off keeps B4 text, blocks A3/A7. Playback/B5
-  remain available; runtime C3 future.
-- A8 GET /v1/lesson-jobs requires jobs:read. Client/course/active-source/DONE/
-  unexpired/no-cleanup filters precede pagination; returns DRAFT metadata only.
-- Learning uses A8/A5 identity/expiry checks. First Interrupt starts B1 then B4;
-  Continue replays the part with player instructions, no position input. Finish/
-  Back send B5, clear players/replies; failures retain retry metadata.
-  B1/B4/B5 pages support JWT/consent, text/WAV and stable-ID retries. B2 has an
-  explicit score-test page; it does not move Learning playback automatically.
-  Health page tests C1/C2 explicitly; credential/course changes clear old results.
-- INGRESS enforces OAuth/client/course/scopes/mTLS; no proxy headers. Explicit
-  development + local_test_mode grants authoring/B1 preview to private/loopback peers.
-- A1 commits bytes/job, returns202 document_id+job_id/A4 Location. A5 uses A3
-  job_id. User removed hash/origin guard scans.
-- Ingestion: Docling/OCR -> Nova candidates/source comparison -> quality-aware
-  chunks -> Titan -> isolated Qdrant attempt/count -> audit -> DONE.
-  Undeleted DONE + active_attempt is activation authority; vector tokens must match.
-- A3 returns202 job_id, awaits A1 and reads active chunks in source order.
-  Cross-window chunks are assigned once with all pages; defaults5pages/~200words,
-  no silent truncation and unknown IDs rejected.
-- A3 V3 explain -> review_explanation -> finalize_explanation: citation/math checks,
-  one edit. Reports retain pre-edit/source/speech findings; no post-edit review.
-- A7 POST /v1/audio:regenerate: lessons:write; lesson_job_id/chunk_id/teacher_review.
-  Exact PG/pinned Qdrant -> three roles/inherited settings/A3 translation ->202.
-  A4/A5/A8 expose complete DRAFT/revision; same chunk IDs/order, selected speech
-  only. WAV links/copies survive parent cleanup; original/sessions preserved.
-  Parent must be unexpired at acceptance. Checkpoints fence PG/TTS retries;
-  POST duplicates create jobs (idempotency deferred). UI: Revise chunk (A7).
-- A3 generates in declared A1 language; differing primary tags trigger translation/
-  review before splitting/PG/target speech. Notation/citations/code/pages/order
-  immutable; checkpoints avoid repeats, no parser repair; one evidenced recheck.
-- Beginner/intermediate/advanced (default intermediate) controls all3 role prompts;
-  reviewer flags mismatches. A5 learner_level_applied=true, explanation-level-v1.
-- V3 PCM/WAV matches SSML/visemes; overshoot rescaled/flagged, malformed marks fail.
-  Actual engines/fallbacks are recorded.
-- Workers use locks/leases/fencing/deadlines; provider calls are at least once.
-  upraise_jobs/upraise_audit retain jobs/content-free audit; artifacts share volume.
-- prepared_lesson_chunks retains final text before TTS and SSML before synthesis,
-  with order/provenance/review/model versions. Fenced retries cannot change text.
-- MW uses pinned HTTPS/mTLS/OAuth; callback2xx is no receipt, A6 RECEIVED required.
-  A5 checks ownership/source/hash/audit with shared locks; writers stay exclusive.
-- TTL24h from completion; A5 denies expired output immediately. Independent
-  delivery recovers cleanup/callbacks; RECEIVED/CANCEL preserves sources/vectors.
-- Disposal/A2 retains prepared_lesson_chunks, including failed/cancelled speech;
-  no archive API/audio DB/backfill.
-- A2 fences ingestion, purges all vector attempts and audits before204. A1 A6
-  preserves source/active vectors/history; lesson A6 removes JSON/audio/checkpoints.
+- A1 Docling/vision/math extraction once -> ordered Qdrant chunks; active attempt
+  prevents mixing source revisions. Returns document_id and job_id; A2 list/delete.
+- A3 v1 POST /v1/lesson-jobs: one requested level; ordered5page windows -> original
+  V3 generator/reviewer/editor -> checked translation if A1/A3 languages differ ->
+  ~200word chunks -> PG text before Polly, exact SSML before TTS. docs/a3.md.
+- A3 v2 POST /v2/lesson-jobs: all configured levels, initially three. Canonical
+  material generated once, segmented into one shared plan; original three-role
+  generation/review/edit adapts each level. Approved drafts retained; negative
+  draft review goes to editor and remains in DRAFT reports for human approval.
+  Additional blocking post-edit material review deferred in FUTURE_UPDATES.md.
+  Exact unit IDs/order/pages/size enforced; original V3 math delimiter/speech
+  recovery retained, without formula-string equality. Semantic quality depends
+  on draft source review/editor and human assessment, not an extra final judge.
+  A1 extraction unchanged. Complete JSON/string recovery handles safe escape errors;
+  ambiguous/duplicate/truncated data fail closed, bounded token retries and
+  content-free stage/reason logs distinguish provider failures. Translation
+  preserves units. Target200/max500 defaults; bounded
+  shortening then at most two common plan refinements, never level-only splits.
+  One complete bundle/job; same count/index/content_unit_id/source scope, distinct
+  chunk_id/text/WAV/duration. All texts/plan saved before speech. Semantic quality
+  still needs human review. Old courses unchanged. docs/a3-v2.md.
+- A4 v2 counts are per level plus total. A5 bundle or ?learner_level=beginner,
+  one root integrity hash; audio IDs unique across levels. A8 expands levels before
+  pagination. A6 receipt/cancel/TTL fences writers, removes all temporary artifacts;
+  durable PG text/SSML/shared plans/audit survive. docs/a5.md/a6.md/a8.md.
+- A7 teacher_review + job/chunk -> exact PG/pinned sources -> three roles/translation/
+  TTS -> new complete standalone revision of selected level. Parent unchanged;
+  stable count/order/unit IDs, v2 material/max-size checked again. Structural
+  changes need new A3 plan. Request idempotency explicitly deferred. docs/a7.md.
+- B1 exact job/context/hash/approval JWT plus selected v2 learner_level; fixed30min
+  RAM-only max10000, audit before visibility, no capabilities. Local DRAFT preview.
+  Inherits language/voice/profile/source scope and only selected variant's chunks.
+  Service OAuth/mTLS and separate session JWT are both required in production.
+- B2 chunk-end: lesson_id/chunk_id/cognitive_load_score finite0..1; telemetry consent,
+  >.5 HIGH_COGNITIVE_LOAD else PROCEED. No consent discards score. RAM-only score/
+  index, content-free ID/version audit; test-v1 threshold, fusion/B6 absent.
+- B4 request-local LangGraph classify -> scoped retrieval/support -> respond.
+  RAG paired document/attempt filtering and source-language query rewrite; support
+  uses selected PG chunk. Questions consent/JWT; text/WAV-STT -> text/SSML/WAVbase64/
+  visemes or playback control. TTS failure preserves text. No learner disk/tracing.
+  User deferred grounding: grounded=null, GROUNDING_NOT_VERIFIED; safety/language
+  remain. One turn/session, max4 concurrent,32MiB/100-message cache, WAV60s/6MB.
+- B5 reason COMPLETED/STOPPED_BY_LEARNER/TIMEOUT/ERROR ->204; clears RAM/B4 audio/
+  chat/counters, fences late commits. Idempotent audit and30min retry metadata;
+  course WAV/PG/Qdrant keep independent retention. Fixed TTL uses same cleanup.
+- C1 /health dependency-free; /ready corePG/Qdrant/artifacts200/503 plus degradation.
+  C2 /v1/status nullable feature reasons/kill switch; UNKNOWN intentional without
+  recent provider evidence. Shared observations provider15min/transient30s/worker150s;
+  no AWS polling. Gates block A3/A7, TTS-off keeps B4 text; B5 remains available.
+- C5 GET /v1/version: jobs:read startup metadata; no provider/storage GET calls.
+  Build/model/prompt/pipeline/profile hashes, threshold .5/fusion absent; common
+  configuration_id API/workers. New-job provenance and full content-free audit
+  snapshots. A7 keeps parent refs/adds revision refs. Checkpoints bind config refs.
 
-## Important paths
+## Key files and artifacts
 
-- FUTURE_UPDATES.md: ignored workers/DOCX/CSV/A7/grounding/runtime/C3 backlog.
-- README.md/compose.yaml/.env.example: setup; backend/docs/: contracts and decisions.
-- backend/src/upraise_ai/: api/, schemas/, guards/, main.py expose/wire APIs;
-  core/config.py owns signatures, budgets, providers and OAuth/TLS.
-- api/runtime/, schemas/, workflows/{sessions,interrupts}.py, storage/sessions.py,
-  guards/session_jwt.py, services/interrupt_{models,stt}.py: B1/B2/B4/B5 runtime.
-  schemas/chunk_end.py, docs/b2.md, tests/test_b2*: B2; frontend/chunk_end.py: UI.
-- {services,storage,api,schemas,guards}/operations*: C1/C2;
-  backend/docs/c1-c2.md and tests/test_c_operations*.
-- services/pdf/: A1; lesson_*.py: A3/A5; v3/: original code/provenance.
-- schemas/revisions.py, workflows/revisions.py, services/revision_{models,pipeline}.py,
-  backend/docs/a7.md, backend/tests/test_a7*: A7; frontend/chunk_revision.py: UI.
-- frontend/: HTTP testbench/player; frontend/tests/: AppTest/fake HTTP.
-  backend/tests/test_{a8,b1,b4,b5,c_operations}*: runtime/catalog/operations.
-- backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned build/math;
-  callback_tls/README.md: secret mounts; AWS mounts in backend/workers.
-- Legacy V3: ../Uprise/v2/backend/learning/v1/.
-- backend/tests/: generation, runtime, speech, storage/locks; AWS mocked.
-- codex_helper/: ignored helpers/logs and disposable validation scripts.
+- backend/src/upraise_ai/{api,schemas,workflows}/: API contracts/orchestration.
+- services/lesson_*.py and v3/: original adapter/provenance/math/speech;
+  services/aligned_{models,pipeline,responses}.py and schemas/aligned_lessons.py: A3 v2.
+- storage/lessons.py: fenced jobs/permanent chunks/shared plans; uniqueness on
+  (job_id,level_key,index), legacy level_key=''; repeatable additive migration.
+- services/revision_{models,pipeline}.py, workflows/revisions.py: immutable A7.
+- workflows/{sessions,interrupts}.py, storage/sessions.py, guards/session_jwt.py:
+  runtime; services/interrupt_{models,stt}.py. core/versions.py: actual B2 policy.
+- services/pdf/: A1; operations modules C1/C2; services/versions.py + schemas/versions.py C5.
+- backend/docs/{a1,a2,a3,a3-v2,a5,a6,a7,a8,b1,b2,b4,b5,c1-c2,c5}.md: full contracts.
+- frontend/{app,learning,learning_interrupt,session_start,chunk_revision}.py: HTTP UI;
+  frontend/tests/: AppTest/fake HTTP. No direct provider/DB use.
+- backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned builds/math.
+- codex_helper/: ignored scripts/logs/reports; FUTURE_UPDATES.md ignored backlog.
+  Latest full-level review: level-content-assessment.md; older reports retained.
 
-## Commands
+## Commands, environment and invariants
 
-From root, Docker Desktop Linux containers:
+- Docker Desktop Linux containers; API8000/UI8501. docker compose config --quiet.
+- Build: docker compose build backend frontend; additive migration:
+  docker compose run --rm --no-deps migrate. Refresh API/UI/workers together:
+  docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend frontend worker lesson-worker lesson-delivery
+- Drain jobs before pipeline/config changes; restart clears RAM sessions. Never reset
+  live volumes/re-ingest sources for A3. No staging/commits without explicit request.
+- Isolated validation helpers validate-a3v2.ps1/validate-c5.ps1 use only labeled
+  disposable PG/Qdrant, fake providers, no user volumes/credentials. Dev image
+  upraise-b4-validation; frontend tests in README. One-offs under codex_helper.
+- Python3.12.14/uv.9.5/UID10001; Docling2.115/core2.99/EasyOCR/CPU Torch;
+  NovaLite figure/NovaPro formula/fidelity, TitanV2 normalized1024D. A3 EU GPTOSS120B
+  + Qwen235B, eu-central-1 default. LangGraph1.2.14/Transcribe.6.4; PG17.11/Qdrant1.19.1;
+  Streamlit1.64/httpx.28. Node22/MathJax4.1.3/SRE5rc4.
+- Polly neural16kHz mono16bitWAV; per-request visemes fitted/offset by PCM duration.
+  SSML limits2800billed/5800total chars. EN/IT/FR/DE math smoke tested.
+- UPRAISE_LESSON_LEVEL_PROFILES ordered JSON (1–8 named profiles), plan level must
+  match; batch4/max8. Explicit level array preserves order across PG JSONB.
+- Windows PS5.1 JSON reads need -Encoding UTF8. Curl JSON examples one line with
+  curl.exe --%; use returned IDs, never NEW_JOB_ID placeholders.
+- Chunk identity(job_id,chunk_id), index0-based; shared content_unit_id links levels.
+  Source content_hash opaque/source_hash realSHA256; maxPDF100MB/500pages.
+- Logs/audit omit texts/scores/audio/prompts/private provider exceptions. Optional
+  model diagnostics local-only and deleted by A6/TTL. Source content untrusted.
+- Fixed session TTL capped by lesson/JWT, no Redis/renewal. Locks/source ownership/
+  leases fence publication; corrupt503/pending409/expired410. Attempts3/max12h,
+  supervised killable children; no deadline reset on progress.
+- Scopes documents:read/write, lessons:write, jobs:read/write, sessions:write;
+  inaccessible404/conflict409/malformed422. Auth closes on missing production config.
 
-- docker compose config --quiet
-- UI: docker compose --profile tools up --build -d --no-deps --wait frontend
-  Tests: frontend/README.md; plain compose up skips UI.
-- API/UI-only deploy: docker compose build backend frontend; then
-  docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend frontend
-- C migration: docker compose run --rm --no-deps migrate; refresh API/UI plus
-  worker lesson-worker lesson-delivery with the same up command/shared configuration.
+## Limits and next work
 
-Migration is additive. Drain old jobs before changing pipeline identity; never
-reset live test volumes or re-ingest sources for A3. Local API8000/Streamlit8501.
-
-## Dependencies and environment
-
-- Python3.12.14 Bookworm/uv0.9.5/UID10001; pinned Docker (host3.10 differs).
-  Docling2.115.0/core2.99.0/EasyOCR/CPU Torch; dependencies in uv.lock.
-- Nova Lite figures and Nova Pro math/fidelity for A1; normalized TitanV2 1024D.
-  A3 GPT OSS120B generator/Qwen235B reviewer; explicit EU region (eu-central-1 default).
-- Node22/MathJax4.1.3/SRE5.0.0-rc.4 npm lock; EN/IT/FR/DE math smoke tested.
-  PDF evidence renders with pypdfium2.
-- Polly neural:16kHz mono16-bit WAV; same-SSML visemes offset by PCM duration.
-  Request limits:2800 billed/5800 total SSML characters.
-- LangGraph1.2.14/amazon-transcribe0.6.4; STT needs transcribe:StartStreamTranscription.
-  Streamlit1.64.0/httpx0.28.1; PostgreSQL17.11/Qdrant1.19.1; no Redis.
-  Deployment needs credentials, gateway claims, MW TLS/IdP and model/IAM access.
-
-## Conventions and invariants
-
-- B1 RAM max10000, fixed1800s capped by lesson/JWT, sweep30s; one process, no renewal.
-  Restart clears state/end records, including pending audit retries. B5 keeps bounded
-  end metadata up to30min (retries204, no reopen); no learner DB/Redis. Sources untrusted.
-- Volumes: upraise_{qdrant_data,postgres_data,ingestion_data,model_cache}.
-  Source content_hash is opaque caller metadata; source_hash is actual SHA-256.
-  PDF defaults100MB/500pages. Chunk identity is job_id+chunk_id (A7 keeps IDs);
-  indexes zero-based;
-  duration_seconds and viseme time_ms; provenance derives from source IDs.
-- A1 retains originals/candidates/crops; strict JSON/end_turn comparison, priority
-  review > unverified > checked. DONE means completion. 600tokens/60 overlap;
-  atomic structures/all page_numbers retained (page is first only).
-- Checkpoints bind request/source/pipeline: corrupt503, pending409, expired410.
-- lesson-v3-a3-8 needs no re-ingestion; new generation uses fresh idempotency key.
-  UPRAISE_LESSON_CAPTURE_MODEL_OUTPUTS is local-only, removed by A6/TTL; logs omit text.
-- Deadlines never reset on progress; max12h/3 attempts; supervised Linux children.
-- A1 retention defaults off, A3 independent; job/audit history survives. Artifact
-  locks never unlinked; A6 cleanup/audit before204, busy writers503 with recovery.
-- Scopes: documents:read/write, lessons:write, jobs:read/write, sessions:write.
-  Inaccessible404; conflicts409; malformed422.
-
-## Known limitations and next work
-
-- A1/A3 defects: codex_helper/ingestion-1-vs-2-vs-3-report.md,
-  italian-v8-assessment-47194bc7.md and level-assessment/assessment.md. Huge windows
-  fail; reviews do not guarantee suitability. Beginner U+0008 invalidates SSML:
-  original warns, A3 fails (beginner-retry-diagnosis.md/original-speech-comparison.md).
-  Job errors lose provider details; MW callbacks unverified.
-- Gateway/Moodle, HA/backups, retention/erasure, orphan cleanup and cross-host
-  storage remain open. No archive-read API. Backlog: concurrency, DOCX/CSV, A7 idempotency.
-- Learning excludes expired/acknowledged outputs; grounding deferred (backlog4).
-  False gate: codex_helper/b4-rag-synthetic-diagnosis.py/.log. B4 synchronous,
-  WAV max60s/6MB. AWS tests invented-only; earlier real-course egress auto-review rejected.
-- v2 uses PG/disk voice/SQLite Python calls: codex_helper/frontend-learning-comparison.md.
-
-## Recent decisions
-
-- 2026-10-09: B2 approved: caller's cognitive_load_score, test threshold0.5;
-  lesson/chunk validation and existing telemetry-consent rule retained.
+- One ingestion/lesson worker; pools overlap but each processes jobs sequentially.
+  A3 v2 variants sequential within bundle; concurrency backlog. No archive-read API;
+  A5 expiry affects playback even with permanent PG text. Human assessment needed.
+- DOCX/CSV, A7 idempotency, structural/cross-level edits and mid-session difficulty
+  switching future. Gateway/Moodle callbacks/model access, HA/backups/erasure/orphan
+  cleanup/cross-host storage unverified. Beginner control-char SSML issue diagnosed
+  in beginner-retry-diagnosis.md; original warns while A3 fails.
+- Earlier real-course AWS egress test auto-review rejected: use invented data/fake
+  providers. User can initiate real curl/UI generation tests. Grounding backlog4.
+- Failed A3 v2 jobs retain checkpoints but no published PG/audio. Old rejected
+  responses were not captured, so exact causes cannot be proven retrospectively.
+  v2.4 uses original three-role flow; independent post-edit A3 verification is
+  deferred. Review findings remain visible, without claiming final/human approval.
+  A7 retains its revision-specific alignment review. Completed job6c8d3bc5 has
+  literal Unicode/double-math escapes and incorrect SSML such as 'L empty'; valid
+  WAV generation does not prove teaching/speech quality. All45 texts reviewed:
+  same broad topic in15 triples, scope gaps in chunks1/11/12 (1-based), advanced3
+  adds .05 threshold; difficulty often cosmetic. Intermediate5/6 contain review
+  JSON; advanced5 has trailing .replace code. Report level-content-assessment.md
+  under codex_helper. Review/escape cleanup needed; failed jobs need new requests.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-09: schemas/chunk_end.py, runtime/sessions.py, storage/{sessions,audit}.py,
-frontend/{chunk_end,session_end,app}.py and docs/b2.md checked. Runtime130 and
-isolated integration31 passed (fake AWS); frontend62 plus final focused5 passed.
-Changed-file Ruff/Compose/diff/build passed. API/UI refreshed; all7 healthy.
-Live B2 verified both decisions, exact0.5, consent, B5 and IDs-only audit; no AWS
-calls. Job51e8c520's12 PG chunks/result/WAV hashes preserved;10 DONE/9 FAILED,
-none active. Logs: codex_helper/b2-*. No migration. B4 power-grid18.7/12.4/page4
-verified in Qdrant/PDF (rag-source-page4.png). PowerShell5.1 needs UTF8 reads.
+2026-10-12 read-only full text assessment of job6c8d3bc5-a825-4a18-b814-9a61b86a6b07:
+PG retained45 texts/15 canonical units; every ID/section/source matches its plan.
+All15 triples share broad topics, but material gaps/additions and inconsistent
+difficulty remain (Limits above). All45 texts read, not only prior samples;
+no independent full-PDF factual certification/audio listening. Evidence:
+codex_helper/{export-level-content-audit.py,level-content-audit-data.json,
+assess-level-content.py,level-content-assessment.md}. Docker Desktop was stopped;
+started only PG for temporary read-only helper, then stopped PG again. Generation
+workers remained stopped; no runtime edits/provider calls. Project services stopped.
+Current config/profiles/aligned schemas/models/pipeline rechecked.
+
+2026-10-10 three-role update deployed; extra A3 review deferred, A7 unchanged.
+193 offline/30 disposable integration tests with fake providers and
+Ruff/Compose/diff/build passed. API/worker C5: aligned-lessons-v2.4-1452bdbd12b0,
+aligned-teaching-v5, review original-three-role-v1/post_edit_material_review=deferred;
+configuration sha256:2351c1daea507d8509a9a098d961299c7a2805b45dcc14b9a85e8952ace32bf1.
+Evidence alignment-three-role-* and verify-alignment-three-role.py in codex_helper.
+Live user retest6c8d3bc5: DONE/attempt1,16m46s, English/Joanna,15 chunks/level.
+45PG texts/SSML match A5;45 WAV hashes/formats/durations/visemes passed.
+DRAFT164 source/draft findings are not164 confirmed final errors. Earlier samples
+found Unicode escapes4 beginner chunks and doubled math/SSML 'empty'8 chunks.
+Evidence check-aligned-success.py/ aligned-success-{check.json,assessment.md}.
+Source79fd4c5e-b3ef-426e-bf47-78ae09a2ef0e: DONE/en/31pages/53chunks, attempt
+c90d99b1-1cca-4b11-888e-73868e302f65, pdf-ingestion-v1.4-10273fc36174; PDF hash matched.
+Historical483b3ea3/c4be12d9/0ac79061/d8f11792 FAILED, unpublished; exact candidates
+unavailable. Earlier authorized reset deleted older lessons, retained sources/audit.
+Reset helpers must never rerun without user request. No real AWS test by agent.

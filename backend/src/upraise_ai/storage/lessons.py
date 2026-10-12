@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS prepared_lesson_chunks (
     PRIMARY KEY(job_id, chunk_id),
     UNIQUE(job_id, chunk_index)
 );
+ALTER TABLE prepared_lesson_chunks ADD COLUMN IF NOT EXISTS level_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE prepared_lesson_chunks ADD COLUMN IF NOT EXISTS content_unit_id UUID;
+ALTER TABLE prepared_lesson_chunks DROP CONSTRAINT IF EXISTS prepared_lesson_chunks_job_id_chunk_index_key;
+CREATE UNIQUE INDEX IF NOT EXISTS prepared_lesson_chunks_level_index
+    ON prepared_lesson_chunks(job_id,level_key,chunk_index);
+CREATE TABLE IF NOT EXISTS lesson_chunk_plans (
+    job_id UUID PRIMARY KEY REFERENCES lesson_jobs(job_id) ON DELETE CASCADE,
+    plan JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 """
 
 
@@ -109,21 +119,30 @@ class LessonRepository(JobRepository):
         )""")
         with self.connect() as conn:
             return conn.execute(
-                "SELECT j.* FROM lesson_jobs AS j WHERE " + " AND ".join(filters)
-                + " ORDER BY j.created_at DESC,j.job_id DESC LIMIT %s OFFSET %s",
+                """SELECT j.*, levels.value AS catalog_level FROM lesson_jobs AS j
+                CROSS JOIN LATERAL jsonb_array_elements_text(
+                    COALESCE(j.result->'levels',jsonb_build_array(
+                        COALESCE(j.metadata->'options'->>'learner_level','intermediate')))
+                ) WITH ORDINALITY AS levels(value,position) WHERE """ + " AND ".join(filters)
+                + " ORDER BY j.created_at DESC,j.job_id DESC,levels.position LIMIT %s OFFSET %s",
                 [*values, limit, offset],
             ).fetchall()
 
     def save_prepared_text(self, conn, job_id, chunks, versions):
         """Caller holds the job lease and source locks; commit before any TTS call."""
-        for index, (chunk_id, text, source, report, section_index, revisions) in enumerate(chunks):
+        counters = {}
+        for item in chunks:
+            chunk_id, text, source, report, section_index, revisions = item[:6]
+            level, unit_id = item[6:] if len(item) == 8 else ('', None)
+            index = counters.get(level, 0)
+            counters[level] = index + 1
             saved = conn.execute(
                 """INSERT INTO prepared_lesson_chunks
-                (job_id,chunk_id,chunk_index,section_index,text,sources,reviewer_report,revisions,versions)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                (job_id,chunk_id,chunk_index,section_index,text,sources,reviewer_report,revisions,versions,level_key,content_unit_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(job_id,chunk_id) DO NOTHING RETURNING chunk_id""",
                 (job_id, chunk_id, index, section_index, text, Jsonb([source.model_dump()]),
-                 Jsonb(report.model_dump()), revisions, Jsonb(versions)),
+                 Jsonb(report.model_dump()), revisions, Jsonb(versions), level, unit_id),
             ).fetchone()
             if saved is None:
                 row = conn.execute(
@@ -131,7 +150,8 @@ class LessonRepository(JobRepository):
                 ).fetchone()
                 if (row["text"] != text or row["chunk_index"] != index or row["section_index"] != section_index
                         or row["sources"] != [source.model_dump()] or row["versions"] != versions
-                        or row["reviewer_report"] != report.model_dump() or row["revisions"] != revisions):
+                        or row["reviewer_report"] != report.model_dump() or row["revisions"] != revisions
+                        or row['level_key'] != level or str(row['content_unit_id'] or '') != str(unit_id or '')):
                     raise IngestionError("LESSON_PREPARED_TEXT_CONFLICT")
         count = conn.execute(
             "SELECT count(*) AS n FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,)
@@ -147,11 +167,25 @@ class LessonRepository(JobRepository):
         ).fetchone():
             raise IngestionError("LESSON_PREPARED_TEXT_MISSING")
 
-    def prepared_chunks(self, job_id):
+    def save_plan(self, conn, job_id, plan):
+        payload = plan.model_dump(mode='json')
+        conn.execute('INSERT INTO lesson_chunk_plans(job_id,plan) VALUES (%s,%s) ON CONFLICT DO NOTHING',
+                     (job_id, Jsonb(payload)))
+        saved = conn.execute('SELECT plan FROM lesson_chunk_plans WHERE job_id=%s', (job_id,)).fetchone()
+        if saved['plan'] != payload:
+            raise IngestionError('LESSON_PLAN_CONFLICT')
+
+    def get_plan(self, job_id):
+        with self.connect() as conn:
+            row = conn.execute('SELECT plan FROM lesson_chunk_plans WHERE job_id=%s', (job_id,)).fetchone()
+            return row['plan'] if row else None
+
+    def prepared_chunks(self, job_id, level=None):
         """Internal/operator access; API authorization and output expiry remain separate."""
         with self.connect() as conn:
             return conn.execute(
-                "SELECT * FROM prepared_lesson_chunks WHERE job_id=%s ORDER BY chunk_index", (job_id,)
+                "SELECT * FROM prepared_lesson_chunks WHERE job_id=%s AND (%s::text IS NULL OR level_key=%s) ORDER BY level_key,chunk_index",
+                (job_id, level, level)
             ).fetchall()
 
     def prepared_chunk(self, job_id, chunk_id):
@@ -183,13 +217,14 @@ class LessonRepository(JobRepository):
                 """WITH c AS (SELECT job_id FROM lesson_jobs WHERE
                 ((status='QUEUED' AND available_at<=clock_timestamp()) OR
                  (status='RUNNING' AND lease_until<clock_timestamp()))
-                AND cleanup_requested_at IS NULL AND pipeline_version=%s
+                AND cleanup_requested_at IS NULL AND pipeline_version=ANY(%s)
                 AND NOT (metadata->>'course_id'=ANY(%s))
                 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
                 UPDATE lesson_jobs j SET status='RUNNING', step='SOURCE', attempts=attempts+1,
                 lease_token=%s, lease_until=clock_timestamp()+%s*interval '1 second',
                 error_code=NULL, updated_at=clock_timestamp() FROM c WHERE j.job_id=c.job_id RETURNING j.*""",
-                (pipeline_version, list(excluded_courses), uuid4(), lease_seconds),
+                ([pipeline_version] if isinstance(pipeline_version, str) else list(pipeline_version),
+                 list(excluded_courses), uuid4(), lease_seconds),
             ).fetchone()
 
     def renew(self, job_id, token, lease_seconds):

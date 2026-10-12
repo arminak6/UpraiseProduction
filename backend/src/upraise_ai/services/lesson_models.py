@@ -51,6 +51,7 @@ class _LanguageClient:
         self.language = "en"
         self.teaching_prompt = None
         self.raw = ""
+        self.stop_reason = None
 
     def converse(self, **request):
         # Keep V3 schemas/recovery intact; add trusted API teaching policy only
@@ -61,7 +62,10 @@ class _LanguageClient:
             request["system"] = [*request["system"], {"text":
                 f"Write all teaching text and mathematical narration in {language_name(self.language)}. "
                 "Retain the exact source notation and JSON contract field names."}]
+        self.raw = ""
+        self.stop_reason = None
         response = self.client.converse(**request)
+        self.stop_reason = response.get("stopReason")
         blocks = response.get("output", {}).get("message", {}).get("content", [])
         self.raw = "\n".join(block["text"] for block in blocks
                              if isinstance(block, dict) and isinstance(block.get("text"), str))
@@ -115,9 +119,9 @@ class LessonModels:
             except OSError:
                 log.warning("V3 lesson diagnostic storage unavailable")
 
-    def generate_section(self, section, language, source_path=None, *, learner_level="intermediate", notify=None):
+    def generate_section(self, section, language, source_path=None, *, learner_level="intermediate", notify=None, level_profiles=None):
         self.transport.language = language
-        teaching_prompt = learner_level_system_prompt(learner_level, "generator")
+        teaching_prompt = learner_level_system_prompt(learner_level, "generator", profiles=level_profiles)
         self.transport.raw = ""
         document, arguments = self.source(section)
         phase = "draft"
@@ -127,12 +131,12 @@ class LessonModels:
             phase = "review"
             if notify:
                 notify("REVIEW")
-            self.transport.teaching_prompt = learner_level_system_prompt(learner_level, "reviewer")
+            self.transport.teaching_prompt = learner_level_system_prompt(learner_level, "reviewer", profiles=level_profiles)
             review = self.teacher.review_explanation(document, draft=draft, **arguments)
             phase = "finalize"
             if notify:
                 notify("FINALIZE")
-            self.transport.teaching_prompt = learner_level_system_prompt(learner_level, "editor")
+            self.transport.teaching_prompt = learner_level_system_prompt(learner_level, "editor", profiles=level_profiles)
             # V3 always finalizes, including an approved draft: this is where its
             # citation/markup checks belong. There is no additional post-edit judge.
             final = self.teacher.finalize_explanation(document, draft=draft, review=review, **arguments)
@@ -167,3 +171,12 @@ class LessonModels:
         from upraise_ai.services.revision_models import revise_chunk
 
         return revise_chunk(self, section, original, feedback, neighbours, learner_level=learner_level, notify=notify)
+
+    def adapt_units(self, section, units, language, *, learner_level, profiles, target_words, max_words, notify=None, current=None):
+        from upraise_ai.services.aligned_models import adapt_units
+        try:
+            return adapt_units(self, section, units, language, learner_level=learner_level, profiles=profiles,
+                               target_words=target_words, max_words=max_words, notify=notify, current=current)
+        except IngestionError as error:
+            self.diagnose("alignment:" + error.stage if hasattr(error, "stage") else "alignment", error)
+            raise

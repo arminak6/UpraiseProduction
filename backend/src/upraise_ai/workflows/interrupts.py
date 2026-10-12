@@ -70,6 +70,10 @@ class InterruptService:
         row = self.lessons.authorized(session.binding.lesson_job_id, principal)
         with self.lessons.staging.artifact_lock(session.binding.lesson_job_id, shared=True):
             result = self.lessons.result(row)
+            if hasattr(result, 'variants'):
+                result = result.variants.get(session.binding.learner_level)
+                if result is None:
+                    raise HTTPException(409, 'LESSON_LEVEL_MISMATCH')
             if row["result"]["result_sha256"] != session.binding.result_sha256:
                 raise HTTPException(409, "LESSON_VERSION_MISMATCH")
             chunk = next((value for value in result.chunks if value.chunk_id == str(data.chunk_id)), None)

@@ -13,6 +13,7 @@ import psycopg
 from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.core.versions import cognitive_load_decision
 from upraise_ai.schemas.sessions import EndReason, StartedSession
 
 INTERRUPT_CACHE_BYTES = 32 * 1024**2
@@ -32,6 +33,8 @@ class SessionBinding:
     consent_scope: tuple[str, ...]
     preview: bool
     subject: str | None = None
+    level_claim_required: bool = False
+    level_profile: str | None = None
 
 
 @dataclass
@@ -294,7 +297,7 @@ class SessionStore:
             self._ensure_current_locked(session)
             session.current_chunk_index = index
             session.cognitive_load_state = score if "telemetry" in session.binding.consent_scope else None
-            return "HIGH_COGNITIVE_LOAD" if session.cognitive_load_state is not None and score > 0.5 else "PROCEED"
+            return cognitive_load_decision(score) if session.cognitive_load_state is not None else "PROCEED"
 
     def finish_interrupt(self, session, request_id, fingerprint, response, message):
         # Caller owns interrupt_lock. This is RAM only; content never enters audit.

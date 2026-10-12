@@ -6,14 +6,17 @@ from uuid import UUID, uuid4
 
 import api_client
 import streamlit as st
-from learning import binding, course_label, expired, refresh_courses
+from learning import binding, catalog_key, course_label, expired, refresh_courses
 
 
-def payload_for(item, *, job_id="", course_id="", activity_id="", lesson_id="", language="", documents=""):
+def payload_for(item, *, job_id="", course_id="", activity_id="", lesson_id="", language="", documents="", learner_level=''):
     if item is not None:
-        return {name: item[name] for name in ("course_id", "activity_id", "lesson_id", "language")} | {
+        body = {name: item[name] for name in ("course_id", "activity_id", "lesson_id", "language")} | {
             "lesson_job_id": str(UUID(item["job_id"])),
         }
+        if item.get('generation_version') == 'a3-v2':
+            body['learner_level'] = item['learner_level']
+        return body
     if not all(value.strip() for value in (course_id, activity_id, lesson_id, job_id)):
         raise ValueError("Enter the lesson job ID, course ID, activity ID and lesson ID.")
     try:
@@ -29,6 +32,8 @@ def payload_for(item, *, job_id="", course_id="", activity_id="", lesson_id="", 
         body["language"] = language.strip()
     if document_ids:
         body["document_ids"] = document_ids
+    if learner_level.strip():
+        body['learner_level'] = learner_level.strip()
     return body
 
 
@@ -50,7 +55,7 @@ def render_session_start(connection, show_response, *, local_testing=False):
         state["loaded"] = True
     if state.get("catalog_error"):
         st.info("Available lessons could not be listed. You can enter the lesson details below.")
-    items = {item["job_id"]: item for item in state["items"] if not expired(item)}
+    items = {catalog_key(item): item for item in state["items"] if not expired(item)}
     choices = [*items, "manual"]
     if st.session_state.get("b1_field_choice") not in choices:
         st.session_state.pop("b1_field_choice", None)
@@ -68,6 +73,7 @@ def render_session_start(connection, show_response, *, local_testing=False):
             values[field] = st.text_input(label, key="b1_field_" + field,
                                           max_chars=36 if field == "job_id" else 120)
         with st.expander("Optional lesson scope"):
+            values['learner_level'] = st.text_input('Learner level (required for A3 v2)', key='b1_field_level', max_chars=40)
             values["language"] = st.text_input("Language (optional)", key="b1_field_language", max_chars=35)
             values["documents"] = st.text_area("Document IDs (optional)", key="b1_field_documents",
                                                 help="Leave empty to use the lesson's sources, or enter a subset, one UUID per line.")

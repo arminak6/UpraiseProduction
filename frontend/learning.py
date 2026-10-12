@@ -57,16 +57,23 @@ def failure(result):
     return result.error or "The lesson could not be loaded. Refresh the list or try again."
 
 
-def load_part(connection, state, job_id, index):
+def load_part(connection, state, job_id, index, learner_level=None):
     """Recheck A5 on every explicit playback action, including after A6/expiry."""
     job_id = str(UUID(job_id))
     path = f"/v1/jobs/{job_id}"
-    result = api_client.request(connection, "GET", path + "/result")
+    old = state.get('active') or {}
+    if learner_level is None and old.get('job_id') == job_id:
+        learner_level = old.get('learner_level') if old.get('generation_version') == 'a3-v2' else None
+    options = {'params': {'learner_level': learner_level}} if learner_level else {}
+    result = api_client.request(connection, "GET", path + "/result", **options)
     state.update(audio=None, audio_error=None, error=None)
     if not result.successful or result.error:
         state.update(active=None, error=failure(result), interrupt={}, interrupt_open=False)
         return
     lesson = result.body
+    if isinstance(lesson, dict) and lesson.get('variants'):
+        state.update(pending_bundle=lesson, active=None, error=None)
+        return
     try:
         chunks = lesson["chunks"]
         if (str(UUID(lesson["job_id"])) != job_id or not chunks or expired(lesson)
@@ -81,7 +88,7 @@ def load_part(connection, state, job_id, index):
         return
     from learning_interrupt import clear_question_widgets
     old = state.get("active") or {}
-    if old.get("job_id") != job_id:
+    if old.get("job_id") != job_id or old.get('learner_level') != lesson.get('learner_level'):
         state.update(interrupt={}, playback_rate=1.0)
         clear_question_widgets()
     elif state.get("index") != index:
@@ -112,6 +119,11 @@ def course_label(item):
     return f"{title}{version} · {language} · {item.get('learner_level', 'intermediate')} · {created}"
 
 
+def catalog_key(item):
+    return (item['job_id'] + ':' + item['learner_level']
+            if item.get('generation_version') == 'a3-v2' else item['job_id'])
+
+
 def refresh_courses(connection, state, *, more=False):
     offset = state.get("offset", 0) if more else 0
     result = api_client.request(connection, "GET", "/v1/lesson-jobs", params={"limit": 100, "offset": offset})
@@ -121,7 +133,7 @@ def refresh_courses(connection, state, *, more=False):
             for item in items:
                 item["job_id"] = str(UUID(item["job_id"]))
             combined = [*state["items"], *items] if more else items
-            state.update(items=list({item["job_id"]: item for item in combined}.values()),
+            state.update(items=list({(item["job_id"], item.get('learner_level')): item for item in combined}.values()),
                          catalog_error=None, error=None, more=len(result.body) == 100,
                          offset=offset + len(result.body))
             return
@@ -264,7 +276,14 @@ def render_learning(connection, *, local_testing=False):
         st.error(state["error"])
     if state.get("catalog_error"):
         st.info(state["catalog_error"])
-    items = {item["job_id"]: item for item in state["items"] if not expired(item)}
+    if state.get('pending_bundle'):
+        bundle = state['pending_bundle']
+        level = st.selectbox('Difficulty level', list(bundle['variants']))
+        if st.button('Open selected level', type='primary'):
+            state.pop('pending_bundle')
+            load_part(connection, state, bundle['job_id'], 0, level)
+            st.rerun()
+    items = {catalog_key(item): item for item in state["items"] if not expired(item)}
     if items:
         if st.session_state.get("learning_selected") not in items:
             st.session_state.pop("learning_selected", None)
@@ -275,7 +294,8 @@ def render_learning(connection, *, local_testing=False):
         st.caption("Ready for draft preview. Human approval remains separate.")
         if st.button("Start course", type="primary"):
             with st.spinner("Opening your lesson…"):
-                load_part(connection, state, selected, 0)
+                load_part(connection, state, item['job_id'], 0,
+                          item.get('learner_level') if item.get('generation_version') == 'a3-v2' else None)
             st.rerun()
     elif not state.get("catalog_error"):
         st.info("No ready lessons are available. Generate a lesson, then refresh this list.")

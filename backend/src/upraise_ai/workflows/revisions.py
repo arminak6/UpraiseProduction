@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.operations import require_feature
-from upraise_ai.schemas.lessons import LessonInput
+from upraise_ai.schemas.lessons import StoredLessonInput
 from upraise_ai.services.lesson_pipeline import LessonPipeline, write_json
 
 log = logging.getLogger("upraise.revisions")
@@ -33,11 +33,16 @@ def submit_revision(lessons, data, principal):
             selected = next((chunk for chunk in result.chunks if chunk.chunk_id == str(data.chunk_id)), None)
             if selected is None:
                 raise HTTPException(404, "LESSON_CHUNK_NOT_FOUND")
+            if hasattr(result, 'variants'):
+                result = next(variant for variant in result.variants.values()
+                              if any(chunk.chunk_id == selected.chunk_id for chunk in variant.chunks))
             if not selected.sources:
                 raise IngestionError("REVISION_SOURCE_UNAVAILABLE", status=409)
             if len(selected.text) > 16000:
                 raise IngestionError("REVISION_CONTEXT_TOO_LARGE", status=422)
-            prepared = {str(chunk["chunk_id"]): chunk for chunk in lessons.jobs.prepared_chunks(parent_id)}
+            all_prepared = lessons.jobs.prepared_chunks(parent_id)
+            prepared = {str(chunk['chunk_id']): chunk for chunk in all_prepared
+                        if str(chunk['chunk_id']) in {part.chunk_id for part in result.chunks}}
             if len(prepared) != len(result.chunks):
                 raise IngestionError("LESSON_PREPARED_TEXT_CONFLICT", status=503)
             for chunk in result.chunks:
@@ -72,20 +77,33 @@ def submit_revision(lessons, data, principal):
                         os.fsync(stream.fileno())
             snapshot = folder / "revision-base.json"
             write_json(snapshot, result.model_dump(mode="json"))
-            metadata = LessonInput.model_validate({
+            metadata = StoredLessonInput.model_validate({
                 key: value for key, value in row["metadata"].items() if key != "revision_request"
             }).model_dump(mode="json")
+            metadata['options']['learner_level'] = result.learner_level
             metadata["callback_url"] = None  # A7 uses A4/A5 pull delivery.
             metadata["revision_request"] = {
                 "parent_job_id": parent_id, "chunk_id": str(data.chunk_id), "teacher_review": data.teacher_review,
                 "number": (result.revision.number if result.revision else 0) + 1,
                 "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(), "source_attempts": attempts,
             }
+            if result.chunk_plan_id:
+                plan = lessons.jobs.get_plan(parent_id)
+                if not plan or plan['chunk_plan_id'] != str(result.chunk_plan_id):
+                    raise IngestionError('LESSON_PLAN_UNAVAILABLE', status=503)
+                unit = next((unit for unit in plan['units']
+                             if unit['content_unit_id'] == str(selected.content_unit_id)), None)
+                if unit is None:
+                    raise IngestionError('LESSON_PLAN_UNAVAILABLE', status=503)
+                metadata['revision_request']['aligned_unit'] = unit
             if row["expires_at"] <= datetime.now(UTC):
                 raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
             lessons.jobs.accept_revision(conn, job_id, principal.client_id,
                                          metadata["revision_request"]["snapshot_sha256"], metadata,
                                          lessons.settings.lesson_signature)
+            if result.chunk_plan_id:
+                from upraise_ai.schemas.aligned_lessons import ChunkPlan
+                lessons.jobs.save_plan(conn, job_id, ChunkPlan.model_validate(plan))
         return {"job_id": job_id}
     except BaseException:
         if staged:

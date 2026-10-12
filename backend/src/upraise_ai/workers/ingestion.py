@@ -12,6 +12,7 @@ from upraise_ai.core.errors import IngestionError, LeaseLost
 from upraise_ai.guards.operations import require_ai
 from upraise_ai.schemas.documents import IngestionMetadata, QualityStatus
 from upraise_ai.services.formats import get_processor
+from upraise_ai.services.versions import VersionCatalog
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
@@ -53,7 +54,7 @@ class IngestionWorker:
     def __init__(self, settings, jobs=None, audit=None, vectors=None, processor=None, *, notify=None):
         self.settings = settings
         self.jobs = jobs or JobRepository(settings.jobs_dsn.get_secret_value())
-        self.audit = audit or AuditRepository(settings.audit_dsn.get_secret_value())
+        self.audit = audit or AuditRepository(settings.audit_dsn.get_secret_value(), settings=settings)
         self.vectors = vectors or VectorStore(
             settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension
         )
@@ -187,6 +188,7 @@ class IngestionWorker:
             with self.jobs.owned_transaction(job_id, token) as conn:
                 count = self.vectors.write(processed, embeddings, token)
                 result = {
+                    **VersionCatalog(self.settings).references(),
                     "page_count": processed.page_count,
                     "chunk_count": count,
                     "warning_count": len(processed.warnings),

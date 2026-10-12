@@ -9,6 +9,7 @@ from upraise_ai.services.aws import aws_session
 from upraise_ai.services.chunking import StructureAwareChunker
 from upraise_ai.services.embeddings import BedrockTitanEmbeddingProvider
 from upraise_ai.services.quality import aggregate_quality, quality_summary
+from upraise_ai.services.versions import VersionCatalog
 from upraise_ai.workers.budgets import enrichment_workload, notify_workload
 
 from .enrichment import PdfEnricher
@@ -29,6 +30,7 @@ class PdfProcessor:
         page_count = validate_pdf_input(source, settings.max_pdf_size_mb * 1024**2, settings.max_pdf_pages)
         notify_workload(progress, "parse", page_count)
         source_hash = sha256_file(source)
+        version_refs = VersionCatalog(settings).references()
         checkpoint = job_dir / "prepared.json"
         if checkpoint.is_file():
             try:
@@ -39,6 +41,7 @@ class PdfProcessor:
                     and processed.metadata == metadata
                     and processed.pipeline_version == settings.pipeline_signature
                     and processed.source_hash == source_hash
+                    and payload.get("versions") == version_refs
                 ):
                     progress("store", 0.93, "Resuming prepared document.")
                     return processed, payload["vectors"]
@@ -117,7 +120,7 @@ class PdfProcessor:
         temporary = checkpoint.with_name(f"prepared.{token}.part")
         with temporary.open("w", encoding="utf-8") as stream:
             json.dump(
-                {"document": processed.model_dump(mode="json"), "vectors": vectors},
+                {"document": processed.model_dump(mode="json"), "vectors": vectors, "versions": version_refs},
                 stream,
                 ensure_ascii=False,
             )

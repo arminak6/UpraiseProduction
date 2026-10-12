@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.operations import require_feature
+from upraise_ai.schemas.aligned_lessons import AlignedLessonInput, AlignedLessonResult
 from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import LessonResult
 from upraise_ai.services.lesson_callback import validate_callback_config
@@ -36,9 +37,15 @@ class LessonService:
                 if row["status"] in {"FAILED", "CANCELLED"}:
                     raise IngestionError("DOCUMENT_INGESTION_FAILED", status=409)
         metadata = data.model_dump(mode="json")
+        aligned = isinstance(data, AlignedLessonInput)
+        signature = self.settings.lesson_v2_signature if aligned else self.settings.lesson_signature
+        if aligned:
+            metadata.update(generation_version='a3-v2', level_profiles=self.settings.lesson_level_profiles,
+                            plan_level=self.settings.lesson_plan_level, levels=list(self.settings.lesson_level_profiles))
+            metadata['options']['learner_level'] = self.settings.lesson_plan_level
         fingerprint = hashlib.sha256(json.dumps({"request": metadata,
-                                                 "pipeline": self.settings.lesson_signature}, sort_keys=True).encode()).hexdigest()
-        row = self.jobs.accept(principal.client_id, key, fingerprint, metadata, self.settings.lesson_signature)
+                                                 "pipeline": signature}, sort_keys=True).encode()).hexdigest()
+        row = self.jobs.accept(principal.client_id, key, fingerprint, metadata, signature)
         return {"job_id": str(row["job_id"])}
 
     def authorized(self, job_id, principal):
@@ -58,14 +65,16 @@ class LessonService:
             job_id=str(row["job_id"]), lesson_id=row["metadata"]["lesson_id"],
             course_id=row["metadata"]["course_id"], activity_id=row["metadata"]["activity_id"],
             language=row["metadata"]["language"], voice=row["metadata"]["voice"],
-            learner_level=row["metadata"].get("options", {}).get("learner_level", "intermediate"),
+            learner_level=row.get('catalog_level') or row["metadata"].get("options", {}).get("learner_level", "intermediate"),
             chunk_count=row["result"]["chunk_count"], requires_review=True,
             review_issue_count=row["result"].get("review_issue_count", 0),
             created_at=row["created_at"], expires_at=row["expires_at"],
             revision=row["result"].get("revision"),
+            generation_version=row['metadata'].get('generation_version'),
+            chunk_plan_id=row['result'].get('chunk_plan_id'),
         ) for row in rows]
 
-    def result(self, row):
+    def result(self, row, learner_level=None):
         row = self.jobs.get(row["job_id"])
         if row["cleanup_requested_at"] or (row["expires_at"] and row["expires_at"] <= datetime.now(UTC)):
             raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
@@ -80,11 +89,24 @@ class LessonService:
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != row["result"]["result_sha256"]:
             raise IngestionError("LESSON_RESULT_INTEGRITY_FAILURE", status=503)
-        result = LessonResult.model_validate_json(raw)
+        payload = json.loads(raw)
+        result = (AlignedLessonResult.model_validate(payload) if 'variants' in payload
+                  else LessonResult.model_validate(payload))
+        if result.source_attempts:
+            checker.check_sources(row, result.source_attempts)
         result.expires_at = row["expires_at"].isoformat()
         base = self.settings.lesson_public_base_url.rstrip("/")
         for chunk in result.chunks:
             chunk.audio_url = base + f"/v1/jobs/{row['job_id']}/audio/{chunk.chunk_id}"
+        if isinstance(result, AlignedLessonResult):
+            for variant in result.variants.values():
+                variant.expires_at = result.expires_at
+            if learner_level is not None:
+                if learner_level not in result.variants:
+                    raise IngestionError('LESSON_LEVEL_NOT_FOUND', status=404)
+                return result.variants[learner_level]
+        elif learner_level is not None and learner_level != result.learner_level:
+            raise IngestionError('LESSON_LEVEL_NOT_FOUND', status=404)
         return result
 
     def dispose(self, job_id, reason, principal):

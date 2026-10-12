@@ -3,6 +3,8 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import psycopg
 from psycopg.types.json import Jsonb
 
+from upraise_ai.services.versions import VersionCatalog
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ingestion_audit (
     event_id UUID PRIMARY KEY,
@@ -22,8 +24,16 @@ CREATE INDEX IF NOT EXISTS lesson_audit_job ON lesson_audit(job_id, created_at);
 
 
 class AuditRepository:
-    def __init__(self, dsn):
+    def __init__(self, dsn, *, settings=None):
         self.dsn = dsn
+        self.version_snapshot = VersionCatalog(settings).snapshot().model_dump(mode="json") if settings else None
+
+    def details(self, details):
+        # Snapshot the component writing the event. A read/end event does not
+        # claim these versions generated the older lesson it references.
+        if self.version_snapshot is None:
+            return details
+        return {**details, "version_snapshot": self.version_snapshot}
 
     def migrate(self):
         with psycopg.connect(self.dsn, connect_timeout=5) as conn:
@@ -39,7 +49,7 @@ class AuditRepository:
             conn.execute(
                 """INSERT INTO ingestion_audit (event_id,job_id,document_id,event_type,details)
                 VALUES (%s,%s,%s,%s,%s) ON CONFLICT (event_id) DO NOTHING""",
-                (event_id, job["job_id"], job["document_id"], event_type, Jsonb(details)),
+                (event_id, job["job_id"], job["document_id"], event_type, Jsonb(self.details(details))),
             )
 
     def lesson(self, job, event_type, details, *, attempt=False):
@@ -50,7 +60,7 @@ class AuditRepository:
             conn.execute(
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details) VALUES (%s,%s,%s,%s)
                 ON CONFLICT(event_id) DO NOTHING""",
-                (uuid5(NAMESPACE_URL, identity), job["job_id"], event_type, Jsonb(details)),
+                (uuid5(NAMESPACE_URL, identity), job["job_id"], event_type, Jsonb(self.details(details))),
             )
 
     def lesson_access(self, job, event_type, details):
@@ -60,7 +70,7 @@ class AuditRepository:
             conn.execute(
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
                 VALUES (%s,%s,%s,%s)""",
-                (uuid4(), job["job_id"], event_type, Jsonb(details)),
+                (uuid4(), job["job_id"], event_type, Jsonb(self.details(details))),
             )
 
     def session_started(self, job, event_id, details):
@@ -70,7 +80,7 @@ class AuditRepository:
             conn.execute(
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
                 VALUES (%s,%s,'session_started',%s) ON CONFLICT(event_id) DO NOTHING""",
-                (event_id, job["job_id"], Jsonb(details)),
+                (event_id, job["job_id"], Jsonb(self.details(details))),
             )
 
     def learner_interrupt(self, job, session_id, request_id, details):
@@ -79,17 +89,17 @@ class AuditRepository:
             conn.execute(
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
                 VALUES (%s,%s,'learner_interrupt',%s) ON CONFLICT(event_id) DO NOTHING""",
-                (event_id, job["job_id"], Jsonb({"session_id": session_id, "request_id": request_id, **details})),
+                (event_id, job["job_id"], Jsonb(self.details({"session_id": session_id, "request_id": request_id, **details}))),
             )
 
     def chunk_ended(self, session, chunk_id):
-        # IDs only: no cognitive-load measurement, decision, text or credentials.
+        # IDs and deployed versions only: no score, decision, text or credentials.
         with psycopg.connect(self.dsn, connect_timeout=5, options="-c statement_timeout=5000") as conn:
             conn.execute(
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
                 VALUES (%s,%s,'chunk_ended',%s)""",
                 (uuid4(), session.binding.lesson_job_id,
-                 Jsonb({"session_id": str(session.response.session_id), "chunk_id": chunk_id})),
+                 Jsonb(self.details({"session_id": str(session.response.session_id), "chunk_id": chunk_id}))),
             )
 
     def session_ended(self, ended):
@@ -101,5 +111,5 @@ class AuditRepository:
             conn.execute(
                 """INSERT INTO lesson_audit(event_id,job_id,event_type,details)
                 VALUES (%s,%s,'session_ended',%s) ON CONFLICT(event_id) DO NOTHING""",
-                (event_id, ended.binding.lesson_job_id, Jsonb(details)),
+                (event_id, ended.binding.lesson_job_id, Jsonb(self.details(details))),
             )

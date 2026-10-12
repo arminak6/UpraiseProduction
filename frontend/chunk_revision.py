@@ -25,22 +25,29 @@ def render_chunk_revision(connection, show_response):
         choice = st.selectbox("Prepared lesson", items, format_func=course_label, key="a7_lesson_choice")
         if st.button("Load selected lesson", key="a7_load_selected"):
             state["requested_job"] = choice["job_id"]
+            state['requested_level'] = choice.get('learner_level') if choice.get('generation_version') == 'a3-v2' else None
             state["lesson"] = None
     job_id = st.text_input("Lesson job ID", key="a7_field_job")
     if st.button("Load lesson by job ID", key="a7_load_id"):
         try:
             state["requested_job"] = str(UUID(job_id.strip()))
+            state['requested_level'] = None
             state["lesson"] = None
         except ValueError:
             st.error("Enter a valid lesson job UUID.")
     if state.get("requested_job"):
         requested = state.pop("requested_job")
-        result = api_client.request(connection, "GET", f"/v1/jobs/{requested}/result")
+        level = state.pop('requested_level', None)
+        options = {'params': {'learner_level': level}} if level else {}
+        result = api_client.request(connection, "GET", f"/v1/jobs/{requested}/result", **options)
         state["load_response"] = result
         state["accepted"] = None
         state.pop("submit_response", None)
         state["lesson"] = result.body if result.successful and isinstance(result.body, dict) else None
     lesson = state.get("lesson")
+    if lesson and lesson.get('variants'):
+        level = st.selectbox('Revision level', list(lesson['variants']), key='a7_variant_level')
+        lesson = lesson['variants'][level]
     if lesson and isinstance(lesson.get("chunks"), list) and lesson["chunks"]:
         st.write(f"Language: {lesson['language']} · Level: {lesson['learner_level']} · Voice: {lesson['voice']}")
         chunk = st.selectbox("Teaching chunk", lesson["chunks"],

@@ -2,7 +2,7 @@
 
 A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
 A7 chunk revision/audio regeneration, A8 ready-lesson listing, B1 lesson start, B2 chunk-end decisions, B4 learner interruption, B5 session end,
-C1 health/readiness and C2 feature status are implemented.
+C1 health/readiness, C2 feature status and C5 deployed versions are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -21,7 +21,8 @@ The Word file was supplied again on 2026-10-06 and checked directly. The supplie
 architecture diagram is retained as conversation context. A/B/C grouping and
 all reserved endpoints remain unchanged. A8 is the user-approved 2026-10-07 extension
 for listing ready lessons; see [A8's contract](backend/docs/a8.md).
-See [A3's Version 3 workflow and callback setup](backend/docs/a3.md) and
+See [A3's Version 3 workflow and callback setup](backend/docs/a3.md),
+the [A3 v2 aligned-level contract](backend/docs/a3-v2.md), and
 [A5 pull downloads, auditing and TTL](backend/docs/a5.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
@@ -82,6 +83,8 @@ overrides for passwords that need URI encoding.
 - Readiness: http://localhost:8000/ready; feature status: http://localhost:8000/v1/status
   (C2 uses INGRESS and jobs:read). See [C1/C2](backend/docs/c1-c2.md) for UNKNOWN
   provider evidence, partial outages and shared API/worker operator controls.
+- Deployed versions: http://localhost:8000/v1/version (INGRESS and jobs:read).
+  [C5](backend/docs/c5.md) reports model IDs, prompt hashes, pipelines and B2 policy.
 - Optional Streamlit Learning and API Testbench: http://localhost:8501
 
 Streamlit is a testing tool in frontend/, separate from the final product.

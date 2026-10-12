@@ -14,8 +14,10 @@ from upraise_ai.api.operations import router as operations_router
 from upraise_ai.api.runtime import router as runtime_router
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.core.versions import APPLICATION_VERSION
 from upraise_ai.guards.body_limit import UploadLimitMiddleware
 from upraise_ai.services.operations import OperationsMonitor
+from upraise_ai.services.versions import VersionCatalog
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
@@ -32,6 +34,7 @@ from upraise_ai.workflows.submission import SubmissionService
 @asynccontextmanager
 async def lifespan(app):
     settings = get_settings()
+    app.state.versions = VersionCatalog(settings)
     app.state.operations = OperationsMonitor(settings)
     app.state.submission = None
     app.state.documents = None
@@ -46,7 +49,7 @@ async def lifespan(app):
         app.state.submission = SubmissionService(settings, jobs, staging)
         if settings.audit_dsn.get_secret_value():
             vectors = VectorStore(settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension)
-            audit = AuditRepository(settings.audit_dsn.get_secret_value())
+            audit = AuditRepository(settings.audit_dsn.get_secret_value(), settings=settings)
             app.state.sessions.end_audit = audit.session_ended
             app.state.documents = DocumentService(jobs, vectors, audit)
             app.state.jobs = JobService(jobs, vectors, audit, staging)
@@ -84,8 +87,8 @@ async def lifespan(app):
 
 app = FastAPI(
     title="UPRAISE AI Module",
-    version="0.1.0",
-    description="UPRAISE A1-A8 authoring, B1/B2/B4/B5 learning and C1/C2 operations.",
+    version=APPLICATION_VERSION,
+    description="UPRAISE A1-A8 authoring, B1/B2/B4/B5 learning and C1/C2/C5 operations.",
     lifespan=lifespan,
 )
 

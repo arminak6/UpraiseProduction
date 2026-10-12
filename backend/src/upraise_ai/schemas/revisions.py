@@ -31,3 +31,4 @@ class RevisionRequest(LessonRevision):
     teacher_review: str = Field(min_length=1, max_length=8000)
     snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_attempts: dict[str, str]
+    aligned_unit: dict | None = None

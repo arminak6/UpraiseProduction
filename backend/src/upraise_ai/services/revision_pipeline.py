@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.schemas.aligned_lessons import AlignedText, AlignedTexts, ContentUnit
 from upraise_ai.schemas.lessons import (
     LessonResult,
     ReviewIssue,
@@ -13,10 +14,12 @@ from upraise_ai.schemas.lessons import (
     Viseme,
 )
 from upraise_ai.schemas.revisions import LessonRevision
+from upraise_ai.services.aligned_models import accepted, reviewed, validate_material_format
 from upraise_ai.services.lesson_models import merge_reviews
 from upraise_ai.services.lesson_pipeline import LessonPipeline, atomic_write, source_issues, write_json
 from upraise_ai.services.lesson_translation import needs_translation
 from upraise_ai.services.revision_models import REVISION_PROMPT_VERSION, validate_revision_text
+from upraise_ai.services.versions import VersionCatalog
 
 
 def file_hash(path):
@@ -66,7 +69,10 @@ class RevisionPipeline(LessonPipeline):
                    "source_language": document["metadata"]["language"], "pages": pages,
                    "window": [min(pages), max(pages)], "page_count": document["result"]["page_count"],
                    "course_id": data.course_id, "chunks": chunks}
-        signature = hashlib.sha256(json.dumps({"request": job["metadata"], "pipeline": job["pipeline_version"],
+        if revision.aligned_unit:
+            section.update(alignment_unit=revision.aligned_unit, level_profiles=data.level_profiles)
+        version_refs = VersionCatalog(self.settings).references("revision_")
+        signature = hashlib.sha256(json.dumps({"request": job["metadata"], "pipeline": job["pipeline_version"], "versions": version_refs,
             "prompt": REVISION_PROMPT_VERSION}, sort_keys=True).encode()).hexdigest()
         progress.set_workload("lesson", 1)
         progress("GENERATE", 0.05)
@@ -95,11 +101,25 @@ class RevisionPipeline(LessonPipeline):
             report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
                                   issues=[*report.issues, *flags], revision_instructions=report.revision_instructions)
             write_json(checkpoint_path, {"signature": signature, "text": text, "review": report.model_dump(), "edits": edits})
+        if revision.aligned_unit:
+            unit = ContentUnit.model_validate(revision.aligned_unit)
+            text = validate_material_format(unit, text)
+            if len(text.split()) > data.options.max_chunk_words:
+                raise IngestionError('REVISION_UNIT_TOO_LARGE')
+            self.models.transport.language = data.language
+            self.models.transport.teaching_prompt = None
+            final_review = reviewed(self.models, section, [unit],
+                AlignedTexts(units=[AlignedText(content_unit_id=unit.content_unit_id, text=text)]),
+                data.language, data.options.learner_level, data.level_profiles)
+            if not accepted(final_review):
+                raise IngestionError('REVISION_ALIGNMENT_REJECTED', retryable=True)
         selected.text, selected.reviewer_report, selected.revisions = text, report, edits
-        selected.sources[0].pages = pages
+        if not revision.aligned_unit:
+            selected.sources[0].pages = pages
         result.job_id, result.expires_at = job_id, None
         result.revision = LessonRevision(parent_job_id=revision.parent_job_id, chunk_id=revision.chunk_id, number=revision.number)
-        result.versions.update(revision_prompt=REVISION_PROMPT_VERSION,
+        result.versions.update(**version_refs,
+                               revision_prompt=REVISION_PROMPT_VERSION,
                                revision_pipeline=job["pipeline_version"],
                                revision_source_language=section["source_language"],
                                revision_translation_applied=str(needs_translation(section["source_language"], data.language)).lower(),
@@ -107,6 +127,9 @@ class RevisionPipeline(LessonPipeline):
                                revision_review_model=self.settings.lesson_review_model_id)
         all_chunks = [(chunk.chunk_id, chunk.text, chunk.sources[0], chunk.reviewer_report,
                        chunk.section_index, chunk.revisions) for chunk in result.chunks]
+        if revision.aligned_unit:
+            all_chunks = [(*value, result.learner_level, chunk.content_unit_id)
+                          for value, chunk in zip(all_chunks, result.chunks, strict=True)]
         save_text(all_chunks, result.versions)
         for chunk in result.chunks:
             if chunk.chunk_id != selected.chunk_id:

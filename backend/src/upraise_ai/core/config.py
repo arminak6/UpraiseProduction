@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     lesson_review_model_id: str = "qwen.qwen3-235b-a22b-2507-v1:0"
     lesson_visual_model_id: str = "eu.amazon.nova-pro-v1:0"  # Retained legacy key; unused by native V3 A3.
     lesson_pipeline_version: str = "lesson-v3-a3-8"
+    lesson_v2_pipeline_version: str = "aligned-lessons-v2.4"
+    lesson_level_profiles: dict[str, str] = Field(default_factory=lambda: {
+        "beginner": "Use plain language, define unfamiliar terms, and explain prerequisites and reasoning step by step. Retain substantive formulas and facts.",
+        "intermediate": "Assume basic familiarity; balance intuition with technical detail and explain key reasoning steps and new notation.",
+        "advanced": "Assume a strong foundation; use precise terminology and formal notation, explaining source-supported derivations, assumptions and limitations.",
+    })
+    lesson_plan_level: str = "intermediate"
+    lesson_alignment_batch_units: int = Field(4, ge=1, le=8)
     lesson_capture_model_outputs: bool = False
     lesson_ttl_seconds: int = Field(86400, ge=60)
     lesson_source_wait_seconds: int = Field(86400, ge=60)
@@ -69,6 +77,16 @@ class Settings(BaseSettings):
     lesson_seconds_per_section: float = Field(1200, gt=0, allow_inf_nan=False)
     lesson_seconds_per_chunk: float = Field(180, gt=0, allow_inf_nan=False)
     lesson_max_source_characters: int = Field(120000, ge=1000)
+
+    @model_validator(mode="after")
+    def valid_level_profiles(self):
+        import re
+        profiles = self.lesson_level_profiles
+        if (not 1 <= len(profiles) <= 8 or self.lesson_plan_level not in profiles
+                or any(not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name) or not text.strip()
+                       or len(text) > 4000 for name, text in profiles.items())):
+            raise ValueError("lesson_level_profiles requires 1-8 named teaching profiles and a matching lesson_plan_level")
+        return self
     polly_engine: Literal["neural", "standard"] = "neural"
     lesson_public_base_url: str = ""
     callback_allowed_hosts: list[str] = []
@@ -182,6 +200,16 @@ class Settings(BaseSettings):
         identity = ":".join((self.lesson_pipeline_version, self.lesson_generation_model_id,
                              self.lesson_review_model_id, self.lesson_visual_model_id, self.polly_engine))
         return f"{self.lesson_pipeline_version}-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+
+    @property
+    def lesson_v2_signature(self) -> str:
+        import hashlib
+        import json
+        payload = {"base": self.lesson_signature, "levels": self.lesson_level_profiles,
+                   'level_order': list(self.lesson_level_profiles),
+                   "plan_level": self.lesson_plan_level, "batch_units": self.lesson_alignment_batch_units}
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+        return f"{self.lesson_v2_pipeline_version}-{digest}"
 
 
 @lru_cache

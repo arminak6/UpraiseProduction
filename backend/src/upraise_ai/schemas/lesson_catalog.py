@@ -24,3 +24,5 @@ class ReadyLesson(BaseModel):
     created_at: datetime
     expires_at: datetime | None
     revision: LessonRevision | None = None
+    generation_version: Literal['a3-v2'] | None = None
+    chunk_plan_id: str | None = None

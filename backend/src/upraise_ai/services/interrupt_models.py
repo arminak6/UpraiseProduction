@@ -58,7 +58,8 @@ class InterruptTeacher:
                           retries={"total_max_attempts": 1, "mode": "standard"}))
         self.native = BedrockTeacherV1(session=None, client=client,
             model_id=settings.lesson_generation_model_id, reviewer_model_id=settings.lesson_review_model_id)
-        self.policy = (learner_level_system_prompt(binding.learner_level, "generator")
+        self.policy = (learner_level_system_prompt(binding.learner_level, "generator",
+                      profiles={binding.learner_level: binding.level_profile} if binding.level_profile else None)
                        + f"\nRespond entirely in {language_name(binding.language)}. Preserve source notation. "
                          "Follow the learner's requested wording/detail for this turn. "
                          "Keep spoken answers concise: normally 100–180 words, never above 250 words. "

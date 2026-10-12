@@ -21,6 +21,7 @@ class SessionInput(BaseModel):
     activity_id: str = Field(min_length=1, max_length=120)
     lesson_id: str = Field(min_length=1, max_length=120)
     lesson_job_id: UUID
+    learner_level: str | None = Field(None, min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_]*$")
     document_ids: list[UUID] | None = Field(None, min_length=1, max_length=50)
     language: str | None = Field(None, min_length=2, max_length=35,
                                  pattern=r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
@@ -45,6 +46,7 @@ class SessionClaims(BaseModel):
     activity_id: str = Field(min_length=1, max_length=120)
     lesson_id: str = Field(min_length=1, max_length=120)
     lesson_job_id: UUID
+    learner_level: str | None = Field(None, min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_]*$")
     result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     consent_scope: list[Consent] = Field(max_length=2)
     lesson_approved: StrictBool
@@ -67,7 +69,7 @@ class StartedSession(BaseModel):
     activity_id: str
     document_ids: list[UUID]
     language: str
-    learner_level: Literal["beginner", "intermediate", "advanced"]
+    learner_level: str
     voice: str
     result_sha256: str
     preview: bool

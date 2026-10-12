@@ -241,6 +241,8 @@ elif page == "Generate lesson":
     st.caption("Known documents are processed in the order supplied. Pending ingestion is awaited.")
     st.button("Start a new lesson generation", on_click=new_lesson)
     st.session_state.setdefault("lesson_key", str(uuid4()))
+    generation = st.radio('Generation version', ['A3 v2 · All aligned levels', 'A3 v1 · One level'], key='a3_version')
+    aligned = generation.startswith('A3 v2')
     with st.form("lesson_form"):
         left, right = st.columns(2)
         lesson_id = left.text_input("lesson_id", key="a3_lesson_id")
@@ -251,7 +253,12 @@ elif page == "Generate lesson":
         document_ids = st.text_area("Document UUIDs in order (one per line)", key="a3_document_ids")
         window = left.number_input("Source window (pages)", min_value=1, max_value=50, value=5, key="a3_window")
         words = right.number_input("Target chunk length (words)", min_value=30, max_value=1000, value=200, key="a3_words")
-        level = left.selectbox("Learner level", ["beginner", "intermediate", "advanced"], index=1, key="a3_level")
+        if aligned:
+            maximum = left.number_input('Maximum chunk length (words)', min_value=50, max_value=2000,
+                                        value=500, key='a3_max_words')
+            st.caption('All configured levels share the same teaching units and chunk count.')
+        else:
+            level = left.selectbox("Learner level", ["beginner", "intermediate", "advanced"], index=1, key="a3_level")
         st.caption("Learner level controls how the lesson explains the source material.")
         callback = st.text_input("Middleware callback URL (optional)", key="a3_callback",
                                  help="Requires configured outbound mTLS and OAuth. Leave empty for A5 pull.")
@@ -265,10 +272,16 @@ elif page == "Generate lesson":
             payload = {"lesson_id": lesson_id.strip(), "course_id": course_id.strip(),
                        "activity_id": activity_id.strip(), "document_ids": ids,
                        "language": language.strip(), "voice": voice.strip(),
-                       "options": {"source_window_pages": window, "target_chunk_words": words, "learner_level": level}}
+                       "options": {"source_window_pages": window, "target_chunk_words": words}}
+            if aligned:
+                if words > maximum:
+                    raise ValueError('Target length must not exceed maximum length.')
+                payload['options']['max_chunk_words'] = maximum
+            else:
+                payload['options']['learner_level'] = level
             if callback.strip():
                 payload["callback_url"] = callback.strip()
-            result = request(connection, "POST", "/v1/lesson-jobs", json_body=payload,
+            result = request(connection, "POST", '/v2/lesson-jobs' if aligned else "/v1/lesson-jobs", json_body=payload,
                              headers={"Idempotency-Key": key.strip()} if key.strip() else {})
             st.session_state["lesson_response"] = result
             if result.status == 202 and result.headers.get("location"):
@@ -372,7 +385,11 @@ elif page == "Processing status":
     lesson = st.session_state.get("lesson_result")
     show_response(lesson)
     if lesson and lesson.successful and isinstance(lesson.body, dict):
-        chunks = lesson.body.get("chunks", [])
+        selected_lesson = lesson.body
+        if lesson.body.get('variants'):
+            level = st.selectbox('Result level', list(lesson.body['variants']), key='a5_level')
+            selected_lesson = lesson.body['variants'][level]
+        chunks = selected_lesson.get("chunks", [])
         st.caption("AI-generated DRAFT. Download all required audio before acknowledging receipt.")
         if chunks:
             selected = st.selectbox("Audio chunk", range(len(chunks)), format_func=lambda i: f"Chunk {chunks[i]['index'] + 1}")

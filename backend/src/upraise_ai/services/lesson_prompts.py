@@ -50,17 +50,18 @@ _LEVEL_ROLE_GUIDANCE = {
 }
 
 
-def learner_level_system_prompt(learner_level, role):
-    if learner_level not in LEARNER_LEVEL_GUIDANCE:
+def learner_level_system_prompt(learner_level, role, *, profiles=None):
+    guidance = LEARNER_LEVEL_GUIDANCE if profiles is None else profiles
+    if learner_level not in guidance:
         raise ValueError("Unsupported learner level")
     return (
-        "Supported explanation levels: beginner, intermediate, advanced.\n"
+        f"Supported explanation levels: {', '.join(guidance)}.\n"
         f"Requested explanation level: {learner_level}.\n"
         "The level controls how the material is explained: language complexity, assumed "
         "prerequisites, pacing and depth of explanation. It does not change the source "
         "facts, substantive coverage or required accuracy. References to an 'easy lecture' "
         "in the base workflow must follow this requested level.\n"
-        f"{LEARNER_LEVEL_GUIDANCE[learner_level]}\n"
+        f"{guidance[learner_level]}\n"
         f"{_LEVEL_ROLE_GUIDANCE[role]}\n"
         "At every level, preserve all substantive source points, exact mathematical "
         "meaning, valid LaTeX and page citations. Define terms, explain prerequisites or "

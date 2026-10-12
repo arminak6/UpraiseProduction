@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.session_jwt import validate_session_jwt
+from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.chunk_end import ChunkEndResponse
 from upraise_ai.schemas.sessions import StartedSession
 from upraise_ai.storage.sessions import RuntimeSession, SessionBinding
@@ -36,7 +37,8 @@ def authorize_session(settings, store, session_id, principal, token=None, *, inc
         actual = (str(claims.session_id), claims.client_id, claims.sub, str(claims.lesson_job_id),
                   claims.course_id, claims.activity_id, claims.lesson_id, claims.result_sha256,
                   tuple(sorted(claims.consent_scope)))
-        if actual != expected or not claims.lesson_approved:
+        if (actual != expected or not claims.lesson_approved
+                or (binding.level_claim_required and claims.learner_level != binding.learner_level)):
             raise HTTPException(403, "SESSION_SCOPE_MISMATCH")
     return session
 
@@ -84,6 +86,20 @@ class SessionService:
             if row["status"] == "DONE" and row["expires_at"] is None:
                 raise IngestionError("LESSON_OUTPUT_UNAVAILABLE", status=503)
             result = self.lessons.result(row)
+            level_required = isinstance(result, AlignedLessonResult) or result.generation_version == 'a3-v2'
+            requested_level = data.learner_level or (claims.learner_level if claims else None)
+            if claims and data.learner_level is not None and claims.learner_level != data.learner_level:
+                raise HTTPException(403, 'SESSION_LEVEL_MISMATCH')
+            if isinstance(result, AlignedLessonResult):
+                if requested_level is None:
+                    raise HTTPException(422, 'LESSON_LEVEL_REQUIRED')
+                if requested_level not in result.variants:
+                    raise HTTPException(404, 'LESSON_LEVEL_NOT_FOUND')
+                result = result.variants[requested_level]
+            elif requested_level is not None and requested_level != result.learner_level:
+                raise HTTPException(409, 'LESSON_LEVEL_MISMATCH')
+            if claims and level_required and claims.learner_level != result.learner_level:
+                raise HTTPException(403, 'SESSION_LEVEL_MISMATCH')
             if (result.job_id, result.course_id, result.activity_id, result.lesson_id) != (
                     str(data.lesson_job_id), data.course_id, data.activity_id, data.lesson_id):
                 raise HTTPException(409, "LESSON_CONTEXT_MISMATCH")
@@ -120,7 +136,8 @@ class SessionService:
             binding = SessionBinding(
                 principal.client_id, str(data.lesson_job_id), digest, data.course_id, data.activity_id,
                 data.lesson_id, tuple(sorted(selected)), result.language.lower(), result.learner_level, consent, not bool(claims),
-                claims.sub if claims else None,
+                claims.sub if claims else None, level_required,
+                row['metadata'].get('level_profiles', {}).get(result.learner_level) if level_required else None,
             )
             response = StartedSession(
                 session_id=session_id, lesson_job_id=data.lesson_job_id, lesson_id=data.lesson_id,

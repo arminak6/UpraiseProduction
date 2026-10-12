@@ -36,6 +36,22 @@ class OperationsTests(unittest.TestCase):
             app.run()
             send.assert_called_once()
 
+    def test_c5_explicit_read_only_check_and_no_automatic_retries(self):
+        body = {"configuration_id": "sha256:invented-config", "application": {"version": "0.1.0"},
+                "cognitive_load": {"fusion_rule": {"status": "NOT_IMPLEMENTED"}}}
+        with patch("api_client.request", return_value=Result("GET", "/v1/version", 200, 2, body, True)) as send:
+            app = self.app()
+            send.assert_not_called()
+            button(app, "Check versions").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(send.call_args.args[1:3], ("GET", "/v1/version"))
+            self.assertEqual(app.session_state["version_response"].body, body)
+            app.run()
+            send.assert_called_once()
+            next(item for item in app.text_input if item.label == "Bearer token").set_value("invented-new-token").run()
+            self.assertNotIn("version_response", app.session_state)
+            self.assertFalse(app.exception)
+
     def test_c2_optional_course_and_unknown_are_displayed_and_old_results_cleared(self):
         body = {"features": {"answers": {"enabled": True, "state": "UNKNOWN", "reason_codes": ["PROVIDER_NOT_VERIFIED"]}}}
         with patch("api_client.request", return_value=Result("GET", "/v1/status", 200, 2, body, True)) as send:

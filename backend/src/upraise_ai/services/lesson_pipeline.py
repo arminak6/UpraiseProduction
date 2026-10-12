@@ -27,6 +27,7 @@ from upraise_ai.services.lesson_models import (
 from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION
 from upraise_ai.services.lesson_speech import split_words
 from upraise_ai.services.lesson_translation import TRANSLATION_PROMPT_VERSION, needs_translation
+from upraise_ai.services.versions import VersionCatalog
 
 
 def atomic_write(path, data):
@@ -174,9 +175,11 @@ class LessonPipeline:
         if not sections:
             raise IngestionError("LESSON_SOURCE_EMPTY")
         progress.set_workload("lesson", len(sections))
-        code = self.speech.validate_voice(data.voice, data.language)
+        self.speech.validate_voice(data.voice, data.language)
+        version_refs = VersionCatalog(self.settings).references()
         signature = hashlib.sha256(json.dumps({"sections": sections, "request": job["metadata"],
-                                               "pipeline": job["pipeline_version"]}, sort_keys=True).encode()).hexdigest()
+                                               "pipeline": job["pipeline_version"], "versions": version_refs},
+                                              sort_keys=True).encode()).hexdigest()
         all_chunks, reports = [], []
         for index, section in enumerate(sections):
             progress("GENERATE", 0.05+0.55*index/len(sections))
@@ -227,7 +230,7 @@ class LessonPipeline:
                                       source_chunk_ids=[chunk["chunk_id"] for chunk in source_chunks],
                                       quality_status="NEEDS_REVIEW" if any(source_issues(section)) else "AUTO_CHECKED")
                 all_chunks.append((chunk_id, text, source, report, index, revisions))
-        versions = {"pipeline": job["pipeline_version"],
+        versions = {**version_refs, "pipeline": job["pipeline_version"],
                     "generator_model": self.settings.lesson_generation_model_id,
                     "review_model": self.settings.lesson_review_model_id,
                     "draft_prompt": DRAFT_PROMPT, "review_prompt": REVIEW_PROMPT,
@@ -239,6 +242,13 @@ class LessonPipeline:
                                                    for s in sections)).lower(),
                     "source_languages": ",".join(dict.fromkeys(s["source_language"] for s in sections))}
         save_text(all_chunks, versions)
+        return self.publish(job, data, all_chunks, versions, signature, progress, save_speech)
+
+    def publish(self, job, data, all_chunks, versions, signature, progress, save_speech):
+        """Shared speech publication for a legacy lesson or one aligned variant."""
+        job_id = str(job['job_id'])
+        folder = self.staging.job_dir(job_id)
+        code = self.speech.validate_voice(data.voice, data.language)
         progress.set_workload("speech", len(all_chunks))
         result_chunks, engines = [], set()
         for index, (chunk_id, text, source, report, section_index, revisions) in enumerate(all_chunks):

@@ -19,6 +19,9 @@ x-ingestion-environment: &ingestion-environment
   UPRAISE_ARTIFACT_RETENTION_DAYS: ${UPRAISE_ARTIFACT_RETENTION_DAYS:-0}
   UPRAISE_LESSON_GENERATION_MODEL_ID: ${UPRAISE_LESSON_GENERATION_MODEL_ID:-openai.gpt-oss-120b-1:0}
   UPRAISE_LESSON_REVIEW_MODEL_ID: ${UPRAISE_LESSON_REVIEW_MODEL_ID:-qwen.qwen3-235b-a22b-2507-v1:0}
+  UPRAISE_LESSON_PLAN_LEVEL: ${UPRAISE_LESSON_PLAN_LEVEL:-intermediate}
+  UPRAISE_LESSON_ALIGNMENT_BATCH_UNITS: ${UPRAISE_LESSON_ALIGNMENT_BATCH_UNITS:-4}
+  UPRAISE_LESSON_LEVEL_PROFILES: '${UPRAISE_LESSON_LEVEL_PROFILES:-{"beginner":"Use plain language, define unfamiliar terms, and explain prerequisites and reasoning step by step. Retain substantive formulas and facts.","intermediate":"Assume basic familiarity; balance intuition with technical detail and explain key reasoning steps and new notation.","advanced":"Assume a strong foundation; use precise terminology and formal notation, explaining source-supported derivations, assumptions and limitations."}}'
   UPRAISE_LESSON_VISUAL_MODEL_ID: ${UPRAISE_LESSON_VISUAL_MODEL_ID:-eu.amazon.nova-pro-v1:0}
   UPRAISE_LESSON_TTL_SECONDS: ${UPRAISE_LESSON_TTL_SECONDS:-86400}
   UPRAISE_LESSON_SOURCE_WAIT_SECONDS: ${UPRAISE_LESSON_SOURCE_WAIT_SECONDS:-86400}

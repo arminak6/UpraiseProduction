@@ -1,4 +1,4 @@
-"""Explicit C1/C2 HTTP checks; no automatic AI calls or changes to operator controls."""
+"""Explicit C1/C2/C5 HTTP checks; no automatic AI calls or operator changes."""
 
 import api_client
 import streamlit as st
@@ -8,7 +8,7 @@ from learning import binding
 def render_operations(connection, show_response):
     identity = binding(connection)
     if st.session_state.get("operations_binding") != identity:
-        for key in ("ready_response", "feature_response"):
+        for key in ("health_response", "ready_response", "feature_response", "version_response"):
             st.session_state.pop(key, None)
         st.session_state["operations_binding"] = identity
     st.subheader("C1 · Backend health and readiness")
@@ -35,3 +35,9 @@ def render_operations(connection, show_response):
         if rows:
             st.dataframe(rows, hide_index=True, width="stretch")
     show_response(result)
+    st.divider()
+    st.subheader("C5 · Deployed versions")
+    st.caption("Current model IDs, prompt hashes, pipeline versions and the cognitive-load test policy. No AI calls.")
+    if st.button("Check versions"):
+        st.session_state["version_response"] = api_client.request(connection, "GET", "/v1/version", timeout=5)
+    show_response(st.session_state.get("version_response"))

@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from upraise_ai.guards.ingress import Principal, ingress
+from upraise_ai.schemas.aligned_lessons import AlignedLessonInput, AlignedLessonResult
 from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import AcceptedLesson, LessonInput, LessonResult
 from upraise_ai.schemas.revisions import ChunkRevisionInput
@@ -42,14 +43,25 @@ def generate_lesson(data: LessonInput, request: Request, response: Response,
     return result
 
 
-@router.get("/v1/jobs/{job_id}/result", response_model=LessonResult, response_model_exclude_none=True,
+@router.post('/v2/lesson-jobs', response_model=AcceptedLesson, status_code=202,
+             summary='A3 v2 - Generate all levels using one shared chunk plan')
+def generate_aligned_lesson(data: AlignedLessonInput, request: Request, response: Response,
+                            principal: Principal = Depends(ingress)):
+    principal.require_scope('lessons:write')
+    result = service(request).submit(data, principal, request.headers.get('idempotency-key'))
+    response.headers['Location'] = f"/v1/jobs/{result['job_id']}"
+    return result
+
+
+@router.get("/v1/jobs/{job_id}/result", response_model=AlignedLessonResult | LessonResult, response_model_exclude_none=True,
             summary="A5 - Fetch a draft lesson")
-def lesson_result(job_id: UUID, request: Request, response: Response, principal: Principal = Depends(ingress)):
+def lesson_result(job_id: UUID, request: Request, response: Response, principal: Principal = Depends(ingress),
+                  learner_level: str | None = Query(None, min_length=1, max_length=40, pattern=r'^[a-z][a-z0-9_]*$')):
     principal.require_scope("jobs:read")
     lessons = service(request)
     row = lessons.authorized(job_id, principal)
     with lessons.staging.artifact_lock(str(job_id), shared=True):
-        result = lessons.result(row)
+        result = lessons.result(row, learner_level=learner_level) if learner_level else lessons.result(row)
         lessons.audit_download(row)
     response.headers["Cache-Control"] = "no-store"
     return result

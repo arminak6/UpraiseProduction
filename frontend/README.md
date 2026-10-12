@@ -4,6 +4,11 @@ This Streamlit interface is a development/testing tool in frontend/, separate
 from the final product. It sends HTTP requests to the backend and has no direct
 database, PDF processing or AWS access. It preserves the backend API contracts.
 
+Generate lesson defaults to A3 v2 (all aligned difficulty levels), with v1 still
+selectable. Learning and B1 list each variant separately; A5 and A7 offer a level
+selector for a bundle opened by job ID. Text lengths and audio durations may vary,
+while the chunk count/order and teaching-unit IDs remain aligned across levels.
+
 ## Start
 
 From the project root:
@@ -129,9 +134,11 @@ not an automatically loaded file.
   A1 pre-fills the latest accepted document/course. Deletion requires an explicit
   button click and does not resubmit on navigation. Invalid UUIDs are rejected
   locally; failed deletes retain their HTTP response for retry.
-- **Health — C1/C2**: explicit GET /health and /ready checks, plus optional-course
+- **Health — C1/C2/C5**: explicit GET /health and /ready checks, plus optional-course
   GET /v1/status. Shows feature states/reasons including UNKNOWN. Credential/course
-  changes clear old C2 results; checks do not invoke AI. See [C1/C2](../backend/docs/c1-c2.md).
+  changes clear old results; checks do not invoke AI. **Check versions** calls
+  GET /v1/version for deployed model/prompt/pipeline/policy metadata.
+  See [C1/C2](../backend/docs/c1-c2.md) and [C5](../backend/docs/c5.md).
 - **API explorer**: load live OpenAPI and send GET/POST/PUT/PATCH/DELETE requests
   with query parameters and JSON bodies, including negative tests. Use A1's
   dedicated form for multipart delivery.

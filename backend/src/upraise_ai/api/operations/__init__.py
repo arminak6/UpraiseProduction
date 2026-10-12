@@ -1,9 +1,10 @@
-"""C1 liveness/readiness and C2 authorized feature status."""
+"""C1 liveness/readiness, C2 feature status and C5 deployed versions."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from upraise_ai.guards.ingress import Principal, ingress
 from upraise_ai.schemas.operations import ReadinessStatus, ServiceStatus
+from upraise_ai.schemas.versions import VersionStatus
 
 router = APIRouter(tags=["C - Operations"])
 
@@ -42,3 +43,13 @@ def service_status(request: Request, response: Response,
         principal.require_course(course_id)
     response.headers["Cache-Control"] = "no-store"
     return monitor(request).status(course_id)
+
+
+@router.get("/v1/version", response_model=VersionStatus, summary="C5 - Deployed model, prompt and pipeline versions")
+def deployed_version(request: Request, response: Response, principal: Principal = Depends(ingress)):
+    principal.require_scope("jobs:read")
+    catalog = getattr(request.app.state, "versions", None)
+    if catalog is None:
+        raise HTTPException(503, "VERSION_METADATA_NOT_CONFIGURED")
+    response.headers["Cache-Control"] = "no-store"
+    return catalog.snapshot()

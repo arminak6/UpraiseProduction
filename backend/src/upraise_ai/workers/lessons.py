@@ -13,6 +13,8 @@ from psycopg.rows import dict_row
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
 from upraise_ai.guards.operations import blocked_generation_courses, feature_enabled, require_feature
+from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
+from upraise_ai.services.aligned_pipeline import AlignedLessonPipeline
 from upraise_ai.services.lesson_callback import CallbackClient
 from upraise_ai.services.lesson_models import LessonModels
 from upraise_ai.services.lesson_pipeline import LessonPipeline
@@ -98,7 +100,7 @@ class LessonWorker:
         self.settings = settings
         self.jobs = jobs or LessonRepository(settings.jobs_dsn.get_secret_value())
         self.documents = documents or JobRepository(settings.jobs_dsn.get_secret_value())
-        self.audit = audit or AuditRepository(settings.audit_dsn.get_secret_value())
+        self.audit = audit or AuditRepository(settings.audit_dsn.get_secret_value(), settings=settings)
         self.vectors = vectors or VectorStore(settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension)
         self.staging = StagingStore(settings.data_dir)
         self.models, self.speech = models, speech
@@ -149,12 +151,15 @@ class LessonWorker:
                     require_feature(self.settings, "tts", job["metadata"]["course_id"])
                     if job["attempts"] > self.settings.max_attempts:
                         raise IngestionError("RETRY_LIMIT_REACHED")
-                    if job["pipeline_version"] != self.settings.lesson_signature:
+                    aligned = job['metadata'].get('generation_version') == 'a3-v2' and not job['metadata'].get('revision_request')
+                    signature = self.settings.lesson_v2_signature if aligned else self.settings.lesson_signature
+                    if job["pipeline_version"] != signature:
                         raise IngestionError("LESSON_CONFIGURATION_CHANGED")
                     if self.settings.aws_region not in {"eu-central-1", "eu-central-2", "eu-west-1", "eu-west-3",
                                                        "eu-north-1", "eu-south-1", "eu-south-2"}:
                         raise IngestionError("LESSON_EU_REGION_REQUIRED")
-                    pipeline_class = RevisionPipeline if job["metadata"].get("revision_request") else LessonPipeline
+                    pipeline_class = (RevisionPipeline if job['metadata'].get('revision_request') else
+                                      AlignedLessonPipeline if aligned else LessonPipeline)
                     pipeline = pipeline_class(self.settings, self.documents, self.vectors, self.staging, None, None)
                     documents = pipeline.load_documents(job)
                     if documents is None:
@@ -182,7 +187,15 @@ class LessonWorker:
                             pipeline.check_sources(job, expected, conn)
                             self.jobs.save_prepared_speech(conn, job_id, chunk_id, ssml, parts)
 
-                    result = pipeline.prepare(job, documents, progress, save_text=save_text, save_speech=save_speech)
+                    def save_plan(plan):
+                        with self.jobs.owned_transaction(job_id, token) as conn:
+                            pipeline.check_sources(job, expected, conn)
+                            self.jobs.save_plan(conn, job_id, plan)
+
+                    arguments = {'save_text': save_text, 'save_speech': save_speech}
+                    if aligned:
+                        arguments['save_plan'] = save_plan
+                    result = pipeline.prepare(job, documents, progress, **arguments)
                     progress("PUBLISH", 0.98)
                     with self.jobs.owned_transaction(job_id, token) as conn:
                         pipeline.check_sources(job, expected, conn)
@@ -190,8 +203,19 @@ class LessonWorker:
                                    "chunk_count": len(result.chunks), "requires_review": True,
                                    "review_approved": result.reviewer_report.approved,
                                    "review_issue_count": len(result.reviewer_report.issues), "label": "AI-generated"}
+                        prefix = "revision_" if result.revision else ""
+                        if isinstance(result, AlignedLessonResult):
+                            summary.update(generation_version='a3-v2', levels=list(result.variants),
+                                chunk_count=result.chunk_count, total_chunk_count=len(result.chunks),
+                                chunk_counts={level: len(variant.chunks) for level, variant in result.variants.items()},
+                                chunk_plan_id=str(result.chunk_plan_id))
+                        for key in ("configuration_id", "build_id"):
+                            if prefix + key in result.versions:
+                                summary[key] = result.versions[prefix + key]
                         if result.revision:
                             summary["revision"] = result.revision.model_dump(mode="json")
+                            if result.chunk_plan_id:
+                                summary['chunk_plan_id'] = str(result.chunk_plan_id)
                         with (self.staging.job_dir(job_id) / "result.json").open("rb") as stream:
                             summary["result_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
                         self.audit.lesson(job, "DRAFT_CREATED", summary, attempt=True)
@@ -236,7 +260,8 @@ class LessonWorker:
                         continue
                     blocked = blocked_generation_courses(self.settings)
                     filters = {"excluded_courses": blocked} if blocked else {}
-                    job = self.jobs.claim(self.settings.lease_seconds, self.settings.lesson_signature, **filters)
+                    job = self.jobs.claim(self.settings.lease_seconds,
+                                          [self.settings.lesson_signature, self.settings.lesson_v2_signature], **filters)
                     if job:
                         self.supervise(job)
                         continue

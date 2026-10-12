@@ -43,9 +43,22 @@ class AcceptedLesson(BaseModel):
     job_id: str
 
 
+class StoredLessonOptions(LessonOptions):
+    learner_level: str = Field("intermediate", min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_]*$")
+    max_chunk_words: int = Field(500, ge=50, le=2000)
+
+
 class StoredLessonInput(LessonInput):
     """Worker-only metadata extension; A3's public request remains unchanged."""
     revision_request: RevisionRequest | None = None
+    generation_version: Literal["a3-v2"] | None = None
+    level_profiles: dict[str, str] | None = None
+    plan_level: str | None = None
+    levels: list[str] | None = None
+
+    # Internal aligned revisions may use operator-configured level names.
+    # The legacy A3 public schema retains its original three choices.
+    options: StoredLessonOptions = Field(default_factory=StoredLessonOptions)
 
 
 class ReviewIssue(BaseModel):
@@ -97,6 +110,7 @@ class Viseme(BaseModel):
 
 class LessonChunk(BaseModel):
     chunk_id: str
+    content_unit_id: UUID | None = None
     index: int = Field(ge=0)
     text: str
     ssml: str
@@ -129,3 +143,6 @@ class LessonResult(BaseModel):
     versions: dict[str, str]
     expires_at: str | None = None
     revision: LessonRevision | None = None
+    generation_version: Literal["a3-v2"] | None = None
+    chunk_plan_id: UUID | None = None
+    source_attempts: dict[str, str] = Field(default_factory=dict)

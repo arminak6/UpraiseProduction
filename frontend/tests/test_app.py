@@ -33,8 +33,10 @@ class AppTests(unittest.TestCase):
             app.number_input(key='a3_window').set_value(6)
             button(app, 'Send A3 request').click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(send.call_args.args[1:3], ('POST', '/v1/lesson-jobs'))
+            self.assertEqual(send.call_args.args[1:3], ('POST', '/v2/lesson-jobs'))
             self.assertEqual(send.call_args.kwargs['json_body']['options']['source_window_pages'], 6)
+            self.assertEqual(send.call_args.kwargs['json_body']['options']['max_chunk_words'], 500)
+            self.assertNotIn('learner_level', send.call_args.kwargs['json_body']['options'])
             key = send.call_args.kwargs['headers']['Idempotency-Key']
             app.radio(key='page').set_value('Health').run()
             app.radio(key='page').set_value('Generate lesson').run()

@@ -70,13 +70,16 @@ def revise_chunk(models, section, original, feedback, neighbours, *, learner_lev
         "neighbouring_chunks_for_continuity_only": neighbours,
         "document": document.model_dump(mode="json"),
         "sources": [chunk.model_dump(mode="json") for chunk in source_chunks],
+        'required_shared_teaching_unit': section.get('alignment_unit'),
     }, ensure_ascii=False)
     phase = "revision_generate"
     def level_prompt(role):
-        return learner_level_system_prompt(learner_level, role) + (
+        return learner_level_system_prompt(learner_level, role, profiles=section.get('level_profiles')) + (
             "\nFor A7, substantive coverage refers to the selected chunk's teaching topic, "
             "not all supplied pages. Honour supported author requests to shorten or remove "
             "a recap/question. The neighbouring chunks must remain unchanged."
+            " If required_shared_teaching_unit is supplied, preserve all its core facts, concepts and formulas. "
+            "Change the explanation according to feedback without moving material to another chunk."
         )
     try:
         models.transport.teaching_prompt = level_prompt("generator")

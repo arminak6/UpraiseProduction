@@ -38,7 +38,7 @@ def render_interrupt(connection, player, *, local_testing=False):
     else:
         token = st.text_input("Middleware session JWT", type="password", key="learning_question_jwt",
                               help="The signed session must allow questions for this lesson.").strip()
-    identity = hashlib.sha256(json.dumps({"job": lesson["job_id"], "mode": mode,
+    identity = hashlib.sha256(json.dumps({"job": lesson["job_id"], 'level': lesson.get('learner_level'), "mode": mode,
         "consent": consent, "token": hashlib.sha256(token.encode()).hexdigest()}, sort_keys=True).encode()).hexdigest()
     if state.get("identity") != identity:
         state.clear()
@@ -88,6 +88,8 @@ def render_interrupt(connection, player, *, local_testing=False):
                 if not started:
                     body = {key: lesson[key] for key in ("course_id", "activity_id", "lesson_id", "language")}
                     body["lesson_job_id"] = lesson["job_id"]
+                    if lesson.get('generation_version') == 'a3-v2':
+                        body['learner_level'] = lesson['learner_level']
                     if mode == "Local draft preview":
                         body.update(session_id=state["local_id"], consent_scope=["questions"])
                     result = api_client.request(connection, "POST", "/v1/sessions", json_body=body, headers=headers)
