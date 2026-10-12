@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+import psycopg
 import pytest
 from test_a2_integration import submit
 from test_a3 import request_data
@@ -196,7 +197,7 @@ def test_failed_variant_does_not_publish_partial_bundle_or_start_speech(integrat
 
 
 @pytest.mark.parametrize('needs_edit', [False, True])
-@pytest.mark.parametrize('wire_mode', ['valid', 'escape', 'truncation'])
+@pytest.mark.parametrize('wire_mode', ['valid', 'escape', 'truncation', 'ids'])
 def test_native_original_flow_publishes_aligned_drafts_with_review_findings(
         integration, lesson, monkeypatch, needs_edit, wire_mode):
     doc = submit(integration)
@@ -232,6 +233,10 @@ def test_native_original_flow_publishes_aligned_drafts_with_review_findings(
         if wire_mode == 'truncation':
             replies.insert(0, {'stopReason': 'max_tokens',
                               'output': {'message': {'content': [{'text': good}]}}})
+        elif wire_mode == 'ids':
+            wrong = json.loads(draft)
+            wrong['units'][0]['content_unit_id'] = str(uuid4())
+            replies.insert(0, json.dumps(wrong))
         client = Converse(replies)
         calls.append(client)
         return LessonModels(settings, client).adapt_units(section, units, language, **kwargs)
@@ -249,7 +254,7 @@ def test_native_original_flow_publishes_aligned_drafts_with_review_findings(
     bundle = service.result(row)
     assert bundle.status == 'DRAFT'
     assert len(calls) == len(settings.lesson_level_profiles)
-    expected_calls = 2 + int(needs_edit) + int(wire_mode == 'truncation')
+    expected_calls = 2 + int(needs_edit) + int(wire_mode in {'truncation', 'ids'})
     assert all(len(client.calls) == expected_calls for client in calls)
     assert all([chunk.content_unit_id for chunk in variant.chunks] == bundle.content_unit_ids
                for variant in bundle.variants.values())
@@ -260,6 +265,7 @@ def test_native_original_flow_publishes_aligned_drafts_with_review_findings(
     assert bundle.versions['post_edit_material_review'] == 'deferred'
     assert 'math_repair_attempts' not in bundle.versions
     assert bundle.versions['response_format'] == 'aligned-json-strings-v1'
+    assert bundle.versions['identity_recovery'] == 'aligned-unit-id-recovery-v1'
     assert worker.speech.client.calls
     if needs_edit:
         assert row['result']['requires_review'] and not row['result']['review_approved']
@@ -268,6 +274,50 @@ def test_native_original_flow_publishes_aligned_drafts_with_review_findings(
                    for chunk in bundle.chunks)
         assert all('Restore the correct degree.' in chunk.reviewer_report.revision_instructions
                    for chunk in bundle.chunks)
+
+
+@pytest.mark.parametrize('max_attempts', [1, 3])
+def test_persistent_identity_rejection_retains_stage_counts_in_retry_and_failure_audit(
+        integration, lesson, monkeypatch, max_attempts):
+    doc = submit(integration)
+    integration[4].process(integration[1].claim(integration[0].lease_seconds))
+    settings, jobs, worker, service, principal, models = lesson
+    worker.settings = settings.model_copy(update={'max_attempts': max_attempts})
+
+    def canonical(section, *args, **kwargs):
+        page = section['pages'][0]
+        return (SectionDraft(paragraphs=[{'text': f'There are twelve nodes. [p. {page}]', 'pages': [page]}]),
+                ReviewReport(approved=True, summary='Invented material checked.'), 0)
+
+    calls = []
+
+    def adapt(section, units, language, **kwargs):
+        bad = json.dumps({'units': [{'content_unit_id': str(uuid4()), 'text': 'PRIVATE_REJECTED_TEXT'}]})
+        client = Converse([bad, bad])
+        calls.append(client)
+        return LessonModels(settings, client).adapt_units(section, units, language, **kwargs)
+
+    monkeypatch.setattr(models, 'generate_section', canonical)
+    monkeypatch.setattr(models, 'adapt_units', adapt, raising=False)
+    data = AlignedLessonInput.model_validate(request_data(document_ids=[doc['document_id']],
+        options={'target_chunk_words': 30, 'max_chunk_words': 50}))
+    response = service.submit(data, principal, None)
+    row = jobs.claim(settings.lease_seconds, [settings.lesson_signature, settings.lesson_v2_signature])
+    worker.process(row)
+    row = jobs.get(response['job_id'])
+    assert row['status'] == ('FAILED' if max_attempts == 1 else 'QUEUED')
+    assert row['error_code'] == 'LESSON_ALIGNMENT_IDS_INVALID' and row['result'] is None
+    assert not jobs.prepared_chunks(row['job_id']) and jobs.get_plan(row['job_id']) is None
+    assert not worker.speech.client.calls and len(calls) == 1 and len(calls[0].calls) == 2
+    event = 'FAILED' if max_attempts == 1 else 'RETRY'
+    with psycopg.connect(settings.audit_dsn.get_secret_value()) as connection:
+        details = connection.execute('SELECT details FROM lesson_audit WHERE job_id=%s AND event_type=%s',
+                                     (row['job_id'], event)).fetchone()[0]
+    expected = {'code': 'LESSON_ALIGNMENT_IDS_INVALID', 'stage': 'aligned_unit_draft', 'reason': 'UNIT_IDS_INVALID',
+                'expected_units': 1, 'received_units': 1, 'missing_units': 1, 'unexpected_units': 1,
+                'duplicate_units': 0, 'order_mismatch': False}
+    assert {key: details[key] for key in expected} == expected
+    assert 'PRIVATE_REJECTED_TEXT' not in json.dumps(details)
 
 
 def test_plan_is_immutable_and_repeatable_migrations_preserve_all_rows(integration, lesson, monkeypatch):

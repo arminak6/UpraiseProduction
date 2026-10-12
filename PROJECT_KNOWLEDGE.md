@@ -3,14 +3,26 @@
 ## Purpose and current state
 
 UPRAISE WP7 implements A1-A8, A3 v2, B1/B2/B4/B5 and C1/C2/C5. Streamlit is an
-HTTP testbench/player. PostgreSQL retains DRAFT text/SSML; Qdrant holds sources;
+HTTP testbench/player, defaulting to its A-series ingestion workspace.
+PostgreSQL retains DRAFT text/SSML; Qdrant holds sources;
 A5 JSON/WAV expires independently (24h). Middleware/Moodle owns human approval.
-Live A3v2 job6c8d3bc5 completed once:15 units/level,45 PG chunks/WAVs verified.
-Full text review: same broad topics, partial coverage and uneven level separation.
+Live v2.5 job8d97f91e DONE/attempt1:7units/level,21 PG chunks/WAVs verified.
+It remains DRAFT; semantic quality needs review. Earlier job6c8d3bc5 text review
+found partial coverage and uneven level separation.
 B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 
 ## Architecture and decisions
 
+- frontend/ingestion_workspace.py: default4-stage HTTP orchestrator A1–A8. A1
+  suggests editable course/activity IDs; no setup step. A2 list/remove, optional
+  course filter or all authorized owned sources; progress0..1 shown to2decimals.
+  Draft loads A2 on entry, one source/v2-only/read-only autofilled IDs; no order,
+  manual UUID/v1/trace controls. Individual API tools retain v1/v2. Jobs starts
+  with Course→Level→Teaching chunk→Download voice; auto unfiltered/paginated A8,
+  generations deduplicated by job. Deferred WAV/SHA256 on click; no player/JSON/ZIP.
+  Manual UUID/poll/A6 in Advanced job tracking; A7 remains. Retry keys survive navigation/
+  renewed signed URLs; changed context resets inputs, credential binding clears
+  workspace. Last100 sanitized calls in captured trace list. No auto mutations.
 - A1 Docling/vision/math extraction once -> ordered Qdrant chunks; active attempt
   prevents mixing source revisions. Returns document_id and job_id; A2 list/delete.
 - A3 v1 POST /v1/lesson-jobs: one requested level; ordered5page windows -> original
@@ -21,14 +33,13 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   generation/review/edit adapts each level. Approved drafts retained; negative
   draft review goes to editor and remains in DRAFT reports for human approval.
   Additional blocking post-edit material review deferred in FUTURE_UPDATES.md.
-  Exact unit IDs/order/pages/size enforced; original V3 math delimiter/speech
-  recovery retained, without formula-string equality. Semantic quality depends
-  on draft source review/editor and human assessment, not an extra final judge.
-  A1 extraction unchanged. Complete JSON/string recovery handles safe escape errors;
-  ambiguous/duplicate/truncated data fail closed, bounded token retries and
-  content-free stage/reason logs distinguish provider failures. Translation
-  preserves units. Target200/max500 defaults; bounded
-  shortening then at most two common plan refinements, never level-only splits.
+  Unit IDs/order/pages/size enforced; original V3 math/speech recovery retained.
+  Semantic quality depends on draft reviewer/editor and human assessment.
+  A1 unchanged; safe JSON/ID recovery, ambiguous/truncated data fail closed. v2.5
+  checks IDs inside draft/review/edit/shorten response recovery, one correction;
+  max3calls if format fallback precedes ID failure, max2 otherwise. Stage/counts
+  in content-free logs/audit. Translation preserves units. Target200/max500;
+  bounded shortening, at most two shared plan refinements, never level-only splits.
   One complete bundle/job; same count/index/content_unit_id/source scope, distinct
   chunk_id/text/WAV/duration. All texts/plan saved before speech. Semantic quality
   still needs human review. Old courses unchanged. docs/a3-v2.md.
@@ -77,7 +88,7 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   runtime; services/interrupt_{models,stt}.py. core/versions.py: actual B2 policy.
 - services/pdf/: A1; operations modules C1/C2; services/versions.py + schemas/versions.py C5.
 - backend/docs/{a1,a2,a3,a3-v2,a5,a6,a7,a8,b1,b2,b4,b5,c1-c2,c5}.md: full contracts.
-- frontend/{app,learning,learning_interrupt,session_start,chunk_revision}.py: HTTP UI;
+- frontend/{app,ingestion_workspace,learning,learning_interrupt,session_start,chunk_revision}.py: HTTP UI;
   frontend/tests/: AppTest/fake HTTP. No direct provider/DB use.
 - backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned builds/math.
 - codex_helper/: ignored scripts/logs/reports; FUTURE_UPDATES.md ignored backlog.
@@ -123,48 +134,40 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   switching future. Gateway/Moodle callbacks/model access, HA/backups/erasure/orphan
   cleanup/cross-host storage unverified. Beginner control-char SSML issue diagnosed
   in beginner-retry-diagnosis.md; original warns while A3 fails.
-- Earlier real-course AWS egress test auto-review rejected: use invented data/fake
-  providers. User can initiate real curl/UI generation tests. Grounding backlog4.
+- Real-course AWS egress test auto-review rejected; agent checks use invented
+  data/fake providers. User initiates real curl/UI generation. Grounding backlog4.
 - Failed A3 v2 jobs retain checkpoints but no published PG/audio. Old rejected
   responses were not captured, so exact causes cannot be proven retrospectively.
-  v2.4 uses original three-role flow; independent post-edit A3 verification is
+  v2.5 uses original three-role flow; independent post-edit A3 verification is
   deferred. Review findings remain visible, without claiming final/human approval.
-  A7 retains its revision-specific alignment review. Completed job6c8d3bc5 has
-  literal Unicode/double-math escapes and incorrect SSML such as 'L empty'; valid
-  WAV generation does not prove teaching/speech quality. All45 texts reviewed:
-  same broad topic in15 triples, scope gaps in chunks1/11/12 (1-based), advanced3
-  adds .05 threshold; difficulty often cosmetic. Intermediate5/6 contain review
-  JSON; advanced5 has trailing .replace code. Report level-content-assessment.md
-  under codex_helper. Review/escape cleanup needed; failed jobs need new requests.
+  A7 retains alignment review. Earlier job6c8d3bc5's45texts had source gaps,
+  escaped math/Unicode, incorrect SSML ('L empty'), weak difficulty separation,
+  unsupported advanced content and review/code leaks. Evidence codex_helper/
+  level-content-assessment.md. WAV integrity does not certify semantic quality.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-12 read-only full text assessment of job6c8d3bc5-a825-4a18-b814-9a61b86a6b07:
-PG retained45 texts/15 canonical units; every ID/section/source matches its plan.
-All15 triples share broad topics, but material gaps/additions and inconsistent
-difficulty remain (Limits above). All45 texts read, not only prior samples;
-no independent full-PDF factual certification/audio listening. Evidence:
-codex_helper/{export-level-content-audit.py,level-content-audit-data.json,
-assess-level-content.py,level-content-assessment.md}. Docker Desktop was stopped;
-started only PG for temporary read-only helper, then stopped PG again. Generation
-workers remained stopped; no runtime edits/provider calls. Project services stopped.
-Current config/profiles/aligned schemas/models/pipeline rechecked.
+2026-10-12 alignment fix: models/pipeline/workers/config/C5, A3v2 tests/docs checked.
+196offline/isolated regressions, Ruff/diff/build passed. v2.5/promptv6 deployed;
+API/three workers match C5 (full ID in alignment-recovery-fix.md).
+Health/readiness200, queues empty at deploy,53source chunks present. No agent model calls.
+Evidence codex_helper/alignment-recovery-fix.md + check-alignment-recovery-deployed.py.
+User job8d97f91e DONE100%/attempt1 at11:38:31UTC/17m52s; v2.5 recovered duplicate
+IDs/MAX_TOKENS. Seven units/level/21 PG/WAVs;17operational checks passed.
+DRAFT/170findings, semantic/audio listening not reviewed. Evidence codex_helper/
+job-8d97f91e-completion-verification.{md,json}; A5 expires2026-10-13 11:38:31UTC.
+Old5da7620d v2.4 FAILED; uncaptured response unknown. codex_helper/job-5da7620d-*.
 
-2026-10-10 three-role update deployed; extra A3 review deferred, A7 unchanged.
-193 offline/30 disposable integration tests with fake providers and
-Ruff/Compose/diff/build passed. API/worker C5: aligned-lessons-v2.4-1452bdbd12b0,
-aligned-teaching-v5, review original-three-role-v1/post_edit_material_review=deferred;
-configuration sha256:2351c1daea507d8509a9a098d961299c7a2805b45dcc14b9a85e8952ace32bf1.
-Evidence alignment-three-role-* and verify-alignment-three-role.py in codex_helper.
-Live user retest6c8d3bc5: DONE/attempt1,16m46s, English/Joanna,15 chunks/level.
-45PG texts/SSML match A5;45 WAV hashes/formats/durations/visemes passed.
-DRAFT164 source/draft findings are not164 confirmed final errors. Earlier samples
-found Unicode escapes4 beginner chunks and doubled math/SSML 'empty'8 chunks.
-Evidence check-aligned-success.py/ aligned-success-{check.json,assessment.md}.
-Source79fd4c5e-b3ef-426e-bf47-78ae09a2ef0e: DONE/en/31pages/53chunks, attempt
-c90d99b1-1cca-4b11-888e-73868e302f65, pdf-ingestion-v1.4-10273fc36174; PDF hash matched.
-Historical483b3ea3/c4be12d9/0ac79061/d8f11792 FAILED, unpublished; exact candidates
-unavailable. Earlier authorized reset deleted older lessons, retained sources/audit.
-Reset helpers must never rerun without user request. No real AWS test by agent.
+2026-10-12 A1 fa70751d/course383861 DONE/31pages/53chunks;26operational checks
+passed. NEEDS_REVIEW:19flagged/18unverified/16auto chunks; six fidelity-provider
+ValidationExceptions. Pages5/10 title-only/blank. Evidence codex_helper/
+latest-ingestion-verification.{md,json}.
+
+2026-10-12 frontend course picker:89tests/changed-file Ruff/diff/build passed;
+frontend redeployed/healthy. Fresh live AppTest selected383861→advanced→part7,
+without UUID import;3.75MB WAV hash/PCM valid, only A8/result/audio GETs.
+Evidence codex_helper/course-voice-picker-verification.md + course-voice-picker-live-verification.json.
+Earlier A2:12isolated integration checks passed; Draft live check in
+codex_helper/check-draft-selector-ui.py. Deferred-download details: a5-one-click-voice.md.

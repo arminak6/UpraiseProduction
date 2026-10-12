@@ -57,6 +57,7 @@ class DocumentSummary(BaseModel):
     version: str | None
     filename: str
     status: str
+    progress: float = Field(ge=0, le=1)
     chunk_count: int
     created_at: datetime
     updated_at: datetime

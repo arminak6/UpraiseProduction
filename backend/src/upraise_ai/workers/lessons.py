@@ -14,6 +14,7 @@ from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
 from upraise_ai.guards.operations import blocked_generation_courses, feature_enabled, require_feature
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
+from upraise_ai.services.aligned_models import AlignmentModelError
 from upraise_ai.services.aligned_pipeline import AlignedLessonPipeline
 from upraise_ai.services.lesson_callback import CallbackClient
 from upraise_ai.services.lesson_models import LessonModels
@@ -115,9 +116,12 @@ class LessonWorker:
     def failure(self, job, error):
         code, retryable = classify_error(error)
         retry = retryable and job["attempts"] < self.settings.max_attempts
+        details = {"code": code}
+        if isinstance(error, AlignmentModelError):
+            details.update(error.diagnostics)
         try:
             with self.jobs.owned_transaction(job["job_id"], job["lease_token"]) as conn:
-                self.audit.lesson(job, "RETRY" if retry else "FAILED", {"code": code}, attempt=True)
+                self.audit.lesson(job, "RETRY" if retry else "FAILED", details, attempt=True)
                 self.jobs.fail(conn, job["job_id"], job["lease_token"], code, retry, self.settings.lesson_ttl_seconds)
         except LeaseLost:
             pass

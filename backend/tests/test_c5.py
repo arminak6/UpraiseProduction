@@ -30,7 +30,8 @@ def test_c5_matches_effective_config_and_policy_not_cloud_readiness():
     assert body["pipelines"]["generation"]["version"] == settings.lesson_signature
     assert body["pipelines"]["aligned_generation"]["version"] == settings.lesson_v2_signature
     assert body["pipelines"]["aligned_generation"]["parameters"]["math_validation"] == "source-review-math-markup-v1"
-    assert body["prompts"]["alignment"]["version"] == "aligned-teaching-v5"
+    assert body["prompts"]["alignment"]["version"] == "aligned-teaching-v6"
+    assert body["pipelines"]["aligned_generation"]["parameters"]["identity_recovery"] == "aligned-unit-id-recovery-v1"
     assert body["pipelines"]["aligned_generation"]["parameters"]["review_strategy"] == "original-three-role-v1"
     assert body["pipelines"]["aligned_generation"]["parameters"]["post_edit_material_review"] == "deferred"
     assert body["pipelines"]["aligned_generation"]["parameters"]["response_format"] == "aligned-json-strings-v1"

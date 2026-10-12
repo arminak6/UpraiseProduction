@@ -15,6 +15,7 @@ from upraise_ai.schemas.lessons import (
 )
 from upraise_ai.services.aligned_models import (
     ALIGNMENT_PROMPT_VERSION,
+    IDENTITY_RECOVERY_VERSION,
     MATH_VALIDATION_VERSION,
     REVIEW_STRATEGY_VERSION,
     UnitSizeError,
@@ -78,6 +79,7 @@ class AlignedLessonPipeline(LessonPipeline):
             raise IngestionError('LESSON_ALIGNMENT_CHECKPOINT_INVALID')
         versions = {**refs, 'pipeline': job['pipeline_version'], 'chunk_plan': plan.version,
                     'alignment_prompt': ALIGNMENT_PROMPT_VERSION,
+                    'identity_recovery': IDENTITY_RECOVERY_VERSION,
                     'response_format': RESPONSE_FORMAT_VERSION,
                     'math_validation': MATH_VALIDATION_VERSION,
                     'review_strategy': REVIEW_STRATEGY_VERSION,

@@ -7,6 +7,7 @@ import streamlit as st
 from api_client import Connection, normalize_base_url, request, status_path
 from chunk_end import render_chunk_end
 from chunk_revision import render_chunk_revision
+from ingestion_workspace import render_ingestion_workspace
 from learner_interrupt import render_learner_interrupt
 from learning import render_learning
 from operations import render_operations
@@ -15,7 +16,7 @@ from session_start import render_session_start
 
 st.set_page_config(page_title="UPRAISE", page_icon="🧪", layout="wide")
 st.title("UPRAISE")
-st.caption("Prepared lesson learning and API testing")
+st.caption("Ingestion orchestration, prepared lessons and API testing")
 
 
 def clear_session():
@@ -73,7 +74,7 @@ with st.sidebar:
         st.caption("Use your HTTPS mTLS gateway. Certificate files and tokens are session-only.")
     timeout = st.number_input("Request timeout (seconds)", min_value=5, max_value=600, value=180, step=5)
     st.divider()
-    page = st.radio("Pages", ["Learning", "Start session (B1)", "Chunk end (B2)", "Learner interrupt (B4)", "End session (B5)", "Ingest material", "Manage material", "Generate lesson", "Revise chunk (A7)", "Processing status", "Health", "API explorer"], key="page")
+    page = st.radio("Pages", ["Ingestion workspace", "Learning", "Start session (B1)", "Chunk end (B2)", "Learner interrupt (B4)", "End session (B5)", "Ingest material", "Manage material", "Generate lesson", "Revise chunk (A7)", "Processing status", "Health", "API explorer"], key="page")
     st.button("Clear session data", on_click=clear_session, width="stretch")
 
 try:
@@ -110,7 +111,7 @@ for name in ("submission_key", "course_id", "activity_id", "language", "source_r
 for name, default in {"language": "en", "mime": "application/pdf", "fill_hash": True}.items():
     st.session_state.setdefault(name, default)
 for name in list(st.session_state):
-    if name.startswith(("b1_field_", "b2_field_", "b4_field_", "b5_field_", "a7_field_", "learning_question_")):
+    if name.startswith(("b1_field_", "b2_field_", "b4_field_", "b5_field_", "a7_field_", "learning_question_", "iw_field_")):
         st.session_state[name] = st.session_state[name]
 
 connection = Connection(
@@ -168,6 +169,9 @@ def remember_submission(result):
 
 if page == "Learning":
     render_learning(connection, local_testing=local_testing)
+
+elif page == "Ingestion workspace":
+    render_ingestion_workspace(connection, show_response)
 
 elif page == "Start session (B1)":
     render_session_start(connection, show_response, local_testing=local_testing)
@@ -365,7 +369,7 @@ elif page == "Processing status":
                 progress = max(0.0, min(1.0, float(body.get("progress", 0))))
             except (TypeError, ValueError):
                 progress = 0.0
-            st.progress(progress, text=f"{body.get('status', '')} · {body.get('step', '')}")
+            st.progress(progress, text=f"{body.get('status', '')} · {body.get('step', '')} · {progress * 100:.2f}%")
             if body.get("status") in ("DONE", "FAILED", "CANCELLED"):
                 st.caption("Processing finished. Automatic polling has stopped.")
         elif failed_request and auto_refresh:

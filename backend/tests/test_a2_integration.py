@@ -73,16 +73,21 @@ def test_list_status_version_scope_and_empty_course(integration):
         assert rows[done["document_id"]]["status"] == "DONE"
         assert rows[done["document_id"]]["version"] == "revision-2"
         assert rows[done["document_id"]]["chunk_count"] == 3
+        assert rows[done["document_id"]]["progress"] == 1
         assert rows[queued["document_id"]]["status"] == "QUEUED"
         assert rows[queued["document_id"]]["version"] is None
         assert rows[queued["document_id"]]["chunk_count"] == 0
         assert rows[failed["document_id"]]["status"] == "FAILED"
         assert "job_id" not in rows[done["document_id"]]
-        assert client.get("/v1/documents").status_code == 422
+        all_courses = client.get("/v1/documents")
+        assert all_courses.status_code == 200
+        assert {row["course_id"] for row in all_courses.json()} == {"course-1", "course-2"}
+        assert len(all_courses.json()) == 4
         assert client.get("/v1/documents", params={"course_id": ""}).status_code == 422
         assert client.get("/v1/documents", params={"course_id": "course-3"}).status_code == 403
         app.dependency_overrides[ingress] = lambda: Principal(principal.client_id, ("empty",), principal.scopes)
         assert client.get("/v1/documents", params={"course_id": "empty"}).json() == []
+        assert client.get("/v1/documents").json() == []
     assert events(integration, done["job_id"], "DOCUMENT_DELETED") == 0
 
 
@@ -119,6 +124,31 @@ def test_delete_all_attempts_204_audit_and_idempotent_retry(integration):
     assert jobs.get(target["job_id"])["status"] == row["status"]
 
 
+def test_all_courses_list_keeps_client_course_isolation_and_progress(integration):
+    settings, jobs, audit, vectors, worker, original = integration
+    first = submit(integration)
+    worker.process(jobs.claim(settings.lease_seconds))
+    second = submit(integration, course="course-2")
+    worker.process(jobs.claim(settings.lease_seconds))
+    hidden = submit(integration, course="hidden-course")
+    foreign = submit(integration, client_id="another-client")
+    running = submit(integration)
+    with jobs.connect() as conn:
+        conn.execute("UPDATE ingestion_jobs SET status='RUNNING',progress=0.123456 WHERE job_id=%s",
+                     (running["job_id"],))
+    with api(integration) as (client, principal):
+        response = client.get("/v1/documents")
+        assert response.status_code == 200, response.text
+        rows = {row["document_id"]: row for row in response.json()}
+        assert set(rows) == {first["document_id"], second["document_id"], running["document_id"]}
+        assert hidden["document_id"] not in rows and foreign["document_id"] not in rows
+        assert rows[first["document_id"]]["chunk_count"] == rows[second["document_id"]]["chunk_count"] == 3
+        assert rows[running["document_id"]]["progress"] == 0.123456
+        app.dependency_overrides[ingress] = lambda: Principal(principal.client_id, (), principal.scopes, local_test=True)
+        local = client.get("/v1/documents").json()
+        assert {row["document_id"] for row in local} == {*rows, hidden["document_id"]}
+
+
 def test_delete_permissions_do_not_touch_other_clients_or_courses(integration):
     target = submit(integration)
     with api(integration) as (client, principal):
@@ -130,6 +160,7 @@ def test_delete_permissions_do_not_touch_other_clients_or_courses(integration):
         app.dependency_overrides[ingress] = lambda: Principal(principal.client_id, principal.courses, frozenset())
         assert client.delete(path).status_code == 403
         assert client.get("/v1/documents", params={"course_id": "course-1"}).status_code == 403
+        assert client.get("/v1/documents").status_code == 403
     assert integration[1].get(target["job_id"])["deletion_requested_at"] is None
 
 

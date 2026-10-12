@@ -162,6 +162,7 @@ class VersionCatalog:
                     'chunk_plan': 'aligned-plan-v1', 'default_target_chunk_words': 200,
                     'default_max_chunk_words': 500,
                     'response_format': source_constant('services/aligned_responses.py', 'RESPONSE_FORMAT_VERSION'),
+                    'identity_recovery': source_constant('services/aligned_models.py', 'IDENTITY_RECOVERY_VERSION'),
                     'review_strategy': source_constant('services/aligned_models.py', 'REVIEW_STRATEGY_VERSION'),
                     'post_edit_material_review': 'deferred',
                     'math_validation': source_constant('services/aligned_models.py', 'MATH_VALIDATION_VERSION')}).model_dump(),

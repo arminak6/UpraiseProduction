@@ -61,7 +61,7 @@ def dispose_job(
 
 @router.get("/v1/documents", response_model=list[DocumentSummary], summary="A2 – List ingested material")
 def list_documents(
-    request: Request, course_id: str = Query(min_length=1, max_length=120),
+    request: Request, course_id: str | None = Query(None, min_length=1, max_length=120),
     principal: Principal = Depends(ingress),
 ):
     principal.require_scope("documents:read")

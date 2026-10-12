@@ -1,6 +1,7 @@
 **
 !requirements.txt
 !app.py
+!ingestion_workspace.py
 !operations.py
 !chunk_revision.py
 !chunk_end.py

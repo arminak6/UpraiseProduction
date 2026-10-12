@@ -89,7 +89,12 @@ overrides for passwords that need URI encoding.
 
 Streamlit is a testing tool in frontend/, separate from the final product.
 Start it with docker compose --profile tools up --build -d --wait.
-Its default Learning page lists ready lessons through A8. Choose a course and
+Its default Ingestion workspace simulates the orchestrator through A1–A8: PDF/URL
+submission with suggested IDs, a two-part A2 library for listing all accessible
+material or removing it, source selection with progress percentages, draft generation, job tracking,
+review/revision, complete JSON/WAV collection and explicit receipt/cancellation.
+Accepted document/job IDs are carried between steps; request sequences are
+available for inspection. The separate Learning page lists ready lessons through A8. Choose a course and
 select Start course to read its text and play its teacher voice. Previous/Next,
 audio pause/resume, Replay, Finish and Restart control session-only progress.
 **Interrupt / ask teacher** stops the lesson audio and opens a text/WAV question

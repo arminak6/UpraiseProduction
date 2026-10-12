@@ -46,7 +46,9 @@ class AlignedLessonTests(unittest.TestCase):
                 return api_client.Result(method, path, 200, 1, copy.deepcopy(body), True)
             return api_client.Result(method, path, 200, 1, binary=b'RIFF-invented-audio')
         with patch('api_client.request', side_effect=send):
-            app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run()
+            app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py'))
+            app.session_state['page'] = 'Learning'
+            app.run()
             self.assertFalse(app.exception)
             app.selectbox(key='learning_selected').set_value(learning.catalog_key(self.items[2])).run()
             next(button for button in app.button if button.label == 'Start course').click().run()

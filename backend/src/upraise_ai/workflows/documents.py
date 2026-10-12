@@ -18,21 +18,24 @@ class DocumentService:
             raise HTTPException(404, "DOCUMENT_NOT_FOUND")
 
     def list(self, course_id, principal):
-        principal.require_course(course_id)
+        if course_id is not None:
+            principal.require_course(course_id)
         summaries = []
         for row in self.jobs.list_documents(principal.client_id, course_id):
+            metadata = row["metadata"]
+            if not principal.can_access_course(metadata["course_id"]):
+                continue
             count = 0
             if row["status"] == "DONE" and row["active_attempt"]:
                 try:
-                    count = self.vectors.document_count(row["document_id"], course_id, row["active_attempt"])
+                    count = self.vectors.document_count(row["document_id"], metadata["course_id"], row["active_attempt"])
                 except (ResponseHandlingException, UnexpectedResponse):
                     raise IngestionError("VECTOR_STORAGE_UNAVAILABLE", status=503) from None
-            metadata = row["metadata"]
             summaries.append(DocumentSummary(
                 document_id=str(row["document_id"]),
                 **{key: metadata[key] for key in ("course_id", "activity_id", "language", "source_ref", "content_hash")},
                 version=metadata.get("version"), filename=metadata["source_filename"],
-                status=row["status"], chunk_count=count,
+                status=row["status"], progress=row["progress"], chunk_count=count,
                 created_at=row["created_at"], updated_at=row["updated_at"],
             ))
         return summaries

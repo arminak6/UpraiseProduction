@@ -11,8 +11,9 @@ from test_a3_model_compat import Converse
 
 from upraise_ai.core.config import Settings
 from upraise_ai.core.errors import IngestionError
-from upraise_ai.schemas.aligned_lessons import AlignedLessonInput, ContentUnit
+from upraise_ai.schemas.aligned_lessons import AlignedLessonInput, AlignedTexts, ContentUnit
 from upraise_ai.services.aligned_models import (
+    AlignmentIdsError,
     UnitSizeError,
     adapt_units,
     provider_schema,
@@ -81,7 +82,8 @@ def test_alignment_failures_do_not_become_delivered_material(failure):
     else:
         final = candidate(item, item.material_text.replace('[p. 1]', '[p. 2]'))
     with pytest.raises(IngestionError):
-        invoke([candidate(item), review(item, False), final], item)
+        invoke([candidate(item), review(item, False), final, final] if failure == 'wrong_id'
+               else [candidate(item), review(item, False), final], item)
 
 
 def test_oversize_editor_gets_one_shortening_attempt_then_shared_plan_refinement():
@@ -299,3 +301,116 @@ def test_schema_failure_reports_stage_and_reason_without_private_content(caplog)
     assert failed.value.__cause__ is not None
     assert 'stage=aligned_unit_final' in caplog.text and 'reason=JSON_SCHEMA' in caplog.text
     assert 'PRIVATE_INVALID_ID' not in caplog.text and 'PRIVATE_RESPONSE_TEXT' not in caplog.text
+
+
+@pytest.mark.parametrize('stage', ['draft', 'review', 'final', 'shorten'])
+def test_unit_identity_is_corrected_at_each_model_stage_before_continuing(stage, caplog):
+    item = unit()
+    wrong = item.model_copy(update={'content_unit_id': uuid4()})
+    if stage == 'draft':
+        replies = [candidate(wrong), candidate(item), review(item)]
+    elif stage == 'review':
+        replies = [candidate(item), review(wrong), review(item)]
+    elif stage == 'final':
+        replies = [candidate(item), review(item, False), candidate(wrong), candidate(item)]
+    else:
+        oversized = candidate(item, item.material_text + ' explanation' * 60)
+        replies = [oversized, review(item), candidate(wrong), candidate(item)]
+    (texts, reports), client = invoke(replies, item)
+    assert texts.units[0].content_unit_id == item.content_unit_id
+    assert texts.units[0].text == item.material_text
+    assert reports[str(item.content_unit_id)].approved == (stage != 'final')
+    assert len(client.calls) == len(replies)
+    failed_call = 0 if stage == 'draft' else 1 if stage == 'review' else 2
+    correction = client.calls[failed_call + 1]
+    prompt = correction['messages'][0]['content'][0]['text']
+    assert 'Previous response failure: UNIT_IDS_INVALID' in prompt
+    assert 'Regenerate the complete batch' in prompt
+    system = '\n'.join(block['text'] for block in correction['system'])
+    assert 'Required content_unit_id sequence: ["' + str(item.content_unit_id) + '"]' in system
+    assert 'stage=aligned_unit_' + stage in caplog.text
+
+
+def identity_batch(failure):
+    first = unit()
+    second = unit().model_copy(update={'index': 1, 'material_text': 'There are 24 edges. [p. 1]'})
+    expected = [first, second]
+    good = {'units': [{'content_unit_id': str(item.content_unit_id), 'text': item.material_text} for item in expected]}
+    bad = json.loads(json.dumps(good))
+    if failure == 'wrong_id':
+        bad['units'][0]['content_unit_id'] = str(uuid4())
+    elif failure == 'missing':
+        bad['units'].pop()
+    elif failure == 'duplicate':
+        bad['units'][1] = dict(bad['units'][0])
+    else:
+        bad['units'].reverse()
+    for item in bad['units']:
+        item['text'] = 'PRIVATE_REJECTED_UNIT_TEXT'
+    return expected, json.dumps(good), json.dumps(bad)
+
+
+@pytest.mark.parametrize('failure', ['wrong_id', 'missing', 'duplicate', 'reordered'])
+def test_invalid_batch_identity_retries_and_keeps_only_the_complete_corrected_response(failure, caplog):
+    expected, good, bad = identity_batch(failure)
+    client = Converse([bad, good])
+    models = LessonModels(Settings(), client)
+    texts = structured(models, 'test', {'units': [item.model_dump(mode='json') for item in expected]},
+                       AlignedTexts, 'aligned_unit_draft', expected_units=expected)
+    assert [item.content_unit_id for item in texts.units] == [item.content_unit_id for item in expected]
+    assert [item.text for item in texts.units] == [item.material_text for item in expected]
+    assert len(client.calls) == 2
+    assert 'PRIVATE_REJECTED_UNIT_TEXT' not in caplog.text
+    assert all(str(item.content_unit_id) not in caplog.text for item in expected)
+
+
+@pytest.mark.parametrize('failure, counts', [
+    ('wrong_id', {'received_units': 2, 'missing_units': 1, 'unexpected_units': 1,
+                  'duplicate_units': 0, 'order_mismatch': False}),
+    ('missing', {'received_units': 1, 'missing_units': 1, 'unexpected_units': 0,
+                 'duplicate_units': 0, 'order_mismatch': False}),
+    ('duplicate', {'received_units': 2, 'missing_units': 1, 'unexpected_units': 0,
+                   'duplicate_units': 1, 'order_mismatch': False}),
+    ('reordered', {'received_units': 2, 'missing_units': 0, 'unexpected_units': 0,
+                   'duplicate_units': 0, 'order_mismatch': True}),
+])
+def test_persistent_identity_errors_fail_with_bounded_calls_and_content_free_stage_counts(failure, counts, caplog):
+    expected, good, bad = identity_batch(failure)
+    client = Converse([bad, bad, good])
+    models = LessonModels(Settings(), client)
+    with pytest.raises(AlignmentIdsError, match='LESSON_ALIGNMENT_IDS_INVALID') as failed:
+        structured(models, 'test', {'units': [item.model_dump(mode='json') for item in expected]},
+                   AlignedTexts, 'aligned_unit_final', expected_units=expected)
+    assert failed.value.retryable
+    assert failed.value.diagnostics == {'stage': 'aligned_unit_final', 'reason': 'UNIT_IDS_INVALID',
+                                       'expected_units': 2, **counts}
+    assert len(client.calls) == 2
+    assert 'stage=aligned_unit_final' in caplog.text and 'reason=UNIT_IDS_INVALID' in caplog.text
+    assert 'PRIVATE_REJECTED_UNIT_TEXT' not in caplog.text
+    assert all(str(item.content_unit_id) not in caplog.text for item in expected)
+
+
+@pytest.mark.parametrize('format_failure', ['truncation', 'syntax'])
+@pytest.mark.parametrize('corrected', [False, True])
+def test_format_fallback_can_still_correct_identity_once_without_an_unbounded_retry_loop(format_failure, corrected):
+    expected, good, bad = identity_batch('wrong_id')
+    initial = ({'stopReason': 'max_tokens', 'output': {'message': {'content': [{'text': good}]}}}
+               if format_failure == 'truncation' else 'PRIVATE_BROKEN_RESPONSE')
+    client = Converse([initial, bad, good if corrected else bad, good])
+    models = LessonModels(Settings(), client)
+
+    def generate():
+        return structured(models, 'test', {'units': [item.model_dump(mode='json') for item in expected]},
+                          AlignedTexts, 'aligned_unit_draft', expected_units=expected)
+
+    if corrected:
+        texts = generate()
+        assert [item.content_unit_id for item in texts.units] == [item.content_unit_id for item in expected]
+        assert [item.text for item in texts.units] == [item.material_text for item in expected]
+    else:
+        with pytest.raises(AlignmentIdsError, match='LESSON_ALIGNMENT_IDS_INVALID'):
+            generate()
+    assert len(client.calls) == 3
+    budget = 16000 if format_failure == 'truncation' else 8000
+    assert [call['inferenceConfig']['maxTokens'] for call in client.calls] == [8000, budget, budget]
+    assert 'Previous response failure: UNIT_IDS_INVALID' in client.calls[2]['messages'][0]['content'][0]['text']

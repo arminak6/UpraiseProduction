@@ -61,7 +61,9 @@ class PlayerInterruptTests(unittest.TestCase):
         return api_client.Result(method, path, 200, 1, binary=b"RIFF-lesson")
 
     def app(self):
-        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=10).run()
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=10)
+        app.session_state["page"] = "Learning"
+        app.run()
         button(app, "Start course").click().run()
         self.assertFalse(app.exception)
         return app

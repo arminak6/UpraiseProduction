@@ -80,10 +80,11 @@ class ClientTests(unittest.TestCase):
         def timeout(incoming):
             raise httpx.ReadTimeout('private transport details', request=incoming)
 
-        result = request(Connection('http://backend:8000'), 'POST', '/v1/documents',
-                         transport=httpx.MockTransport(timeout))
-        self.assertIn('same Idempotency-Key', result.error)
-        self.assertNotIn('private transport details', result.error)
+        for path in ('/v1/documents', '/v1/lesson-jobs', '/v2/lesson-jobs'):
+            result = request(Connection('http://backend:8000'), 'POST', path,
+                             transport=httpx.MockTransport(timeout))
+            self.assertIn('same Idempotency-Key', result.error)
+            self.assertNotIn('private transport details', result.error)
         for url in ['file:///tmp/data', 'http://user:password@example.com', 'http://example.com?q=secret']:
             with self.assertRaises(ValueError):
                 normalize_base_url(url)

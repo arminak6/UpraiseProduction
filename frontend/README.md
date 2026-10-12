@@ -1,11 +1,12 @@
-# UPRAISE Learning and API Testbench
+# UPRAISE Ingestion Orchestrator and API Testbench
 
 This Streamlit interface is a development/testing tool in frontend/, separate
 from the final product. It sends HTTP requests to the backend and has no direct
 database, PDF processing or AWS access. It preserves the backend API contracts.
 
-Generate lesson defaults to A3 v2 (all aligned difficulty levels), with v1 still
-selectable. Learning and B1 list each variant separately; A5 and A7 offer a level
+The ingestion workspace uses A3 v2 (all aligned difficulty levels); the individual
+Generate lesson API tool also supports v1. Learning and B1 list each variant
+separately; A5 and A7 offer a level
 selector for a bundle opened by job ID. Text lengths and audio durations may vary,
 while the chunk count/order and teaching-unit IDs remain aligned across levels.
 
@@ -37,7 +38,55 @@ not an automatically loaded file.
 
 ## Tools
 
-- **Learning — A8 + A5**: the default page lists completed lessons whose temporary
+- **Ingestion workspace — A1–A8**: the default page simulates the orchestrator's
+  authoring workflow through the real HTTP APIs. Four steps keep the material,
+  source documents, generation inputs and job results connected:
+
+  1. **Ingest material — A1** accepts a PDF or signed Moodle URL and computes
+     the uploaded PDF's SHA-256 for `content_hash`. Suggested course/activity IDs
+     and source language sit in the form's **Course and activity** expander.
+     Document/job UUIDs come from the API and carry into draft generation.
+  2. **Manage material — A2** contains only **Show ingested material** and
+     **Remove material** panels. **Show all ingested material** loads all undeleted
+     documents accessible to the caller across authorized courses. Remove by
+     selecting a loaded document or entering its UUID. Status and progress are
+     shown in the material table; progress uses two decimal places, e.g. `12.35%`.
+  3. **Draft lesson** loads the current source table when opened. Its generation
+     box fixes the version to **A3 v2 · All aligned levels** and provides a single
+     **Course material** selector. Course/activity/document IDs fill automatically
+     from that selection and are read-only; A1 inputs stay separate. Set the
+     editable generation parameters, then click **Generate lesson · A3**.
+     Defaults are 5 source pages, 200 target words and a 500-word maximum.
+     Output language/voice and optional push callback remain editable. Failed or
+     cancelled sources cannot be selected; A3 waits for pending ingestion.
+     **Refresh source status** updates the table with progress percentages.
+     Selection changes prepare a new retry key; navigation and refresh failures
+     preserve the same selected source/key. The request-sequence panel is hidden
+     on this step. The individual Generate lesson API tool still supports v1/v2.
+  4. **Jobs & results** tracks all accepted/imported jobs through A4, discovers
+     existing drafts through paginated A8, and reviews A5 text, source evidence,
+     automated findings and checksum-checked audio per level/chunk. The visible
+     **Course** selector automatically lists available generations from all
+     authorized courses, independently of A1/A3 form IDs. Select **Course**, then
+     **Level** and **Teaching chunk**, then
+     click **Download voice**. This single button fetches just that chunk's WAV on
+     click, verifies its SHA-256, and downloads it without rerunning the page.
+     JSON and bulk ZIP export controls are omitted from this workspace.
+     **Refresh courses** reloads A8 and **Load more courses** handles pagination.
+     Manual UUID import, job polling and receipt controls sit in **Advanced job tracking**.
+     A7 feedback creates a separate tracked revision job. A6 CANCEL/RECEIVED are
+     explicit; RECEIVED asks you to confirm the required output has been saved
+     or the failed/material job inspected. Collection never sends A6 automatically.
+
+  A1/A3 retry keys survive navigation. Changed inputs with the same attempted key
+  are blocked: prepare a new document/generation or restore the original request.
+  Changing course/activity prepares fresh inputs while retaining job history;
+  changing connection credentials clears the workspace. On the other steps, the
+  last 100 HTTP calls can be exported as a request sequence with request bodies, IDs, status and timing;
+  credentials and signed Moodle/callback URLs are omitted. Workspace data and
+  downloads are session-only. This simulates the API caller; it requires a running
+  backend for real ingestion/generation. No offline provider simulation is added.
+- **Learning — A8 + A5**: lists completed lessons whose temporary
   outputs are still available and whose source documents remain active. Select
   an available course, then **Start course** for its text and teacher voice.
   Previous/Next select parts; the audio controls pause/resume; Replay restarts

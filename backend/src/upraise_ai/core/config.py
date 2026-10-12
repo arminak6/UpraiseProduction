@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     lesson_review_model_id: str = "qwen.qwen3-235b-a22b-2507-v1:0"
     lesson_visual_model_id: str = "eu.amazon.nova-pro-v1:0"  # Retained legacy key; unused by native V3 A3.
     lesson_pipeline_version: str = "lesson-v3-a3-8"
-    lesson_v2_pipeline_version: str = "aligned-lessons-v2.4"
+    lesson_v2_pipeline_version: str = "aligned-lessons-v2.5"
     lesson_level_profiles: dict[str, str] = Field(default_factory=lambda: {
         "beginner": "Use plain language, define unfamiliar terms, and explain prerequisites and reasoning step by step. Retain substantive formulas and facts.",
         "intermediate": "Assume basic familiarity; balance intuition with technical detail and explain key reasoning steps and new notation.",

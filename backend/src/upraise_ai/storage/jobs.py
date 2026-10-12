@@ -103,12 +103,14 @@ class JobRepository:
         with self.connect() as conn:
             return conn.execute("SELECT * FROM ingestion_jobs WHERE job_id=%s", (job_id,)).fetchone()
 
-    def list_documents(self, client_id, course_id):
+    def list_documents(self, client_id, course_id=None):
+        course_filter = " AND metadata->>'course_id'=%s" if course_id is not None else ""
+        parameters = (client_id, course_id) if course_id is not None else (client_id,)
         with self.connect() as conn:
             return conn.execute(
-                """SELECT * FROM ingestion_jobs WHERE client_id=%s AND metadata->>'course_id'=%s
-                AND deletion_requested_at IS NULL ORDER BY created_at DESC, document_id""",
-                (client_id, course_id),
+                "SELECT * FROM ingestion_jobs WHERE client_id=%s" + course_filter
+                + " AND deletion_requested_at IS NULL ORDER BY created_at DESC, document_id",
+                parameters,
             ).fetchall()
 
     @contextmanager

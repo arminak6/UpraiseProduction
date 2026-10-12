@@ -48,7 +48,9 @@ class LearningTests(unittest.TestCase):
         return api_client.Result(method, path, self.audio_status, 1, binary=b"RIFF-test-audio")
 
     def app(self):
-        app = AppTest.from_file(str(FRONTEND / "app.py"), default_timeout=10).run()
+        app = AppTest.from_file(str(FRONTEND / "app.py"), default_timeout=10)
+        app.session_state["page"] = "Learning"
+        app.run()
         self.assertFalse(app.exception)
         self.assertEqual(app.radio(key="page").value, "Learning")
         return app
