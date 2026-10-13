@@ -91,7 +91,10 @@ not an automatically loaded file.
      JSON and bulk ZIP export controls are omitted from this workspace.
      **Refresh courses** reloads A8 and **Load more courses** handles pagination.
      Manual UUID import, job polling and receipt controls sit in **Advanced job tracking**.
-     A7 feedback creates a separate tracked revision job. A6 CANCEL/RECEIVED are
+     A7 feedback creates a tracked processing job and replaces the selected chunk
+     in the existing lesson after success. Check **Apply revision to all difficulty
+     levels** to update the corresponding chunk across levels together; otherwise
+     only the selected level changes. Old versions are removed. A6 CANCEL/RECEIVED are
      explicit; RECEIVED asks you to confirm the required output has been saved
      or the failed/material job inspected. Collection never sends A6 automatically.
 
@@ -108,7 +111,7 @@ not an automatically loaded file.
   an **Available lesson** and **Difficulty level**, then **Start lesson** creates
   B1 before displaying its first chunk's text and voice. Settings allow local
   questions consent (enabled by default) or a signed Middleware session JWT.
-  A3 v2 levels share one lesson choice; A7 revisions remain separate choices.
+  A3 v2 levels share one lesson choice; A7 updates that existing lesson.
   **Next chunk** advances; **Replay voice** restarts the current chunk.
   A custom Streamlit component plays checksum-verified WAV bytes and handles
   **User interruption** in the browser: pause first, capture exact currentTime,
@@ -138,15 +141,26 @@ not an automatically loaded file.
   navigation. Start a new lesson generation to request fresh output.
 - **Revise chunk (A7)**: load a ready lesson by catalog or job ID, select its
   teaching chunk and describe the teacher's requested changes. Language, level
-  and voice are inherited. Submission creates a new complete lesson version;
-  an inline panel shows its A4 status, processing step and percentage, refreshing
+  and voice are inherited. Submission replaces the selected chunk's text/voice
+  in the same lesson only after processing succeeds; failures leave it intact.
+  **Apply revision to all difficulty levels** is unchecked by default. Check it
+  to revise the corresponding chunk in every aligned level, each keeping its own
+  difficulty. One job reports overall progress and publishes all levels together
+  only after they all succeed; other chunks stay unchanged. Unchecked edits just
+  the selected level. The checkbox appears in workspace and standalone A7.
+  An inline panel shows its A4 status, processing step and percentage, refreshing
   every 5 seconds until DONE/FAILED/CANCELLED. HTTP/network errors pause tracking;
-  **Refresh revision status** resumes it. **Open revised lesson** explicitly loads
-  the new version once completed; the selected edited part is retained in the
-  standalone tool. The same panel appears in workspace A7. Processing status
-  remains available, and Learning lists completed revisions. Loading a lesson
+  **Refresh revision status** resumes it. Success automatically reloads the same
+  lesson at the edited level and part; **Open updated lesson** also reloads it.
+  The same panel appears in workspace A7. Processing status
+  remains available, and Learning shows the current lesson. Loading a lesson
   (A5 GET/200) is distinct from submitting a revision (A7 POST/202); HTTP details
   have separate labels. No automatic submission retry; A7 request idempotency is deferred.
+  Final review considers teacher edits and allows up to two feedback-driven
+  corrections. A rejected revision shows **Why this revision failed** with the
+  level, part, specific findings and suggested correction. Old jobs that only
+  retained an error code cannot display a recovered reason. To retry a terminal
+  failure, submit a new revision; the UI never resubmits it automatically.
   See [A7](../backend/docs/a7.md).
 - **Start session (B1)**: choose an available A8 lesson, then **Start session**.
   Displays the B1 HTTP response, session UUID, AI notice, language/level

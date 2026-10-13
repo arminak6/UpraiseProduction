@@ -1,10 +1,10 @@
-"""Revise one chunk; retain a complete independently disposable lesson version."""
+"""Stage selected teaching-unit edits for one atomic lesson replacement."""
 
 import hashlib
 import json
 
 from upraise_ai.core.errors import IngestionError
-from upraise_ai.schemas.aligned_lessons import AlignedText, AlignedTexts, ContentUnit
+from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.lessons import (
     LessonResult,
     ReviewIssue,
@@ -14,11 +14,16 @@ from upraise_ai.schemas.lessons import (
     Viseme,
 )
 from upraise_ai.schemas.revisions import LessonRevision
-from upraise_ai.services.aligned_models import accepted, reviewed, validate_material_format
+from upraise_ai.services.aligned_models import reviewed
 from upraise_ai.services.lesson_models import merge_reviews
 from upraise_ai.services.lesson_pipeline import LessonPipeline, atomic_write, source_issues, write_json
 from upraise_ai.services.lesson_translation import needs_translation
-from upraise_ai.services.revision_models import REVISION_PROMPT_VERSION, validate_revision_text
+from upraise_ai.services.revision_models import (
+    REVISION_PROMPT_VERSION,
+    RevisionModelInvalidOutput,
+    validate_revision_text,
+)
+from upraise_ai.services.revision_validation import MAX_ALIGNMENT_CORRECTIONS, validate_aligned_revision
 from upraise_ai.services.versions import VersionCatalog
 
 
@@ -40,14 +45,45 @@ class RevisionPipeline(LessonPipeline):
         return documents
 
     def prepare(self, job, documents, progress, *, save_text, save_speech):
+        revision = StoredLessonInput.model_validate(job["metadata"]).revision_request
+        path = self.staging.job_dir(str(job["job_id"])) / "revision-base.json"
+        if file_hash(path) != revision.snapshot_sha256:
+            raise IngestionError("REVISION_SNAPSHOT_INTEGRITY_FAILURE")
+        if not revision.apply_to_all_levels:
+            return self.prepare_level(job, documents, progress, save_text=save_text, save_speech=save_speech,
+                                      result=LessonResult.model_validate_json(path.read_bytes()))
+        result = AlignedLessonResult.model_validate_json(path.read_bytes())
+        if (not revision.aligned_unit or set(result.variants) != set(revision.target_chunk_sha256_by_level)
+                or result.job_id != str(revision.parent_job_id)):
+            raise IngestionError("REVISION_SNAPSHOT_INTEGRITY_FAILURE")
+        unit_id = str(revision.aligned_unit["content_unit_id"])
+        count = len(result.variants)
+        for index, (level, variant) in enumerate(result.variants.items()):
+            selected = next((chunk for chunk in variant.chunks if str(chunk.content_unit_id) == unit_id), None)
+            if selected is None:
+                raise IngestionError("REVISION_SNAPSHOT_INTEGRITY_FAILURE")
+            metadata = {**job["metadata"], "options": {**job["metadata"]["options"], "learner_level": level},
+                        "revision_request": {**job["metadata"]["revision_request"], "chunk_id": selected.chunk_id}}
+            level_job = {**job, "metadata": metadata}
+
+            def level_progress(step, fraction, offset=index):
+                progress(step, 0.05 + 0.90 * (offset + fraction) / count)
+
+            level_progress.set_workload = lambda phase, units: progress.set_workload(phase, count * units)
+            result.variants[level] = self.prepare_level(level_job, documents, level_progress,
+                save_text=lambda chunks, versions: save_text(chunks, versions, partial=True),
+                save_speech=save_speech, result=variant, checkpoint_key="-" + selected.chunk_id)
+        result.job_id, result.expires_at = str(job["job_id"]), None
+        result.reviewer_report = merge_reviews([variant.reviewer_report for variant in result.variants.values()])
+        result.versions.update(VersionCatalog(self.settings).references("revision_"))
+        write_json(path.parent / "result.json", result.model_dump(mode="json"))
+        return result
+
+    def prepare_level(self, job, documents, progress, *, save_text, save_speech, result, checkpoint_key=""):
         data = StoredLessonInput.model_validate(job["metadata"])
         revision = data.revision_request
         job_id = str(job["job_id"])
         folder = self.staging.job_dir(job_id)
-        base_path = folder / "revision-base.json"
-        if file_hash(base_path) != revision.snapshot_sha256:
-            raise IngestionError("REVISION_SNAPSHOT_INTEGRITY_FAILURE")
-        result = LessonResult.model_validate_json(base_path.read_bytes())
         selected = next((chunk for chunk in result.chunks if chunk.chunk_id == str(revision.chunk_id)), None)
         if (selected is None or result.job_id != str(revision.parent_job_id)
                 or result.course_id != data.course_id or result.lesson_id != data.lesson_id
@@ -74,9 +110,11 @@ class RevisionPipeline(LessonPipeline):
         version_refs = VersionCatalog(self.settings).references("revision_")
         signature = hashlib.sha256(json.dumps({"request": job["metadata"], "pipeline": job["pipeline_version"], "versions": version_refs,
             "prompt": REVISION_PROMPT_VERSION}, sort_keys=True).encode()).hexdigest()
-        progress.set_workload("lesson", 1)
+        progress.set_workload("lesson", 1 + 2 * MAX_ALIGNMENT_CORRECTIONS if revision.aligned_unit else 1)
         progress("GENERATE", 0.05)
-        checkpoint_path = folder / "revision-final.json"
+        neighbours = [{"index": chunk.index, "text": chunk.text[:6000]} for chunk in result.chunks
+                      if abs(chunk.index - selected.index) == 1]
+        checkpoint_path = folder / f"revision-final{checkpoint_key}.json"
         if checkpoint_path.is_file():
             saved = json.loads(checkpoint_path.read_bytes())
             if saved["signature"] != signature:
@@ -85,12 +123,14 @@ class RevisionPipeline(LessonPipeline):
             report = ReviewReport.model_validate(saved["review"])
             edits = saved["edits"]
         else:
-            neighbours = [{"index": chunk.index, "text": chunk.text[:6000]} for chunk in result.chunks
-                          if abs(chunk.index - selected.index) == 1]
-            text, report, edits = self.models.revise_chunk(
-                section, selected.text, revision.teacher_review, neighbours,
-                learner_level=data.options.learner_level,
-                notify=lambda step: progress(step, 0.25 if step == "REVIEW" else 0.40))
+            try:
+                text, report, edits = self.models.revise_chunk(
+                    section, selected.text, revision.teacher_review, neighbours,
+                    learner_level=data.options.learner_level,
+                    notify=lambda step: progress(step, 0.25 if step == "REVIEW" else 0.40))
+            except RevisionModelInvalidOutput as error:
+                error.details.update(chunk_id=selected.chunk_id, chunk_index=selected.index)
+                raise
             text = validate_revision_text(text)
             if needs_translation(section["source_language"], data.language):
                 progress("TRANSLATE", 0.48)
@@ -100,19 +140,14 @@ class RevisionPipeline(LessonPipeline):
             flags = source_issues(section)
             report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
                                   issues=[*report.issues, *flags], revision_instructions=report.revision_instructions)
-            write_json(checkpoint_path, {"signature": signature, "text": text, "review": report.model_dump(), "edits": edits})
+            saved = {"signature": signature, "text": text, "review": report.model_dump(), "edits": edits,
+                     "correction_rounds": 0}
+            write_json(checkpoint_path, saved)
+        correction_rounds = 0
         if revision.aligned_unit:
-            unit = ContentUnit.model_validate(revision.aligned_unit)
-            text = validate_material_format(unit, text)
-            if len(text.split()) > data.options.max_chunk_words:
-                raise IngestionError('REVISION_UNIT_TOO_LARGE')
-            self.models.transport.language = data.language
-            self.models.transport.teaching_prompt = None
-            final_review = reviewed(self.models, section, [unit],
-                AlignedTexts(units=[AlignedText(content_unit_id=unit.content_unit_id, text=text)]),
-                data.language, data.options.learner_level, data.level_profiles)
-            if not accepted(final_review):
-                raise IngestionError('REVISION_ALIGNMENT_REJECTED', retryable=True)
+            text, correction_rounds = validate_aligned_revision(self.models, section, data, selected, neighbours,
+                saved, checkpoint_path, progress, reviewed)
+            edits = saved["edits"]
         selected.text, selected.reviewer_report, selected.revisions = text, report, edits
         if not revision.aligned_unit:
             selected.sources[0].pages = pages
@@ -125,6 +160,8 @@ class RevisionPipeline(LessonPipeline):
                                revision_translation_applied=str(needs_translation(section["source_language"], data.language)).lower(),
                                revision_generator_model=self.settings.lesson_generation_model_id,
                                revision_review_model=self.settings.lesson_review_model_id)
+        if revision.aligned_unit:
+            result.versions["revision_correction_rounds"] = str(correction_rounds)
         all_chunks = [(chunk.chunk_id, chunk.text, chunk.sources[0], chunk.reviewer_report,
                        chunk.section_index, chunk.revisions) for chunk in result.chunks]
         if revision.aligned_unit:
@@ -140,7 +177,7 @@ class RevisionPipeline(LessonPipeline):
         progress.set_workload("speech", 1)
         progress("SPEECH", 0.60)
         audio_path = folder / f"{selected.chunk_id}.wav"
-        speech_path = folder / "revision-speech.json"
+        speech_path = folder / f"revision-speech{checkpoint_key}.json"
         if speech_path.is_file():
             saved = json.loads(speech_path.read_bytes())
             if saved["signature"] != signature or file_hash(audio_path) != saved["audio_sha256"]:

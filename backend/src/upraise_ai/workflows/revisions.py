@@ -11,14 +11,20 @@ from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.guards.operations import require_feature
+from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.lessons import StoredLessonInput
 from upraise_ai.services.lesson_pipeline import LessonPipeline, write_json
+from upraise_ai.services.lesson_replacement import artifact_job, chunk_fingerprint
 
 log = logging.getLogger("upraise.revisions")
 
 
 def submit_revision(lessons, data, principal):
     row = lessons.authorized(str(data.lesson_job_id), principal)
+    target = (row.get("result") or {}).get("replacement_target_job_id")
+    if target:
+        data = data.model_copy(update={"lesson_job_id": target})
+        row = lessons.authorized(target, principal)
     with lessons.jobs.course_admission(principal.client_id, row["metadata"]["course_id"]):
         return _submit_revision(lessons, data, principal)
 
@@ -39,13 +45,22 @@ def _submit_revision(lessons, data, principal):
             selected = next((chunk for chunk in result.chunks if chunk.chunk_id == str(data.chunk_id)), None)
             if selected is None:
                 raise HTTPException(404, "LESSON_CHUNK_NOT_FOUND")
-            if hasattr(result, 'variants'):
-                result = next(variant for variant in result.variants.values()
-                              if any(chunk.chunk_id == selected.chunk_id for chunk in variant.chunks))
-            if not selected.sources:
-                raise IngestionError("REVISION_SOURCE_UNAVAILABLE", status=409)
-            if len(selected.text) > 16000:
-                raise IngestionError("REVISION_CONTEXT_TOO_LARGE", status=422)
+            if data.apply_to_all_levels and not isinstance(result, AlignedLessonResult):
+                raise IngestionError("REVISION_ALL_LEVELS_UNAVAILABLE", status=409)
+            selected_variant = (next(variant for variant in result.variants.values()
+                                if any(chunk.chunk_id == selected.chunk_id for chunk in variant.chunks))
+                                if isinstance(result, AlignedLessonResult) else result)
+            if not data.apply_to_all_levels:
+                result = selected_variant
+            targets = ({level: next(chunk for chunk in variant.chunks
+                        if chunk.content_unit_id == selected.content_unit_id)
+                        for level, variant in result.variants.items()}
+                       if data.apply_to_all_levels else {selected_variant.learner_level: selected})
+            for target in targets.values():
+                if not target.sources:
+                    raise IngestionError("REVISION_SOURCE_UNAVAILABLE", status=409)
+                if len(target.text) > 16000:
+                    raise IngestionError("REVISION_CONTEXT_TOO_LARGE", status=422)
             all_prepared = lessons.jobs.prepared_chunks(parent_id)
             prepared = {str(chunk['chunk_id']): chunk for chunk in all_prepared
                         if str(chunk['chunk_id']) in {part.chunk_id for part in result.chunks}}
@@ -68,7 +83,7 @@ def _submit_revision(lessons, data, principal):
             # DONE artifacts are immutable. Hard links avoid copying unchanged
             # WAVs; atomic replacement of the edited file never changes a parent.
             for chunk in result.chunks:
-                source = lessons.staging.job_dir(parent_id) / f"{chunk.chunk_id}.wav"
+                source = lessons.staging.job_dir(artifact_job(row)) / f"{chunk.chunk_id}.wav"
                 if not source.is_file():
                     raise IngestionError("LESSON_AUDIO_UNAVAILABLE", status=503)
                 with source.open("rb") as stream:
@@ -86,12 +101,15 @@ def _submit_revision(lessons, data, principal):
             metadata = StoredLessonInput.model_validate({
                 key: value for key, value in row["metadata"].items() if key != "revision_request"
             }).model_dump(mode="json")
-            metadata['options']['learner_level'] = result.learner_level
+            metadata['options']['learner_level'] = selected_variant.learner_level
             metadata["callback_url"] = None  # A7 uses A4/A5 pull delivery.
             metadata["revision_request"] = {
                 "parent_job_id": parent_id, "chunk_id": str(data.chunk_id), "teacher_review": data.teacher_review,
-                "number": (result.revision.number if result.revision else 0) + 1,
+                "number": (selected_variant.revision.number if selected_variant.revision else 0) + 1,
                 "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(), "source_attempts": attempts,
+                "target_chunk_sha256": chunk_fingerprint(selected),
+                "apply_to_all_levels": data.apply_to_all_levels,
+                "target_chunk_sha256_by_level": {level: chunk_fingerprint(chunk) for level, chunk in targets.items()},
             }
             if result.chunk_plan_id:
                 plan = lessons.jobs.get_plan(parent_id)

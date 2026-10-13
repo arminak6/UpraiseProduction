@@ -59,8 +59,9 @@ def lesson_result(job_id: UUID, request: Request, response: Response, principal:
                   learner_level: str | None = Query(None, min_length=1, max_length=40, pattern=r'^[a-z][a-z0-9_]*$')):
     principal.require_scope("jobs:read")
     lessons = service(request)
-    row = lessons.authorized(job_id, principal)
-    with lessons.staging.artifact_lock(str(job_id), shared=True):
+    row, replacement_level = lessons.delivery_row(job_id, principal)
+    learner_level = learner_level or replacement_level
+    with lessons.staging.artifact_lock(str(row["job_id"]), shared=True):
         result = lessons.result(row, learner_level=learner_level) if learner_level else lessons.result(row)
         lessons.audit_download(row)
     response.headers["Cache-Control"] = "no-store"
@@ -84,11 +85,11 @@ def regenerate_audio(data: ChunkRevisionInput, request: Request, response: Respo
 def lesson_audio(job_id: UUID, chunk_id: UUID, request: Request, principal: Principal = Depends(ingress)):
     principal.require_scope("jobs:read")
     lessons = service(request)
-    row = lessons.authorized(job_id, principal)
+    row, _ = lessons.delivery_row(job_id, principal)
     # Open the descriptor while locked. POSIX retains an open file across unlink;
     # Windows cleanup retries while it is open. Streaming does not retain a lock
     # indefinitely when a remote client stops reading.
-    with lessons.staging.artifact_lock(str(job_id), shared=True):
+    with lessons.staging.artifact_lock(str(row["job_id"]), shared=True):
         path, chunk = lessons.audio(row, str(chunk_id))
         stream = path.open("rb")
         try:

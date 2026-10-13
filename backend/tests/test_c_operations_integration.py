@@ -51,7 +51,8 @@ def test_c_operations_disabled_courses_remain_queued_without_consuming_attempts(
     assert jobs.get(source["job_id"])["attempts"] == 0
     assert jobs.claim(settings.lease_seconds)["job_id"]
     lesson_jobs = LessonRepository(settings.jobs_dsn.get_secret_value())
-    pending = lesson_jobs.accept(principal.client_id, str(uuid4()), "fingerprint", {"course_id": "course-1"}, "ops-test")
+    pending = lesson_jobs.accept(principal.client_id, str(uuid4()), "fingerprint",
+                                 {"course_id": "course-1", "document_ids": [source["document_id"]]}, "ops-test")
     assert lesson_jobs.claim(settings.lease_seconds, "ops-test", excluded_courses=["course-1"]) is None
     assert lesson_jobs.get(pending["job_id"])["attempts"] == 0
     assert lesson_jobs.claim(settings.lease_seconds, "ops-test")["job_id"] == pending["job_id"]

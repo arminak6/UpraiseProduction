@@ -141,6 +141,14 @@ class LessonRepository(JobRepository):
             return [str(row["job_id"]) for row in conn.execute("""SELECT job_id FROM lesson_jobs
                 WHERE job_id=ANY(%s::uuid[]) AND content_deletion_requested_at IS NOT NULL""", (job_ids,)).fetchall()]
 
+    def result_hashes(self, job_ids):
+        if not job_ids:
+            return {}
+        with self.connect() as conn:
+            return {str(row["job_id"]): row["digest"] for row in conn.execute("""SELECT job_id,
+                result->>'result_sha256' AS digest FROM lesson_jobs WHERE job_id=ANY(%s::uuid[])
+                AND result ? 'result_sha256'""", (job_ids,)).fetchall()}
+
     def accept_revision(self, conn, job_id, client_id, fingerprint, metadata, pipeline_version):
         # Caller stages independent artifacts while holding the parent snapshot
         # lock. Visibility starts only when that transaction commits.
@@ -154,6 +162,8 @@ class LessonRepository(JobRepository):
         # Apply ownership/course/availability filters BEFORE pagination. A8
         # exposes metadata only; A5 rechecks artifacts and audits playback.
         filters = ["j.client_id=%s", "j.status='DONE'", "j.cleanup_requested_at IS NULL",
+                   "j.metadata->'revision_request' IS NULL",
+                   "NOT (j.result ? 'replacement_target_job_id')",
                    "j.expires_at>clock_timestamp()",
                    "jsonb_array_length(j.metadata->'document_ids')>0"]
         values = [client_id]
@@ -182,7 +192,7 @@ class LessonRepository(JobRepository):
                 [*values, limit, offset],
             ).fetchall()
 
-    def save_prepared_text(self, conn, job_id, chunks, versions):
+    def save_prepared_text(self, conn, job_id, chunks, versions, *, partial=False):
         """Caller holds the job lease and source locks; commit before any TTS call."""
         counters = {}
         for item in chunks:
@@ -210,7 +220,7 @@ class LessonRepository(JobRepository):
         count = conn.execute(
             "SELECT count(*) AS n FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,)
         ).fetchone()["n"]
-        if count != len(chunks):
+        if not partial and count != len(chunks):
             raise IngestionError("LESSON_PREPARED_TEXT_CONFLICT")
 
     def save_prepared_speech(self, conn, job_id, chunk_id, ssml, parts):
@@ -350,8 +360,9 @@ class LessonRepository(JobRepository):
                 (expires_at<=clock_timestamp() OR (status='FAILED' AND completed_at IS NULL))"""
             )
             return conn.execute(
-                """SELECT job_id FROM lesson_jobs WHERE cleanup_requested_at IS NOT NULL
-                AND cleanup_completed_at IS NULL ORDER BY cleanup_requested_at LIMIT 20"""
+                """SELECT job_id FROM lesson_jobs WHERE
+                (cleanup_requested_at IS NOT NULL AND cleanup_completed_at IS NULL)
+                OR result ? 'replacement_cleanup_jobs' ORDER BY cleanup_requested_at NULLS LAST LIMIT 20"""
             ).fetchall()
 
     def claim_callback(self, maximum):

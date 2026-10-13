@@ -60,7 +60,7 @@ def submit_revision(client, body, **kwargs):
     return response.json()["job_id"]
 
 
-def test_a7_full_revision_a4_a5_a8_pg_audio_and_parent_unchanged(integration, lesson):
+def test_a7_replaces_existing_chunk_a4_a5_a8_pg_audio_and_removes_old_content(integration, lesson):
     parent_id, original, calls = parent(integration, lesson)
     parent_hash = lesson[1].get(parent_id)["result"]["result_sha256"]
     old_audio = {chunk.chunk_id: (lesson[3].staging.job_dir(parent_id) / f"{chunk.chunk_id}.wav").read_bytes()
@@ -72,15 +72,16 @@ def test_a7_full_revision_a4_a5_a8_pg_audio_and_parent_unchanged(integration, le
         row = process(lesson)
         assert str(row["job_id"]) == revised_id and row["status"] == "DONE", row["error_code"]
         status = client.get(f"/v1/jobs/{revised_id}").json()
-        assert status["result"]["revision"]["parent_job_id"] == parent_id
+        assert status["result"]["replacement_target_job_id"] == parent_id
         revised = client.get(f"/v1/jobs/{revised_id}/result").json()
-        assert revised["revision"] == {"parent_job_id": parent_id, "chunk_id": original.chunks[1].chunk_id, "number": 1}
+        assert revised["job_id"] == parent_id and "revision" not in revised
         assert revised["status"] == "DRAFT" and revised["learner_level"] == "beginner"
         assert (revised["language"], revised["voice"]) == (original.language, original.voice)
         assert len(revised["chunks"]) == len(original.chunks) and len(calls) == 1
         assert calls[0][1] == original.chunks[1].text and calls[0][4] == "beginner"
         assert {item["chunk_id"] for item in calls[0][0]["chunks"]} == set(original.chunks[1].sources[0].source_chunk_ids)
-        prepared = lesson[1].prepared_chunks(revised_id)
+        prepared = lesson[1].prepared_chunks(parent_id)
+        assert lesson[1].prepared_chunks(revised_id) == []
         assert [chunk["text"] for chunk in prepared] == [chunk["text"] for chunk in revised["chunks"]]
         assert [chunk["ssml"] for chunk in prepared] == [chunk["ssml"] for chunk in revised["chunks"]]
         for index, chunk in enumerate(revised["chunks"]):
@@ -96,15 +97,19 @@ def test_a7_full_revision_a4_a5_a8_pg_audio_and_parent_unchanged(integration, le
                 assert chunk["ssml"] == original.chunks[index].ssml and audio.content == old_audio[chunk["chunk_id"]]
         assert len(lesson[2].speech.client.calls) == 2  # Edited audio + its visemes only.
         catalog = client.get("/v1/lesson-jobs").json()
-        assert {item["job_id"] for item in catalog} == {parent_id, revised_id}
-        assert next(item for item in catalog if item["job_id"] == revised_id)["revision"]["number"] == 1
-        assert lesson[1].get(parent_id)["result"]["result_sha256"] == parent_hash
-        assert client.get(f"/v1/jobs/{parent_id}/result").json()["chunks"][1]["text"] == original.chunks[1].text
+        assert {item["job_id"] for item in catalog} == {parent_id}
+        assert lesson[1].get(parent_id)["result"]["result_sha256"] != parent_hash
+        assert client.get(f"/v1/jobs/{parent_id}/result").json()["chunks"][1]["text"].startswith("A clearer")
+        assert not lesson[3].staging.job_dir(parent_id).exists()
+        assert not (lesson[3].staging.job_dir(revised_id) / "revision-base.json").exists()
+        # A processing-job receipt leaves the stable lesson's delivery intact.
+        assert client.delete(f"/v1/jobs/{revised_id}?reason=RECEIVED").status_code == 204
+        assert client.get(f"/v1/jobs/{parent_id}/result").status_code == 200
         assert client.delete(f"/v1/jobs/{parent_id}?reason=RECEIVED").status_code == 204
         assert client.get(f"/v1/jobs/{parent_id}/result").status_code == 410
-        assert client.get(f"/v1/jobs/{revised_id}/result").status_code == 200
+        assert client.get(f"/v1/jobs/{revised_id}/result").status_code == 410
         for chunk in revised["chunks"]:
-            assert client.get(chunk["audio_url"]).status_code == 200
+            assert client.get(chunk["audio_url"]).status_code == 410
         with lesson[1].connect() as conn:
             assert conn.execute("SELECT count(*) AS n FROM prepared_lesson_chunks WHERE job_id=%s", (parent_id,)).fetchone()["n"] == len(original.chunks)
 
@@ -139,8 +144,9 @@ def test_a7_expired_parent_rejected_but_accepted_snapshot_survives_expiry(integr
         lesson[1].maintenance()
         lesson[3].complete_cleanup(parent_id)
         row = process(lesson)
-        assert str(row["job_id"]) == revised_id and row["status"] == "DONE", row["error_code"]
-        assert client.get(f"/v1/jobs/{revised_id}/result").status_code == 200
+        assert str(row["job_id"]) == revised_id and row["status"] == "FAILED", row["error_code"]
+        assert row["error_code"] == "REVISION_TARGET_UNAVAILABLE"
+        assert client.get(f"/v1/jobs/{revised_id}/result").status_code == 409
 
 
 def test_a7_speech_retry_reuses_final_text_and_cancel_preserves_parent(integration, lesson):
@@ -192,7 +198,7 @@ def test_a7_feedback_and_language_level_translation_are_preserved(integration, l
         assert calls[0][2] == payload(parent_id, result)["teacher_review"]
 
 
-def test_a7_concurrent_submissions_create_independent_versions(integration, lesson):
+def test_a7_concurrent_same_chunk_edit_rejects_stale_snapshot(integration, lesson):
     from upraise_ai.schemas.revisions import ChunkRevisionInput
     from upraise_ai.workflows.revisions import submit_revision as submit_service
 
@@ -202,8 +208,9 @@ def test_a7_concurrent_submissions_create_independent_versions(integration, less
         results = list(executor.map(lambda _: submit_service(lesson[3], data, lesson[4]), range(2)))
     assert results[0]["job_id"] != results[1]["job_id"]
     assert process(lesson)["status"] == "DONE"
-    assert process(lesson)["status"] == "DONE"
-    assert lesson[3].result(lesson[1].get(parent_id)).chunks[1].text == result.chunks[1].text
+    failed = process(lesson)
+    assert failed["status"] == "FAILED" and failed["error_code"] == "REVISION_TARGET_CHANGED"
+    assert lesson[3].result(lesson[1].get(parent_id)).chunks[1].text.startswith("A clearer")
 
 
 def test_a7_cancel_while_generating_fences_pg_and_preserves_old_audio(integration, lesson):
@@ -273,7 +280,7 @@ def test_a7_corrupt_parent_audio_cannot_create_job(integration, lesson):
         assert conn.execute("SELECT count(*) AS n FROM lesson_jobs").fetchone()["n"] == 1
 
 
-def test_a7_second_revision_tracks_parent_and_revision_number(integration, lesson):
+def test_a7_second_revision_uses_same_stable_lesson_id(integration, lesson):
     parent_id, result, _ = parent(integration, lesson)
     with api(integration, lesson) as client:
         first_id = submit_revision(client, payload(parent_id, result))
@@ -282,7 +289,10 @@ def test_a7_second_revision_tracks_parent_and_revision_number(integration, lesso
         second_id = submit_revision(client, payload(first_id, first, teacher_review="Make the explanation shorter."))
         assert process(lesson)["status"] == "DONE"
         second = client.get(f"/v1/jobs/{second_id}/result").json()
-        assert second["revision"]["number"] == 2 and second["revision"]["parent_job_id"] == first_id
+        assert second["job_id"] == parent_id and "revision" not in second
+        assert lesson[1].get(parent_id)["result"]["replacement_count"] == 2
+        assert lesson[1].prepared_chunks(first_id) == []
+        assert not lesson[3].staging.job_dir(first_id).exists()
         assert len(second["chunks"]) == len(result.chunks)
 
 
@@ -299,7 +309,7 @@ def test_a7_operational_generation_and_tts_controls_reject_before_staging(integr
         assert conn.execute("SELECT count(*) AS n FROM lesson_jobs").fetchone()["n"] == 1
 
 
-def test_a7_old_and_revised_sessions_resolve_their_own_pg_teaching_text(integration, lesson):
+def test_a7_old_session_is_revoked_and_new_session_reads_current_text(integration, lesson):
     from test_b1_integration import b1_api
 
     from upraise_ai.schemas.interrupts import InterruptInput
@@ -312,17 +322,22 @@ def test_a7_old_and_revised_sessions_resolve_their_own_pg_teaching_text(integrat
         started = client.post("/v1/sessions", json=body)
         assert started.status_code == 201, started.text
         old_session = app.state.sessions.get(started.json()["session_id"], lesson[4].client_id)
-        revised_id = submit_revision(client, payload(parent_id, result))
+        submit_revision(client, payload(parent_id, result))
         assert process(lesson)["status"] == "DONE"
-        new = client.post("/v1/sessions", json={**body, "lesson_job_id": revised_id})
+        new = client.post("/v1/sessions", json=body)
         assert new.status_code == 201, new.text
         new_session = app.state.sessions.get(new.json()["session_id"], lesson[4].client_id)
         assert old_session.binding.lesson_job_id == parent_id
-        assert new_session.binding.lesson_job_id == revised_id
+        assert new_session.binding.lesson_job_id == parent_id
         assert old_session.binding.result_sha256 != new_session.binding.result_sha256
-        interrupts = InterruptService(lesson[0], lesson[3], app.state.sessions, integration[3])
+        from upraise_ai.core.config import get_settings
+        principal = app.dependency_overrides[ingress]()
+        interrupts = InterruptService(app.dependency_overrides[get_settings](), lesson[3], app.state.sessions, integration[3])
         message = InterruptInput(request_id=uuid4(), chunk_id=result.chunks[1].chunk_id, text="Explain this part.")
-        _, _, old_text, _ = interrupts._lesson(old_session, message, lesson[4])
-        _, _, new_text, _ = interrupts._lesson(new_session, message, lesson[4])
-        assert old_text == result.chunks[1].text
-        assert new_text.startswith("A clearer") and new_text != old_text
+        import pytest
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as changed:
+            interrupts.authorized_session(old_session.response.session_id, principal, None)
+        assert changed.value.status_code == 409
+        _, _, new_text, _ = interrupts._lesson(new_session, message, principal)
+        assert new_text.startswith("A clearer") and new_text != result.chunks[1].text

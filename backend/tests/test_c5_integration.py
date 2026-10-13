@@ -43,7 +43,10 @@ def test_c5_integration_a1_a3_a7_versions_link_to_immutable_audit_snapshot(integ
         assert result["versions"]["configuration_id"] == original.versions["configuration_id"]
         assert result["versions"]["revision_configuration_id"] == snapshot["configuration_id"]
         assert revised["result"]["configuration_id"] == snapshot["configuration_id"]
-    assert lesson[1].prepared_chunks(parent_id) == old_prepared
+    current_prepared = lesson[1].prepared_chunks(parent_id)
+    assert len(current_prepared) == len(old_prepared)
+    assert current_prepared[0] == old_prepared[0]
+    assert current_prepared[1]['text'] != old_prepared[1]['text']
     # A later process can read an old lesson without relabelling its generation.
     changed = lesson[0].model_copy(update={"lesson_generation_model_id": "invented-new-generation-model"})
     new_audit = AuditRepository(changed.audit_dsn.get_secret_value(), settings=changed)
@@ -53,7 +56,7 @@ def test_c5_integration_a1_a3_a7_versions_link_to_immutable_audit_snapshot(integ
                                   "AND event_type IN ('DRAFT_CREATED','VERSION_TEST_READ')", (parent_id,)).fetchall())
     assert events["DRAFT_CREATED"]["version_snapshot"] == snapshot
     assert events["VERSION_TEST_READ"]["version_snapshot"]["configuration_id"] != snapshot["configuration_id"]
-    assert lesson[1].prepared_chunks(parent_id) == old_prepared
+    assert lesson[1].prepared_chunks(parent_id) == current_prepared
 
 
 def test_c5_integration_b2_audit_tracks_policy_without_measurement(integration, lesson):

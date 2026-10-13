@@ -1,8 +1,9 @@
 """A7 author feedback and immutable lesson revision provenance."""
 
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 
 class ChunkRevisionInput(BaseModel):
@@ -10,6 +11,7 @@ class ChunkRevisionInput(BaseModel):
     lesson_job_id: UUID
     chunk_id: UUID
     teacher_review: str = Field(min_length=1, max_length=8000)
+    apply_to_all_levels: StrictBool = False
 
     @field_validator("teacher_review")
     @classmethod
@@ -30,5 +32,8 @@ class RevisionRequest(LessonRevision):
     """Internal job metadata; never accepted by A3 or returned with feedback."""
     teacher_review: str = Field(min_length=1, max_length=8000)
     snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_chunk_sha256: str | None = Field(None, pattern=r"^[0-9a-f]{64}$")
     source_attempts: dict[str, str]
     aligned_unit: dict | None = None
+    apply_to_all_levels: StrictBool = False
+    target_chunk_sha256_by_level: dict[str, Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]] = Field(default_factory=dict)

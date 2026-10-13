@@ -304,15 +304,87 @@ class IngestionWorkspaceTests(unittest.TestCase):
             self.load_draft(app)
             app.selectbox(key="iw_field_result_level").set_value("advanced").run()
             app.text_area(key="iw_field_feedback").set_value("Explain the assumption more clearly.")
+            self.assertFalse(app.checkbox(key="iw_field_all_levels").value)
             button(app, "Submit teacher revision · A7").click().run()
             self.assertFalse(app.exception)
             submitted = next(call for call in send.call_args_list if call.args[2] == "/v1/audio:regenerate")
             self.assertEqual(submitted.kwargs["json_body"]["chunk_id"], self.chunks[2])
+            self.assertNotIn("apply_to_all_levels", submitted.kwargs["json_body"])
             self.assertEqual(app.selectbox(key="iw_field_job").value, self.revision)
             self.assertIn(self.lesson, app.session_state["ingestion_workspace"]["jobs"])
             count = send.call_count
             app.run()
             self.assertEqual(send.call_count, count)
+
+    def test_all_levels_checkbox_submits_scope_and_reloads_every_updated_level(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.load_draft(app)
+            app.selectbox(key="iw_field_result_level").set_value("advanced").run()
+            self.assertFalse(app.checkbox(key="iw_field_all_levels").value)
+            self.assertFalse(app.checkbox(key="iw_field_all_levels").disabled)
+            self.status_body.update(status="RUNNING", step="GENERATE", progress=0.25)
+            app.checkbox(key="iw_field_all_levels").set_value(True)
+            app.text_area(key="iw_field_feedback").set_value("Clarify this topic in each difficulty.")
+            button(app, "Submit teacher revision · A7").click().run()
+            self.assertFalse(app.exception)
+            submitted = next(call for call in send.call_args_list if call.args[2] == "/v1/audio:regenerate")
+            self.assertEqual(submitted.kwargs["json_body"], {"lesson_job_id": self.lesson,
+                "chunk_id": self.chunks[2], "teacher_review": "Clarify this topic in each difficulty.",
+                "apply_to_all_levels": True})
+            self.assertEqual(app.session_state["ingestion_workspace"]["jobs"][self.lesson]["revision_accepted"], self.revision)
+            updated = copy.deepcopy(self.bundle)
+            for level in updated["variants"]:
+                updated["variants"][level]["chunks"][0]["text"] = f"Updated {level} teaching explanation."
+            self.result_overrides[self.lesson] = updated
+            self.status_body.update(status="DONE", step="DONE", progress=1,
+                result={"replacement_target_job_id": self.lesson, "revised_levels": list(updated["variants"])})
+            button(app, "Refresh revision status").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.selectbox(key="iw_field_download_course").value, self.lesson)
+            self.assertEqual(len(app.selectbox(key="iw_field_download_course").options), 1)
+            self.assertTrue(any("all 3 difficulty levels" in item.value for item in app.success))
+            for level in updated["variants"]:
+                app.selectbox(key="iw_field_result_level").set_value(level).run()
+                self.assertTrue(any(f"Updated {level} teaching" in item.value for item in app.markdown))
+            self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), 1)
+
+    def test_workspace_failed_revision_displays_review_reason_without_resubmitting(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.load_draft(app)
+            self.status_body.update(status="FAILED", step="FAILED", progress=0.584, error={
+                "code": "REVISION_ALIGNMENT_REJECTED", "learner_level": "advanced", "chunk_index": 0,
+                "correction_rounds": 2, "reason": "The mathematical relationship was changed.",
+                "review": {"revision_instructions": ["Restore the original mathematical relationship."]}})
+            app.text_area(key="iw_field_feedback").set_value("Remove attribution.")
+            button(app, "Submit teacher revision · A7").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("REVISION_ALIGNMENT_REJECTED" in item.value for item in app.error))
+            self.assertTrue(any("mathematical relationship was changed" in item.value for item in app.markdown))
+            self.assertTrue(any("Level: advanced" in item.value and "Part 1" in item.value for item in app.markdown))
+            self.assertTrue(any("Restore the original mathematical relationship" in item.value for item in app.markdown))
+            app.run()
+            self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), 1)
+
+    def test_workspace_invalid_model_output_shows_reason_without_review_or_resubmission(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.load_draft(app)
+            self.status_body.update(status="FAILED", step="FAILED", progress=0.17, error={
+                "code": "REVISION_MODEL_INVALID_OUTPUT", "stage": "revision_finalize",
+                "learner_level": "beginner", "chunk_index": 0, "correction_rounds": 2,
+                "reason_code": "OUTPUT_SCHEMA_INVALID",
+                "reason": "The model did not return the required final-text JSON structure."})
+            app.text_area(key="iw_field_feedback").set_value("Remove attribution.")
+            button(app, "Submit teacher revision · A7").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("REVISION_MODEL_INVALID_OUTPUT" in item.value for item in app.error))
+            self.assertTrue(any("final-text JSON structure" in item.value for item in app.markdown))
+            self.assertTrue(any("Level: beginner" in item.value and "Part 1" in item.value for item in app.markdown))
+            self.assertTrue(any("This revision was not applied" in item.value for item in app.caption))
+            app.run()
+            self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), 1)
 
     def test_workspace_revision_progress_and_open_completed_version(self):
         with patch("api_client.request", side_effect=self.response) as send:
@@ -334,10 +406,35 @@ class IngestionWorkspaceTests(unittest.TestCase):
                                   "learner_level": "beginner"}]
             button(app, "Refresh revision status").click().run()
             self.assertTrue(any("Revision complete" in item.value for item in app.success))
-            button(app, "Open revised lesson").click().run()
+            button(app, "Open updated lesson").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(app.selectbox(key="iw_field_download_course").value, self.revision)
             self.assertTrue(any("revised proof" in item.value for item in app.markdown))
+            self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), 1)
+
+    def test_replacement_opens_same_lesson_refreshes_cached_text_and_keeps_selected_level(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.load_draft(app)
+            app.selectbox(key="iw_field_result_level").set_value("advanced").run()
+            self.status_body.update(status="RUNNING", step="GENERATE", progress=0.25)
+            app.text_area(key="iw_field_feedback").set_value("Clarify the proof.")
+            button(app, "Submit teacher revision · A7").click().run()
+            updated = copy.deepcopy(self.bundle)
+            updated["variants"]["advanced"]["chunks"][0]["text"] = "Updated advanced proof in the same lesson."
+            self.result_overrides[self.lesson] = updated
+            self.status_body.update(status="DONE", step="DONE", progress=1,
+                                    result={"replacement_target_job_id": self.lesson, "learner_level": "advanced"})
+            button(app, "Refresh revision status").click().run()
+            self.assertEqual(app.selectbox(key="iw_field_download_course").value, self.lesson)
+            self.assertTrue(any("Updated advanced proof" in item.value for item in app.markdown))
+            button(app, "Open updated lesson").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.selectbox(key="iw_field_download_course").value, self.lesson)
+            self.assertEqual(len(app.selectbox(key="iw_field_download_course").options), 1)
+            self.assertEqual(app.selectbox(key="iw_field_result_level").value, "advanced")
+            self.assertTrue(any("Updated advanced proof" in item.value for item in app.markdown))
+            self.assertFalse(button(app, "Submit teacher revision · A7").disabled)
             self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), 1)
 
     def test_a2_selection_a8_discovery_and_connection_reset(self):

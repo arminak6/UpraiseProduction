@@ -167,7 +167,9 @@ class VersionCatalog:
                     'post_edit_material_review': 'deferred',
                     'math_validation': source_constant('services/aligned_models.py', 'MATH_VALIDATION_VERSION')}).model_dump(),
                 "revision": PipelineVersion(version=settings.lesson_signature, parameters={
-                    "strategy": "three_role_single_chunk_revision"}).model_dump(),
+                    "strategy": "three_role_replace_existing_chunk", "all_levels_supported": True,
+                    "alignment_review": "teacher-feedback-aware-v1", "max_alignment_corrections": 2,
+                    "max_final_output_corrections": 2}).model_dump(),
                 "interrupts": PipelineVersion(version=INTERRUPT_PIPELINE_VERSION, parameters={
                     "source_characters": settings.interrupt_source_characters, "grounding_verifier_enabled": False}).model_dump(),
             },

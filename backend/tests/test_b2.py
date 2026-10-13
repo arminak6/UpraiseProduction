@@ -29,9 +29,22 @@ def setup_b2(*, consent=("telemetry",)):
 @contextmanager
 def b2_http(store, audits, *, audit=None, **kwargs):
     with http(store, **kwargs) as client:
+        app.state.lessons.authorized = lambda job_id, principal: {"result": {"result_sha256": next(
+            session.binding.result_sha256 for session in store._sessions.values()
+            if session.binding.lesson_job_id == job_id)}}
         app.state.lessons.audit.chunk_ended = audit or (lambda session, chunk: audits.append({
             "session_id": str(session.response.session_id), "chunk_id": chunk}))
         yield client
+
+
+def test_b2_rejects_changed_lesson_and_clears_old_session():
+    store, session, _, body = setup_b2()
+    with b2_http(store, []) as client:
+        app.state.lessons.authorized = lambda *_: {"result": {"result_sha256": "changed"}}
+        result = client.post(f"/v1/sessions/{session.response.session_id}/chunk-end", json=body)
+        assert result.status_code == 409 and result.json()["detail"] == "LESSON_VERSION_MISMATCH"
+        result = client.post(f"/v1/sessions/{session.response.session_id}/chunk-end", json=body)
+        assert result.status_code == 410
 
 
 @pytest.mark.parametrize("score,decision", [(0, "PROCEED"), (0.3, "PROCEED"), (0.5, "PROCEED"),

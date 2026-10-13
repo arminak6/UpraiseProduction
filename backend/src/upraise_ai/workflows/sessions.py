@@ -11,6 +11,7 @@ from upraise_ai.guards.session_jwt import validate_session_jwt
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.chunk_end import ChunkEndResponse
 from upraise_ai.schemas.sessions import StartedSession
+from upraise_ai.services.lesson_replacement import artifact_job
 from upraise_ai.storage.sessions import RuntimeSession, SessionBinding
 
 AI_NOTICES = {
@@ -22,7 +23,7 @@ AI_NOTICES = {
 }
 
 
-def authorize_session(settings, store, session_id, principal, token=None, *, include_ended=False):
+def authorize_session(settings, store, session_id, principal, token=None, *, include_ended=False, lessons=None):
     """Shared B2/B4/B5 authorization; feature consent is enforced separately."""
     principal.require_scope("sessions:write")
     session = store.get(session_id, principal.client_id, include_ended=include_ended)
@@ -40,6 +41,11 @@ def authorize_session(settings, store, session_id, principal, token=None, *, inc
         if (actual != expected or not claims.lesson_approved
                 or (binding.level_claim_required and claims.learner_level != binding.learner_level)):
             raise HTTPException(403, "SESSION_SCOPE_MISMATCH")
+    if lessons is not None and not include_ended:
+        row = lessons.authorized(binding.lesson_job_id, principal)
+        if (row.get("result") or {}).get("result_sha256") != binding.result_sha256:
+            store.end(session_id, principal.client_id, "ERROR")
+            raise HTTPException(409, "LESSON_VERSION_MISMATCH")
     return session
 
 
@@ -48,7 +54,7 @@ class SessionService:
         self.settings, self.lessons, self.store = settings, lessons, store
 
     def chunk_end(self, session_id, data, principal, token=None):
-        session = authorize_session(self.settings, self.store, session_id, principal, token)
+        session = authorize_session(self.settings, self.store, session_id, principal, token, lessons=self.lessons)
         try:
             decision = self.store.chunk_end(session, data.lesson_id, str(data.chunk_id),
                                             data.cognitive_load_score, self.lessons.audit.chunk_ended)
@@ -122,7 +128,7 @@ class SessionService:
                     or [chunk.index for chunk in result.chunks] != list(range(len(chunk_ids)))):
                 raise IngestionError("LESSON_OUTPUT_UNAVAILABLE", status=503)
             for chunk_id in chunk_ids:
-                if not self.lessons.staging.job_dir(result.job_id).joinpath(f"{chunk_id}.wav").is_file():
+                if not self.lessons.staging.job_dir(artifact_job(row)).joinpath(f"{chunk_id}.wav").is_file():
                     raise IngestionError("LESSON_AUDIO_UNAVAILABLE", status=503)
             now = datetime.now(UTC)
             expires = min(now + timedelta(seconds=self.settings.session_ttl_seconds),

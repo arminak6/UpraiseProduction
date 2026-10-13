@@ -552,13 +552,17 @@ def render_result(connection, state, job, show_response):
 
 def render_revision(connection, state, job, variant, chunk, show_response):
     with st.expander("A7 · Request a teacher revision", expanded=bool(job.get("revision_accepted"))):
-        st.caption("Revise the selected chunk in this level. A7 creates a new complete version; each submission creates a job.")
+        st.caption("Replace the selected chunk's text and voice in this level after processing succeeds.")
         selected = (variant.get("learner_level"), chunk["chunk_id"])
         if state.get("revision_selection") != selected:
             state["revision_selection"] = selected
             st.session_state["iw_field_feedback"] = ""
+            st.session_state["iw_field_all_levels"] = False
         with st.form("iw_revision"):
             feedback = st.text_area("Teacher's requested changes", key="iw_field_feedback", max_chars=8000)
+            all_levels = st.checkbox("Apply revision to all difficulty levels", key="iw_field_all_levels",
+                disabled=not bool(job.get("result", {}).get("variants")),
+                help="Checked: revise this same teaching chunk in every available level. Unchecked: only the selected level.")
             submit = st.form_submit_button("Submit teacher revision · A7", disabled=bool(job.get("revision_accepted")))
         if submit:
             if not feedback.strip():
@@ -566,11 +570,14 @@ def render_revision(connection, state, job, variant, chunk, show_response):
             else:
                 result = send(connection, state, "POST", "/v1/audio:regenerate", json_body={
                     "lesson_job_id": job["job_id"], "chunk_id": chunk["chunk_id"], "teacher_review": feedback.strip(),
+                    **({"apply_to_all_levels": True} if all_levels else {}),
                 })
                 job["revision_response"] = result
-                revision = accepted_job(connection, state, result, "lesson", {
+                revision = accepted_job(connection, state, result, "revision", {
                     **{key: variant.get(key) for key in ("course_id", "activity_id", "lesson_id")},
                     "parent_job_id": job["job_id"], "document_ids": job.get("document_ids", []),
+                    "learner_level": variant.get("learner_level"), "edited_part_index": chunk["index"],
+                    "apply_to_all_levels": all_levels,
                 })
                 if revision:
                     job["revision_accepted"] = revision
@@ -687,6 +694,18 @@ def render_courses(connection, state, show_response, *, refresh_on_open=False):
             job.pop("status_body", None)
         st.session_state["iw_field_job"] = selected
         activate_job(state, selected)
+        if open_revision:
+            job.pop("revision_accepted", None)
+            job.pop("revision_response", None)
+            st.session_state["iw_field_feedback"] = ""
+            for name in ("result", "result_response", "audio", "audio_response"):
+                job.pop(name, None)
+            level = state.pop("open_revision_level", None)
+            index = state.pop("open_revision_index", None)
+            if level:
+                st.session_state["iw_field_result_level"] = level
+            if index is not None:
+                st.session_state["iw_field_chunk"] = index
         state["catalog_context"] = ready_job_context(state)
         render_result(connection, state, job, show_response)
     elif not courses:
@@ -703,14 +722,21 @@ def render_jobs(connection, state, show_response, *, refresh_on_open=False):
     revision = state.get("latest_revision")
     if revision in state["jobs"]:
         revision_job = state["jobs"][revision]
+        if revision_job.get("apply_to_all_levels"):
+            st.caption("Revising the corresponding chunk in all difficulty levels. Updates apply together after all levels succeed.")
 
         def open_revision(job_id):
             state["open_revision"] = job_id
             state["next_job"] = job_id
+            state["open_revision_level"] = revision_job.get("learner_level")
+            state["open_revision_index"] = revision_job.get("edited_part_index")
 
         def status_changed(body):
             revision_job.update(status=body["status"], step=body.get("step"), progress=body.get("progress"),
                                 status_body=body, status_response=revision_job["revision_progress"]["response"])
+            target = (body.get("result") or {}).get("replacement_target_job_id")
+            if body["status"] == "DONE" and target:
+                open_revision(target)
 
         render_revision_progress(connection, revision_job.setdefault("revision_progress", {}), revision,
                                  show_response, key="iw_revision_progress_" + revision, on_open=open_revision,
@@ -781,7 +807,7 @@ def render_job_tracking(connection, state, show_response, *, course_job=None):
     monitor()
     if job.get("kind") == "material":
         st.button("Continue to draft lesson", on_click=navigate, args=(2,))
-    elif not course_job:
+    elif not course_job and job.get("kind") != "revision":
         render_result(connection, state, job, show_response)
     render_action(connection, state, job, show_response)
 

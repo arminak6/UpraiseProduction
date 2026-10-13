@@ -13,6 +13,7 @@ from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import LessonResult
 from upraise_ai.services.lesson_callback import validate_callback_config
 from upraise_ai.services.lesson_pipeline import LessonPipeline
+from upraise_ai.services.lesson_replacement import artifact_job, cleanup_replacements, current_manifest
 
 
 class LessonService:
@@ -74,16 +75,35 @@ class LessonService:
             chunk_plan_id=row['result'].get('chunk_plan_id'),
         ) for row in rows]
 
+    def delivery_row(self, job_id, principal):
+        row = self.authorized(job_id, principal)
+        target = (row.get("result") or {}).get("replacement_target_job_id")
+        level = None
+        if target:
+            if row["cleanup_requested_at"] or row["expires_at"] <= datetime.now(UTC):
+                raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
+            level = row["result"]["learner_level"]
+            row = self.authorized(target, principal)
+        return row, level
+
     def result(self, row, learner_level=None):
         row = self.jobs.get(row["job_id"])
         if row["cleanup_requested_at"] or (row["expires_at"] and row["expires_at"] <= datetime.now(UTC)):
             raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
         if row["status"] != "DONE":
             raise IngestionError("LESSON_RESULT_NOT_READY", status=409)
+        target = row["result"].get("replacement_target_job_id")
+        if target:
+            current = self.jobs.get(target)
+            if (not current or current["client_id"] != row["client_id"]
+                    or current["metadata"]["course_id"] != row["metadata"]["course_id"]):
+                raise IngestionError("JOB_NOT_FOUND", status=404)
+            with self.staging.artifact_lock(target, shared=True):
+                return self.result(current, learner_level or row["result"]["learner_level"])
         # Use the same activation check as the worker without creating AWS clients.
         checker = LessonPipeline(self.settings, self.documents, None, self.staging, None, None)
         checker.check_sources(row)
-        path = self.staging.job_dir(str(row["job_id"])) / "result.json"
+        path = current_manifest(self.staging, row)
         if not path.is_file():
             raise IngestionError("LESSON_OUTPUT_UNAVAILABLE", status=503)
         raw = path.read_bytes()
@@ -130,12 +150,33 @@ class LessonService:
         self.complete_cleanup(job_id)
 
     def complete_cleanup(self, job_id):
+        current = self.jobs.get(job_id)
+        if current and current.get("result"):
+            target = current["result"].get("replacement_target_job_id") or str(job_id)
+            if ((self.jobs.get(target) or {}).get("result") or {}).get("replacement_cleanup_jobs"):
+                cleanup_replacements(self.jobs, self.staging, target)
         # Always acquire artifacts before the DB row, matching generation/delivery.
         # A6 first commits its fence, then returns 503 if a writer has not stopped.
         with self.staging.artifact_lock(job_id), self.jobs.job_transaction(job_id) as (conn, row):
             if not row or not row["cleanup_requested_at"] or row["cleanup_completed_at"]:
                 return
-            self.staging.remove(job_id)
+            # Processing-job cleanup cannot delete files owned by a current
+            # lesson. Stable lesson cleanup removes its active directory too.
+            reference = conn.execute("""SELECT job_id FROM lesson_jobs WHERE
+                result->>'artifact_job_id'=%s AND cleanup_requested_at IS NULL
+                AND content_deletion_requested_at IS NULL LIMIT 1""", (str(job_id),)).fetchone()
+            if not reference:
+                self.staging.remove(job_id)
+            active = artifact_job(row) if row.get("result") else str(job_id)
+            if active != str(job_id):
+                with self.staging.artifact_lock(active):
+                    self.staging.remove(active)
+            if row["metadata"].get("revision_request"):
+                # Unpublished A7 text is a temporary candidate, not retained
+                # teaching content. Cancel/receipt/expiry disposes it as well.
+                conn.execute("DELETE FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,))
+                conn.execute("DELETE FROM lesson_chunk_plans WHERE job_id=%s", (job_id,))
+                conn.execute("UPDATE lesson_jobs SET metadata=metadata-'revision_request',result=NULL WHERE job_id=%s", (job_id,))
             if row.get("content_deletion_requested_at"):
                 self.jobs.erase_content(conn, job_id)
                 self.audit.lesson(row, "CONTENT_DELETED", {"course_id": row["metadata"]["course_id"],
@@ -154,7 +195,10 @@ class LessonService:
         chunk = next((chunk for chunk in result.chunks if chunk.chunk_id == chunk_id), None)
         if chunk is None:
             raise HTTPException(404, "LESSON_AUDIO_NOT_FOUND")
-        path = self.staging.job_dir(str(row["job_id"])) / f"{chunk_id}.wav"
+        row = self.jobs.get(str(row["job_id"]))
+        if row["result"].get("replacement_target_job_id"):
+            row = self.jobs.get(row["result"]["replacement_target_job_id"])
+        path = self.staging.job_dir(artifact_job(row)) / f"{chunk_id}.wav"
         if not path.is_file():
             raise IngestionError("LESSON_AUDIO_UNAVAILABLE", status=503)
         with path.open("rb") as stream:

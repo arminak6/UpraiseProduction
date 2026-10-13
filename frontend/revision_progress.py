@@ -55,13 +55,30 @@ def render_revision_progress(connection, state, job_id, show_response, *, key, o
             status = body["status"]
             st.progress(progress, text=f"{status} · {body.get('step', '')} · {progress * 100:.2f}%")
             if status == "DONE":
-                st.success("Revision complete. The revised text and voice are ready to review.")
-                if st.button("Open revised lesson", key=key + "_open"):
-                    on_open(job_id)
+                levels = (body.get("result") or {}).get("revised_levels", [])
+                message = (f"The corresponding chunk has been updated in all {len(levels)} difficulty levels."
+                           if len(levels) > 1 else "The lesson's selected chunk has been updated.")
+                st.success("Revision complete. " + message)
+                if st.button("Open updated lesson", key=key + "_open"):
+                    target = (body.get("result") or {}).get("replacement_target_job_id") or job_id
+                    on_open(target)
                     st.rerun()
             elif status == "FAILED":
                 error = body.get("error") or {}
                 st.error("Revision failed: " + str(error.get("code", "Check the job details.")))
+                if error.get("reason"):
+                    with st.expander("Why this revision failed", expanded=True):
+                        level = error.get("learner_level")
+                        index = error.get("chunk_index")
+                        if level and isinstance(index, int):
+                            st.write(f"Level: {level} · Part {index + 1}")
+                        st.write(error["reason"])
+                        findings = error.get("review") or {}
+                        for instruction in findings.get("revision_instructions", []):
+                            st.write("Suggested correction: " + str(instruction))
+                        if isinstance(error.get("correction_rounds"), int):
+                            st.caption(f"Correction attempts: {error['correction_rounds']}")
+                        st.caption("This revision was not applied.")
             elif status == "CANCELLED":
                 st.info("Revision cancelled.")
             else:

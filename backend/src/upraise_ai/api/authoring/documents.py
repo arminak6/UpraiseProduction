@@ -151,7 +151,10 @@ def job_status(job_id: UUID, request: Request, principal: Principal = Depends(in
         return JobStatus(
             job_id=str(row["job_id"]), lesson_id=row["metadata"]["lesson_id"], status=row["status"],
             step=row["step"], progress=row["progress"], attempts=row["attempts"],
-            error={"code": row["error_code"]} if row["error_code"] else None, result=row["result"],
+            error={"code": row["error_code"], **((row.get("result") or {}).get("revision_failure", {})
+                    if row["error_code"] in {"REVISION_ALIGNMENT_REJECTED", "REVISION_MODEL_INVALID_OUTPUT"}
+                    else {})} if row["error_code"] else None,
+            result=row["result"],
             created_at=row["created_at"], updated_at=row["updated_at"], expires_at=row["expires_at"],
             cleanup_pending=bool(row["cleanup_requested_at"] and not row["cleanup_completed_at"]),
             acknowledged=bool(row["cleanup_reason"] == "RECEIVED" and row["cleanup_completed_at"]),

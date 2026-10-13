@@ -26,7 +26,7 @@ the [A3 v2 aligned-level contract](backend/docs/a3-v2.md), and
 [A5 pull downloads, auditing and TTL](backend/docs/a5.md).
 See [A2's contract and deletion recovery](backend/docs/a2.md).
 See [A6's cancellation and acknowledgment contract](backend/docs/a6.md).
-See [A7's teacher-feedback revisions and matching audio](backend/docs/a7.md).
+See [A7's teacher-feedback chunk replacement and matching audio](backend/docs/a7.md).
 See [B1's temporary sessions, JWT/consent contract and local curl](backend/docs/b1.md).
 B1 opens process-local learner state for one selected A3 generation; restarts
 clear sessions. Its default 30-minute TTL is capped by lesson/token expiry.

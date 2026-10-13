@@ -59,7 +59,7 @@ class InterruptService:
         self.input_capacity = BoundedSemaphore(settings.interrupt_max_concurrent)
 
     def authorized_session(self, session_id, principal, token):
-        session = authorize_session(self.settings, self.store, session_id, principal, token)
+        session = authorize_session(self.settings, self.store, session_id, principal, token, lessons=self.lessons)
         if "questions" not in session.binding.consent_scope:
             raise HTTPException(403, "QUESTIONS_CONSENT_REQUIRED")
         require_feature(self.settings, "answers", session.binding.course_id)

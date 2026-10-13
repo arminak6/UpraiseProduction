@@ -106,7 +106,7 @@ def test_database_failure_prevents_tts_and_retry_uses_finalized_checkpoint(integ
     speech = lesson[2].speech.synthesize
     lesson[2].speech.synthesize = lambda *args: synthesized.append(True) or speech(*args)
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise psycopg.OperationalError("test storage unavailable")
 
     monkeypatch.setattr(lesson[1], "save_prepared_text", fail)

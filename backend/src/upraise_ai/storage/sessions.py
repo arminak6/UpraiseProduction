@@ -173,6 +173,14 @@ class SessionStore:
         for session in ended:
             self._audit_end(session)
 
+    def revoke_changed_lessons(self, hashes):
+        with self._lock:
+            ended = [self._end_locked(session, "ERROR") for session in list(self._sessions.values())
+                     if session.binding.lesson_job_id in hashes
+                     and session.binding.result_sha256 != hashes[session.binding.lesson_job_id]]
+        for session in ended:
+            self._audit_end(session)
+
     def start(self, session, audit):
         key = str(session.response.session_id)
         with self._lock:

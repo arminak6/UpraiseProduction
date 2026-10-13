@@ -358,5 +358,9 @@ def test_a7_revises_selected_level_preserving_plan_and_parent(integration, lesso
         assert revised.chunk_plan_id == original.chunk_plan_id
         assert [part.content_unit_id for part in revised.chunks] == original.content_unit_ids
         assert revised.chunks[1].text != chunk.text
-        assert lesson[3].result(row) == original
+        current = lesson[3].result(row)
+        assert current.job_id == original.job_id
+        assert current.variants['beginner'].chunks[1].text == revised.chunks[1].text
+        for level in ('intermediate', 'advanced'):
+            assert current.variants[level].model_dump(exclude={'expires_at'}) == original.variants[level].model_dump(exclude={'expires_at'})
         assert lesson[1].get_plan(revised.job_id) == lesson[1].get_plan(row['job_id'])

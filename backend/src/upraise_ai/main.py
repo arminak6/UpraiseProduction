@@ -57,6 +57,8 @@ async def lifespan(app):
             )
             app.state.documents = DocumentService(jobs, vectors, audit, lessons=app.state.lessons, sessions=app.state.sessions)
             app.state.interrupts = InterruptService(settings, app.state.lessons, app.state.sessions, vectors)
+            from upraise_ai.services.lesson_replacement import consolidate_legacy_revisions
+            await asyncio.to_thread(consolidate_legacy_revisions, app.state.lessons)
     async def sweep_sessions():
         while True:
             await asyncio.sleep(settings.session_sweep_seconds)
@@ -65,6 +67,8 @@ async def lifespan(app):
                 try:
                     revoked = await asyncio.to_thread(app.state.lessons.jobs.revoked_jobs, app.state.sessions.active_job_ids())
                     await asyncio.to_thread(app.state.sessions.revoke_jobs, revoked)
+                    hashes = await asyncio.to_thread(app.state.lessons.jobs.result_hashes, app.state.sessions.active_job_ids())
+                    await asyncio.to_thread(app.state.sessions.revoke_changed_lessons, hashes)
                 except (psycopg.Error, IngestionError):
                     # Keep the sweep alive across transient storage/audit outages.
                     pass

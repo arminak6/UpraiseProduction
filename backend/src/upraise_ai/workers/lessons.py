@@ -4,11 +4,13 @@ import hashlib
 import logging
 import signal
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
@@ -19,8 +21,11 @@ from upraise_ai.services.aligned_pipeline import AlignedLessonPipeline
 from upraise_ai.services.lesson_callback import CallbackClient
 from upraise_ai.services.lesson_models import LessonModels
 from upraise_ai.services.lesson_pipeline import LessonPipeline
+from upraise_ai.services.lesson_replacement import publish_replacement
 from upraise_ai.services.lesson_speech import LessonSpeech
+from upraise_ai.services.revision_models import RevisionModelInvalidOutput
 from upraise_ai.services.revision_pipeline import RevisionPipeline
+from upraise_ai.services.revision_validation import RevisionAlignmentRejected
 from upraise_ai.storage.audit import AuditRepository
 from upraise_ai.storage.files import StagingStore
 from upraise_ai.storage.jobs import JobRepository
@@ -123,6 +128,11 @@ class LessonWorker:
             with self.jobs.owned_transaction(job["job_id"], job["lease_token"]) as conn:
                 self.audit.lesson(job, "RETRY" if retry else "FAILED", details, attempt=True)
                 self.jobs.fail(conn, job["job_id"], job["lease_token"], code, retry, self.settings.lesson_ttl_seconds)
+                if isinstance(error, (RevisionAlignmentRejected, RevisionModelInvalidOutput)):
+                    # Author-facing findings are temporary output; never audit
+                    # model text or feedback. A6/TTL/A2 disposes these details.
+                    conn.execute("UPDATE lesson_jobs SET result=%s WHERE job_id=%s",
+                                 (Jsonb({"revision_failure": error.details}), job["job_id"]))
         except LeaseLost:
             pass
 
@@ -181,10 +191,10 @@ class LessonWorker:
                     pipeline.speech = self.speech or LessonSpeech(self.settings, pipeline.models)
                     expected = {str(row["document_id"]): str(row["active_attempt"]) for row, _ in documents}
 
-                    def save_text(chunks, versions):
+                    def save_text(chunks, versions, *, partial=False):
                         with self.jobs.owned_transaction(job_id, token) as conn:
                             pipeline.check_sources(job, expected, conn)
-                            self.jobs.save_prepared_text(conn, job_id, chunks, versions)
+                            self.jobs.save_prepared_text(conn, job_id, chunks, versions, partial=partial)
 
                     def save_speech(chunk_id, ssml, parts):
                         with self.jobs.owned_transaction(job_id, token) as conn:
@@ -201,13 +211,15 @@ class LessonWorker:
                         arguments['save_plan'] = save_plan
                     result = pipeline.prepare(job, documents, progress, **arguments)
                     progress("PUBLISH", 0.98)
-                    with self.jobs.owned_transaction(job_id, token) as conn:
+                    target_id = job["metadata"].get("revision_request", {}).get("parent_job_id")
+                    with (self.staging.artifact_lock(str(target_id)) if target_id else nullcontext()), \
+                            self.jobs.owned_transaction(job_id, token) as conn:
                         pipeline.check_sources(job, expected, conn)
                         summary = {"lesson_id": job["metadata"]["lesson_id"], "lesson_status": "DRAFT",
                                    "chunk_count": len(result.chunks), "requires_review": True,
                                    "review_approved": result.reviewer_report.approved,
                                    "review_issue_count": len(result.reviewer_report.issues), "label": "AI-generated"}
-                        prefix = "revision_" if result.revision else ""
+                        prefix = "revision_" if target_id else ""
                         if isinstance(result, AlignedLessonResult):
                             summary.update(generation_version='a3-v2', levels=list(result.variants),
                                 chunk_count=result.chunk_count, total_chunk_count=len(result.chunks),
@@ -226,6 +238,12 @@ class LessonWorker:
                         if result.revision:
                             self.audit.lesson(job, "CHUNK_REVISED", {**result.revision.model_dump(mode="json"),
                                 "result_sha256": summary["result_sha256"]}, attempt=True)
+                        if target_id:
+                            summary = publish_replacement(self.jobs, self.staging, conn, job, result,
+                                                          self.settings.lesson_ttl_seconds)
+                            self.audit.lesson(job, "CHUNK_REPLACED", {key: summary[key] for key in (
+                                "replacement_target_job_id", "chunk_id", "revised_levels", "result_sha256")
+                                if key in summary}, attempt=True)
                         self.jobs.done(conn, job_id, token, summary, self.settings.lesson_ttl_seconds)
                 except LeaseLost:
                     pass

@@ -177,6 +177,7 @@ def test_done_reports_quality_separately_from_processing_success(tmp_path, statu
         yield object()
 
     jobs = SimpleNamespace(
+        dsn=settings.jobs_dsn.get_secret_value(),
         progress=lambda *args: None, owned_transaction=owned_transaction,
         done=lambda conn, job_id, token, result: results.append(result),
     )
