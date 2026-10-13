@@ -12,6 +12,8 @@ from uuid import UUID, uuid4
 import api_client
 import streamlit as st
 from learning import binding, expired, readable_text
+from revision_progress import render_revision_progress
+from voice_picker import render_language_voice
 
 STAGES = ["1 · Ingest material", "2 · Manage material", "3 · Draft lesson", "4 · Jobs & results"]
 TERMINAL = {"DONE", "FAILED", "CANCELLED"}
@@ -383,13 +385,13 @@ def render_generation(connection, state, show_response, *, refresh_on_open=False
         elif material["status"] in {"QUEUED", "RUNNING"}:
             st.caption("This source is still processing. A3 will wait for ingestion to finish.")
         st.button("Prepare a new generation", on_click=new_generation, args=(state,))
+        language, voice = render_language_voice("Output language", language_key="iw_field_output_language",
+                                               voice_key="iw_field_voice")
         with st.form("iw_generation"):
             lesson = st.text_input("Lesson ID", key="iw_field_lesson", max_chars=120)
             left, right = st.columns(2)
             left.text_input("Course ID", key="iw_field_draft_course", disabled=True)
             right.text_input("Activity ID", key="iw_field_draft_activity", disabled=True)
-            language = left.text_input("Output language", key="iw_field_output_language", max_chars=35)
-            voice = right.text_input("Polly voice", key="iw_field_voice", max_chars=80)
             window = left.number_input("Source window (pages)", 1, 50, key="iw_field_window")
             words = right.number_input("Target chunk length (words)", 30, 1000, key="iw_field_words")
             maximum = left.number_input("Maximum chunk length (words)", 50, 2000, key="iw_field_maximum")
@@ -549,7 +551,7 @@ def render_result(connection, state, job, show_response):
 
 
 def render_revision(connection, state, job, variant, chunk, show_response):
-    with st.expander("A7 · Request a teacher revision"):
+    with st.expander("A7 · Request a teacher revision", expanded=bool(job.get("revision_accepted"))):
         st.caption("Revise the selected chunk in this level. A7 creates a new complete version; each submission creates a job.")
         selected = (variant.get("learner_level"), chunk["chunk_id"])
         if state.get("revision_selection") != selected:
@@ -572,6 +574,7 @@ def render_revision(connection, state, job, variant, chunk, show_response):
                 })
                 if revision:
                     job["revision_accepted"] = revision
+                    state["latest_revision"] = revision
                     st.rerun()
         if job.get("revision_accepted"):
             st.success("Revision job: " + job["revision_accepted"])
@@ -644,9 +647,10 @@ def activate_job(state, selected):
 
 def render_courses(connection, state, show_response, *, refresh_on_open=False):
     st.subheader("Download course voice")
+    open_revision = state.pop("open_revision", None)
     refresh = st.button("Refresh courses")
     newly_ready = set(ready_job_context(state)) - set(state.get("catalog_context") or ())
-    if refresh_on_open or refresh or not state.get("catalog_response") or newly_ready:
+    if open_revision or refresh_on_open or refresh or not state.get("catalog_response") or newly_ready:
         refresh_catalog(connection, state)
     if state.get("catalog_more") and st.button("Load more courses"):
         refresh_catalog(connection, state, more=True)
@@ -655,6 +659,9 @@ def render_courses(connection, state, show_response, *, refresh_on_open=False):
     for item in state["catalog"]:
         if not expired(item) and not state["jobs"].get(item["job_id"], {}).get("action_completed"):
             courses.setdefault(item["job_id"], item)  # A8 lists one row per level; show each generation once.
+    if open_revision:
+        st.session_state["iw_field_job"] = open_revision
+        st.session_state["iw_field_download_course"] = open_revision if open_revision in courses else None
     if st.session_state.get("iw_field_download_course") not in courses:
         st.session_state["iw_field_download_course"] = None
     previous = state.get("download_course")
@@ -693,6 +700,22 @@ def render_courses(connection, state, show_response, *, refresh_on_open=False):
 
 
 def render_jobs(connection, state, show_response, *, refresh_on_open=False):
+    revision = state.get("latest_revision")
+    if revision in state["jobs"]:
+        revision_job = state["jobs"][revision]
+
+        def open_revision(job_id):
+            state["open_revision"] = job_id
+            state["next_job"] = job_id
+
+        def status_changed(body):
+            revision_job.update(status=body["status"], step=body.get("step"), progress=body.get("progress"),
+                                status_body=body, status_response=revision_job["revision_progress"]["response"])
+
+        render_revision_progress(connection, revision_job.setdefault("revision_progress", {}), revision,
+                                 show_response, key="iw_revision_progress_" + revision, on_open=open_revision,
+                                 request_status=lambda path: send(connection, state, "GET", path, timeout=15),
+                                 on_status=status_changed)
     course_job = render_courses(connection, state, show_response, refresh_on_open=refresh_on_open)
     with st.expander("Advanced job tracking", expanded=not bool(course_job)):
         render_job_tracking(connection, state, show_response, course_job=course_job)

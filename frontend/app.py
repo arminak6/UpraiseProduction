@@ -13,6 +13,7 @@ from learning import render_learning
 from operations import render_operations
 from session_end import render_session_end
 from session_start import render_session_start
+from voice_picker import render_language_voice
 
 st.set_page_config(page_title="UPRAISE", page_icon="🧪", layout="wide")
 st.title("UPRAISE")
@@ -247,13 +248,14 @@ elif page == "Generate lesson":
     st.session_state.setdefault("lesson_key", str(uuid4()))
     generation = st.radio('Generation version', ['A3 v2 · All aligned levels', 'A3 v1 · One level'], key='a3_version')
     aligned = generation.startswith('A3 v2')
+    st.session_state.setdefault("a3_language", "en")
+    st.session_state.setdefault("a3_voice", "Joanna")
+    language, voice = render_language_voice("Generated language", language_key="a3_language", voice_key="a3_voice")
     with st.form("lesson_form"):
         left, right = st.columns(2)
         lesson_id = left.text_input("lesson_id", key="a3_lesson_id")
         course_id = right.text_input("course_id", key="a3_course_id")
         activity_id = left.text_input("activity_id", key="a3_activity_id")
-        language = right.text_input("Generated language", value="en", key="a3_language")
-        voice = left.text_input("Polly voice", value="Joanna", key="a3_voice")
         document_ids = st.text_area("Document UUIDs in order (one per line)", key="a3_document_ids")
         window = left.number_input("Source window (pages)", min_value=1, max_value=50, value=5, key="a3_window")
         words = right.number_input("Target chunk length (words)", min_value=30, max_value=1000, value=200, key="a3_words")

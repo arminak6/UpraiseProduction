@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py api_client.py ingestion_workspace.py learning.py learning_session.py lesson_audio.py lesson_audio.js session_start.py learner_interrupt.py learning_interrupt.py session_end.py operations.py chunk_revision.py chunk_end.py ./
+COPY app.py api_client.py ingestion_workspace.py voice_picker.py revision_progress.py learning.py learning_session.py lesson_audio.py lesson_audio.js session_start.py learner_interrupt.py learning_interrupt.py session_end.py operations.py chunk_revision.py chunk_end.py ./
 
 EXPOSE 8501
 

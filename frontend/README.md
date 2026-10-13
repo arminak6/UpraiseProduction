@@ -65,7 +65,16 @@ not an automatically loaded file.
      from that selection and are read-only; A1 inputs stay separate. Set the
      editable generation parameters, then click **Generate lesson · A3**.
      Defaults are 5 source pages, 200 target words and a 500-word maximum.
-     Output language/voice and optional push callback remain editable. Failed or
+     Output language/voice and optional push callback remain editable. English
+     (`en`) and Italian (`it`) have a Polly voice dropdown showing accent and
+     gender; locale tags such as `en-GB` narrow the choices. Language changes
+     refresh the choices without submitting a generation. Defaults: Joanna for
+     English, Bianca for Italian. Other languages retain manual voice entry.
+     The same picker is available in the standalone **Generate lesson** tool.
+     `voice_picker.py` contains the neural catalogue verified with Polly
+     DescribeVoices in `eu-central-1` on 2026-10-13 (23 English, 2 Italian).
+     Reverify the catalogue when changing the engine/region or adding voices;
+     the backend validates every selected voice. Failed or
      cancelled sources cannot be selected; A3 waits for pending ingestion.
      **Refresh source status** updates the table with progress percentages.
      Selection changes prepare a new retry key; navigation and refresh failures
@@ -130,8 +139,14 @@ not an automatically loaded file.
 - **Revise chunk (A7)**: load a ready lesson by catalog or job ID, select its
   teaching chunk and describe the teacher's requested changes. Language, level
   and voice are inherited. Submission creates a new complete lesson version;
-  Processing status checks progress/text/audio, and Learning lists completed
-  revisions. No automatic submission retry; A7 request idempotency is deferred.
+  an inline panel shows its A4 status, processing step and percentage, refreshing
+  every 5 seconds until DONE/FAILED/CANCELLED. HTTP/network errors pause tracking;
+  **Refresh revision status** resumes it. **Open revised lesson** explicitly loads
+  the new version once completed; the selected edited part is retained in the
+  standalone tool. The same panel appears in workspace A7. Processing status
+  remains available, and Learning lists completed revisions. Loading a lesson
+  (A5 GET/200) is distinct from submitting a revision (A7 POST/202); HTTP details
+  have separate labels. No automatic submission retry; A7 request idempotency is deferred.
   See [A7](../backend/docs/a7.md).
 - **Start session (B1)**: choose an available A8 lesson, then **Start session**.
   Displays the B1 HTTP response, session UUID, AI notice, language/level

@@ -10,6 +10,9 @@ A5 JSON/WAV expires independently (24h). Middleware/Moodle owns human approval.
 Live v2.5 job8d97f91e DONE/attempt1:7units/level,21 PG chunks/WAVs verified.
 It remains DRAFT; semantic quality needs review. Earlier job6c8d3bc5 text review
 found partial coverage and uneven level separation.
+Turing source7058485d/course102515:55pages/98vectors, generation76432483
+DONE/attempt2:20units/level/60texts+WAVs. Structural checks pass; confirmed
+subtraction/table/ID-trace/proof errors and advanced reviewer JSON block approval.
 B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 
 ## Architecture and decisions
@@ -24,6 +27,11 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   Manual UUID/poll/A6 in Advanced job tracking; A7 remains. Retry keys survive navigation/
   renewed signed URLs; changed context resets inputs, credential binding clears
   workspace. Last100 sanitized calls in captured trace list. No auto mutations.
+- frontend/voice_picker.py: shared A3 EN/IT neural voice dropdown, also in
+  standalone v1/v2 tools. Language/voice outside submit form refresh choices
+  immediately; exact locale tags filter accents. Defaults Joanna/Bianca;
+  other languages keep manual entry. Static25-voice catalogue verified via
+  Polly DescribeVoices(eu-central-1,neural); reverify on engine/region changes.
 - A2 document deletion fences/removes all dependent generation text/SSML/plans,
   temporary lessons and embedded A7 feedback/material (all languages/levels/statuses,
   including expired/A6-received). Course DELETE /v1/courses/{course_id} applies
@@ -57,6 +65,11 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
   TTS -> new complete standalone revision of selected level. Parent unchanged;
   stable count/order/unit IDs, v2 material/max-size checked again. Structural
   changes need new A3 plan. Request idempotency explicitly deferred. docs/a7.md.
+- frontend/revision_progress.py: shared A7 inline status/stage/percentage panel,
+  automatic A4 GET every5s while page open; terminal/error stops, manual refresh
+  resumes. Open revised lesson loads/selects new version; standalone retains
+  edited part. Workspace panel remains visible after tracked job changes.
+  A5-load and A7-submit HTTP details labeled separately; no automatic POST retry.
 - Learning: separate lesson/difficulty selectors; Start lesson creates B1 before
   text/voice playback. Next chunk retains session; browser component pauses and
   captures exact currentTime on User interruption. Text questions use B4 with
@@ -99,6 +112,11 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 - backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}: pinned builds/math.
 - codex_helper/: ignored scripts/logs/reports; FUTURE_UPDATES.md ignored backlog.
   Latest full-level review: level-content-assessment.md; older reports retained.
+- Turing course review: codex_helper/turing-content-verification.md and
+  turing-{ingestion,generation}-verification.json; retained review export/PDF.
+- API input/output reference: codex_helper/output/pdf/upraise-backend-api-summary.pdf
+  (5 pages, 20 application endpoints plus built-in docs); generator:
+  codex_helper/create_api_summary_pdf.py. Recheck live OpenAPI before regenerating.
 
 ## Commands, environment and invariants
 
@@ -151,6 +169,38 @@ B3/B6/C3/C4 remain reserved. Original ../Uprise/v2 is reference-only.
 ## User notes (preserve verbatim)
 
 ## Last verified
+
+2026-10-13 A7 progress UI: shared monitor, standalone/workspace, Docker inclusion
+and README checked.94frontend fake HTTP tests pass, then3targeted tests after
+job-field update; running/HTTP-pause/resume/DONE/open-result/navigation checked.
+Ruff new module + scoped E4/E7/E9/F and diff pass. Frontend-only deploy healthy,
+file hashes match; backend/worker start times unchanged. Existing A7 revision
+40d2a50f DONE, advanced part1 text/SSML/audio hash changed, other19unchanged.
+Evidence codex_helper/a7-progress-{frontend-tests.log,final-tests.log,
+services-before.txt}, a7-40d2a50f-verification.json. No live revision submitted.
+
+2026-10-13 Turing course verification: source/prepared98Qdrant records, PG60text/
+SSML+shared20unit plan, 60WAV hashes/PCM/duration/visemes;26source+17generation
+checks pass. PDF14/16/21/46 visually compared with final lessons; source16table
+merged, input0^m1 0^n changed to0^m B1^n, part5trace drops0, part17omitsstates.
+Advanced parts2/3/8/9 leak Review JSON; exercises/level task alignment partial.
+59source warnings/331aggregate reviewer flags are not confirmed-error counts.
+Content insufficient for approval; report scope is focused, not full certification.
+No content mutation/provider calls; reports under codex_helper/turing-*.
+
+2026-10-13 A3 voice selector: Polly read-only catalogue23EN/2IT, shared picker,
+workspace/standalone forms, Dockerfile/.dockerignore and frontend README checked.
+92frontend AppTest/fake HTTP tests passed; selected voice/language payloads,
+navigation/retry fencing verified. New module Ruff/all changed files E4/E7/E9/F
+(existing test E402 excluded) and diff check passed. Frontend-only build/deploy
+healthy; deployed file hashes match. Backend/worker start times unchanged;
+active generation76432483 finished DONE during deployment. Evidence:
+codex_helper/voice-picker-frontend-tests.log and voice-picker-services-before.txt.
+
+2026-10-13 API summary: live /openapi.json compared with backend api/ and schemas/;
+A1/A3/B1/B2/B4/A6 contracts checked. All20 application endpoints included in
+5-page PDF; text/route coverage and all rendered pages verified. B2 without
+telemetry consent returns PROCEED and discards the score. Runtime code unchanged.
 
 2026-10-12 coordinated deletion: source/course workflows/storage/API, B1 fence/
 RAM revocation, recovery worker, frontend controls and docs checked.213isolated

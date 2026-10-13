@@ -44,6 +44,30 @@ class AppTests(unittest.TestCase):
             self.assertEqual(app.session_state['tracking_path'], '/v1/jobs/' + job)
             self.assertEqual(send.call_count, 1)
 
+    def test_a3_voice_picker_sends_selected_italian_voice_for_both_versions(self):
+        for version, path in [('A3 v2 · All aligned levels', '/v2/lesson-jobs'),
+                              ('A3 v1 · One level', '/v1/lesson-jobs')]:
+            with self.subTest(version=version):
+                job = str(uuid4())
+                accepted = Result('POST', path, 202, 1, {'job_id': job}, True,
+                                  {'location': '/v1/jobs/' + job})
+                with patch('api_client.request', return_value=accepted) as send:
+                    app = self.app()
+                    app.radio(key='page').set_value('Generate lesson').run()
+                    app.radio(key='a3_version').set_value(version).run()
+                    app.text_input(key='a3_language').set_value('it-IT').run()
+                    self.assertEqual(app.selectbox(key='a3_voice').value, 'Bianca')
+                    app.selectbox(key='a3_voice').select('Adriano').run()
+                    for key, value in [('a3_lesson_id', 'lesson'), ('a3_course_id', '25'), ('a3_activity_id', '310')]:
+                        app.text_input(key=key).set_value(value)
+                    app.text_area(key='a3_document_ids').set_value(str(uuid4()))
+                    send.assert_not_called()
+                    button(app, 'Send A3 request').click().run()
+                    self.assertFalse(app.exception)
+                    self.assertEqual(send.call_args.args[1:3], ('POST', path))
+                    self.assertEqual(send.call_args.kwargs['json_body']['language'], 'it-IT')
+                    self.assertEqual(send.call_args.kwargs['json_body']['voice'], 'Adriano')
+
     def app(self):
         app = AppTest.from_file(str(FRONTEND / 'app.py'), default_timeout=10)
         app.session_state['page'] = 'Ingest material'

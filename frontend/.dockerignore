@@ -2,6 +2,8 @@
 !requirements.txt
 !app.py
 !ingestion_workspace.py
+!voice_picker.py
+!revision_progress.py
 !operations.py
 !chunk_revision.py
 !chunk_end.py

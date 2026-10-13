@@ -71,7 +71,9 @@ class IngestionWorkspaceTests(unittest.TestCase):
         if "/audio/" in path:
             audio = self.audio_overrides.get(path.rsplit("/", 1)[1], self.audio)
             return api_client.Result(method, path, self.audio_status, 1, binary=audio if self.audio_status == 200 else None)
-        return api_client.Result(method, path, 200, 1, copy.deepcopy(self.status_body), True)
+        status_body = copy.deepcopy(self.status_body)
+        status_body["job_id"] = path.rsplit("/", 1)[-1]
+        return api_client.Result(method, path, 200, 1, status_body, True)
 
     def app(self):
         app = AppTest.from_file(str(FRONTEND / "app.py"), default_timeout=10)
@@ -142,6 +144,38 @@ class IngestionWorkspaceTests(unittest.TestCase):
             self.assertEqual(send.call_args.kwargs["headers"]["Idempotency-Key"], a1_key)
             self.assertNotIn("private-test-secret", json.dumps(app.session_state["ingestion_workspace"]["trace"]))
             self.assertEqual(send.call_count, 4)
+
+    def test_voice_language_changes_preserve_job_context_and_only_submit_on_click(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.submit_signed(app)
+            self.stage(app, 2)
+            self.assertEqual(app.selectbox(key="iw_field_voice").value, "Joanna")
+            retry_key = app.session_state["iw_field_a3_key"]
+            calls = send.call_count
+            app.text_input(key="iw_field_output_language").set_value("it").run()
+            self.assertFalse(app.exception)
+            picker = app.selectbox(key="iw_field_voice")
+            self.assertEqual(picker.value, "Bianca")
+            self.assertEqual(picker.options, ["Bianca · Italian · Female", "Adriano · Italian · Male"])
+            picker.select("Adriano").run()
+            self.assertEqual(send.call_count, calls)
+            button(app, "Generate lesson · A3").click().run()
+            self.assertEqual(send.call_args.kwargs["json_body"]["language"], "it")
+            self.assertEqual(send.call_args.kwargs["json_body"]["voice"], "Adriano")
+            self.assertEqual(send.call_args.kwargs["json_body"]["document_ids"], [self.document])
+            self.stage(app, 0)
+            self.stage(app, 2)
+            self.assertEqual(app.selectbox(key="iw_field_voice").value, "Adriano")
+            self.assertEqual(app.session_state["iw_field_a3_key"], retry_key)
+            posts = sum(call.args[1] == "POST" for call in send.call_args_list)
+            app.text_input(key="iw_field_output_language").set_value("en-GB").run()
+            self.assertEqual(app.selectbox(key="iw_field_voice").value, "Amy")
+            self.assertEqual(len(app.selectbox(key="iw_field_voice").options), 4)
+            button(app, "Generate lesson · A3").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), posts)
+            self.assertTrue(any("request changed" in item.value for item in app.error))
 
     def test_pdf_hash_and_multipart_are_filled(self):
         import streamlit as st
@@ -272,12 +306,39 @@ class IngestionWorkspaceTests(unittest.TestCase):
             app.text_area(key="iw_field_feedback").set_value("Explain the assumption more clearly.")
             button(app, "Submit teacher revision · A7").click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(send.call_args.kwargs["json_body"]["chunk_id"], self.chunks[2])
+            submitted = next(call for call in send.call_args_list if call.args[2] == "/v1/audio:regenerate")
+            self.assertEqual(submitted.kwargs["json_body"]["chunk_id"], self.chunks[2])
             self.assertEqual(app.selectbox(key="iw_field_job").value, self.revision)
             self.assertIn(self.lesson, app.session_state["ingestion_workspace"]["jobs"])
             count = send.call_count
             app.run()
             self.assertEqual(send.call_count, count)
+
+    def test_workspace_revision_progress_and_open_completed_version(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.load_draft(app)
+            self.status_body.update(status="RUNNING", step="GENERATE", progress=0.25)
+            app.text_area(key="iw_field_feedback").set_value("Clarify the proof.")
+            button(app, "Submit teacher revision · A7").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("25.00%" in item.proto.text for item in app.get("progress")))
+            self.status_body.update(status="DONE", step="DONE", progress=1)
+            revised = copy.deepcopy(self.bundle["variants"]["beginner"])
+            revised["job_id"] = self.revision
+            revised["chunks"][0]["text"] = "The revised proof is now visible."
+            self.result_overrides[self.revision] = revised
+            self.catalog_rows = [{**{key: value for key, value in revised.items() if key != "chunks"},
+                                  "chunk_count": 1},
+                                 {**{key: value for key, value in self.bundle.items() if key != "variants"},
+                                  "learner_level": "beginner"}]
+            button(app, "Refresh revision status").click().run()
+            self.assertTrue(any("Revision complete" in item.value for item in app.success))
+            button(app, "Open revised lesson").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.selectbox(key="iw_field_download_course").value, self.revision)
+            self.assertTrue(any("revised proof" in item.value for item in app.markdown))
+            self.assertEqual(sum(call.args[1] == "POST" for call in send.call_args_list), 1)
 
     def test_a2_selection_a8_discovery_and_connection_reset(self):
         with patch("api_client.request", side_effect=self.response) as send:
