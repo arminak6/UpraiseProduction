@@ -59,6 +59,18 @@ CREATE TABLE IF NOT EXISTS lesson_chunk_plans (
 ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS content_deletion_requested_at TIMESTAMPTZ;
 ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS content_deleted_at TIMESTAMPTZ;
 ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS content_deletion_reason TEXT;
+ALTER TABLE lesson_jobs ADD COLUMN IF NOT EXISTS deleted_levels TEXT[] NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS lesson_content_deletions (
+    deletion_id UUID PRIMARY KEY,
+    job_id UUID NOT NULL REFERENCES lesson_jobs(job_id) ON DELETE CASCADE,
+    level_key TEXT NOT NULL,
+    levels TEXT[] NOT NULL,
+    artifact_ids UUID[] NOT NULL DEFAULT '{}',
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    published_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    UNIQUE(job_id,level_key)
+);
 CREATE INDEX IF NOT EXISTS lesson_jobs_course ON lesson_jobs(client_id,(metadata->>'course_id'));
 CREATE INDEX IF NOT EXISTS lesson_jobs_documents ON lesson_jobs USING gin ((metadata->'document_ids'));
 """
@@ -146,7 +158,9 @@ class LessonRepository(JobRepository):
             return {}
         with self.connect() as conn:
             return {str(row["job_id"]): row["digest"] for row in conn.execute("""SELECT job_id,
-                result->>'result_sha256' AS digest FROM lesson_jobs WHERE job_id=ANY(%s::uuid[])
+                CASE WHEN EXISTS (SELECT 1 FROM lesson_content_deletions d WHERE d.job_id=lesson_jobs.job_id
+                    AND d.completed_at IS NULL) THEN NULL ELSE result->>'result_sha256' END AS digest
+                FROM lesson_jobs WHERE job_id=ANY(%s::uuid[])
                 AND result ? 'result_sha256'""", (job_ids,)).fetchall()}
 
     def accept_revision(self, conn, job_id, client_id, fingerprint, metadata, pipeline_version):
@@ -162,6 +176,8 @@ class LessonRepository(JobRepository):
         # Apply ownership/course/availability filters BEFORE pagination. A8
         # exposes metadata only; A5 rechecks artifacts and audits playback.
         filters = ["j.client_id=%s", "j.status='DONE'", "j.cleanup_requested_at IS NULL",
+                   "j.content_deletion_requested_at IS NULL",
+                   "NOT EXISTS (SELECT 1 FROM lesson_content_deletions d WHERE d.job_id=j.job_id AND d.completed_at IS NULL)",
                    "j.metadata->'revision_request' IS NULL",
                    "NOT (j.result ? 'replacement_target_job_id')",
                    "j.expires_at>clock_timestamp()",
@@ -362,8 +378,15 @@ class LessonRepository(JobRepository):
             return conn.execute(
                 """SELECT job_id FROM lesson_jobs WHERE
                 (cleanup_requested_at IS NOT NULL AND cleanup_completed_at IS NULL)
-                OR result ? 'replacement_cleanup_jobs' ORDER BY cleanup_requested_at NULLS LAST LIMIT 20"""
+                OR result ? 'replacement_cleanup_jobs'
+                OR EXISTS (SELECT 1 FROM lesson_content_deletions d WHERE d.job_id=lesson_jobs.job_id AND d.completed_at IS NULL)
+                ORDER BY cleanup_requested_at NULLS LAST LIMIT 20"""
             ).fetchall()
+
+    def pending_content_deletion(self, job_id):
+        with self.connect() as conn:
+            return bool(conn.execute("""SELECT 1 FROM lesson_content_deletions
+                WHERE job_id=%s AND completed_at IS NULL LIMIT 1""", (job_id,)).fetchone())
 
     def claim_callback(self, maximum):
         with self.connect() as conn:

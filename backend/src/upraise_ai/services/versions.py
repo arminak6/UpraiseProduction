@@ -172,6 +172,10 @@ class VersionCatalog:
                     "max_final_output_corrections": 2}).model_dump(),
                 "interrupts": PipelineVersion(version=INTERRUPT_PIPELINE_VERSION, parameters={
                     "source_characters": settings.interrupt_source_characters, "grounding_verifier_enabled": False}).model_dump(),
+                "generated_content_deletion": PipelineVersion(
+                    version=source_constant("workflows/lesson_deletion.py", "DELETION_VERSION"),
+                    parameters={"selected_level_supported": True, "sources_preserved": True,
+                                "success_status": 204}).model_dump(),
             },
             "cognitive_load": CognitiveLoadVersion(fusion_rule=FusionRule(), threshold_method=ThresholdMethod(
                 version=COGNITIVE_LOAD_POLICY_VERSION, value=COGNITIVE_LOAD_THRESHOLD)).model_dump(),

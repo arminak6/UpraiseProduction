@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import api_client
 import streamlit as st
+from generated_deletion import open_generated_deletion
 from learning import binding, expired, readable_text
 from revision_progress import render_revision_progress
 from voice_picker import render_language_voice
@@ -544,6 +545,8 @@ def render_result(connection, state, job, show_response):
             st.json({name: chunk.get(name) for name in ("content_unit_id", "sources", "reviewer_report", "ssml", "ssml_parts")})
             st.caption("Automated review findings are evidence for human review, not a human approval decision.")
         render_revision(connection, state, job, variant, chunk, show_response)
+        st.button("Delete generated content · B7", key="iw_open_b7", on_click=open_generated_deletion,
+                  args=(job["job_id"], level, binding(connection)))
     for key in ("result_response", "audio_response"):
         if job.get(key):
             with st.expander("A5 HTTP details · " + key, expanded=not job[key].successful):

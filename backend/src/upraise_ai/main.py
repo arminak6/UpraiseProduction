@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from upraise_ai.api.authoring import router as authoring_router
+from upraise_ai.api.generated_content import router as generated_content_router
 from upraise_ai.api.operations import router as operations_router
 from upraise_ai.api.runtime import router as runtime_router
 from upraise_ai.core.config import get_settings
@@ -145,5 +146,6 @@ async def database_error(request, error):
 
 
 app.include_router(authoring_router)
+app.include_router(generated_content_router)
 app.include_router(runtime_router)
 app.include_router(operations_router)

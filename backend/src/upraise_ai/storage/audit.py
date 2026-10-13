@@ -83,6 +83,16 @@ class AuditRepository:
                 (event_id, job["job_id"], Jsonb(self.details(details))),
             )
 
+    def generated_content_deleted(self, job, operation):
+        identity = f"generated-content-deleted:{operation['deletion_id']}"
+        details = {"deletion_id": str(operation["deletion_id"]), "course_id": job["metadata"]["course_id"],
+                   "learner_level": None if operation["level_key"] == "*" else operation["level_key"],
+                   "levels": operation["levels"]}
+        with psycopg.connect(self.dsn, connect_timeout=5) as conn:
+            conn.execute("""INSERT INTO lesson_audit(event_id,job_id,event_type,details)
+                VALUES (%s,%s,'GENERATED_CONTENT_DELETED',%s) ON CONFLICT(event_id) DO NOTHING""",
+                (uuid5(NAMESPACE_URL, identity), job["job_id"], Jsonb(self.details(details))))
+
     def learner_interrupt(self, job, session_id, request_id, details):
         event_id = uuid5(NAMESPACE_URL, f"interrupt:{session_id}:{request_id}")
         with psycopg.connect(self.dsn, connect_timeout=5, options="-c statement_timeout=5000") as conn:

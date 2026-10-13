@@ -311,6 +311,19 @@ class IngestionWorkspaceTests(unittest.TestCase):
             self.assertEqual(submitted.kwargs["json_body"]["chunk_id"], self.chunks[2])
             self.assertNotIn("apply_to_all_levels", submitted.kwargs["json_body"])
             self.assertEqual(app.selectbox(key="iw_field_job").value, self.revision)
+
+    def test_b7_link_prefills_selected_lesson_level_without_deleting(self):
+        with patch("api_client.request", side_effect=self.response) as send:
+            app = self.app()
+            self.load_draft(app)
+            app.selectbox(key="iw_field_result_level").set_value("advanced").run()
+            button(app, "Delete generated content · B7").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.radio(key="page").value, "Delete teaching content (B7)")
+            self.assertEqual(app.text_input(key="b7_field_job").value, self.lesson)
+            self.assertEqual(app.text_input(key="b7_field_level").value, "advanced")
+            self.assertFalse(app.checkbox(key="b7_field_confirm").value)
+            self.assertEqual(sum(call.args[1] == "DELETE" for call in send.call_args_list), 0)
             self.assertIn(self.lesson, app.session_state["ingestion_workspace"]["jobs"])
             count = send.call_count
             app.run()

@@ -1,5 +1,6 @@
 import hashlib
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -88,6 +89,12 @@ class LessonService:
 
     def result(self, row, learner_level=None):
         row = self.jobs.get(row["job_id"])
+        if row.get("content_deletion_requested_at"):
+            raise IngestionError("JOB_NOT_FOUND", status=404)
+        if learner_level in row.get("deleted_levels", []):
+            raise IngestionError("LESSON_LEVEL_NOT_FOUND", status=404)
+        if self.jobs.pending_content_deletion(row["job_id"]):
+            raise IngestionError("LESSON_DELETION_PENDING", status=503, retryable=True)
         if row["cleanup_requested_at"] or (row["expires_at"] and row["expires_at"] <= datetime.now(UTC)):
             raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
         if row["status"] != "DONE":
@@ -150,6 +157,11 @@ class LessonService:
         self.complete_cleanup(job_id)
 
     def complete_cleanup(self, job_id):
+        from upraise_ai.workflows.lesson_deletion import complete_generated_deletions
+        complete_generated_deletions(self, str(job_id))
+        self._complete_output_cleanup(job_id)
+
+    def _complete_output_cleanup(self, job_id):
         current = self.jobs.get(job_id)
         if current and current.get("result"):
             target = current["result"].get("replacement_target_job_id") or str(job_id)
@@ -178,6 +190,12 @@ class LessonService:
                 conn.execute("DELETE FROM lesson_chunk_plans WHERE job_id=%s", (job_id,))
                 conn.execute("UPDATE lesson_jobs SET metadata=metadata-'revision_request',result=NULL WHERE job_id=%s", (job_id,))
             if row.get("content_deletion_requested_at"):
+                # B7 artifact directories have durable deletion-operation IDs,
+                # rather than processing-job rows. A2 must remove them too.
+                for operation in conn.execute("SELECT deletion_id FROM lesson_content_deletions WHERE job_id=%s", (job_id,)):
+                    identifier = str(operation["deletion_id"])
+                    with nullcontext() if identifier == str(job_id) else self.staging.artifact_lock(identifier):
+                        self.staging.remove(identifier)
                 self.jobs.erase_content(conn, job_id)
                 self.audit.lesson(row, "CONTENT_DELETED", {"course_id": row["metadata"]["course_id"],
                                                           "reason": row["content_deletion_reason"]})

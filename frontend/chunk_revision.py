@@ -4,6 +4,7 @@ from uuid import UUID
 
 import api_client
 import streamlit as st
+from generated_deletion import open_generated_deletion
 from learning import binding, course_label, expired, readable_text
 from revision_progress import render_revision_progress
 
@@ -60,6 +61,8 @@ def render_chunk_revision(connection, show_response):
     if lesson and isinstance(lesson.get("chunks"), list) and lesson["chunks"]:
         st.caption("Loaded lesson job: " + lesson["job_id"])
         st.write(f"Language: {lesson['language']} · Level: {lesson['learner_level']} · Voice: {lesson['voice']}")
+        st.button("Delete generated content · B7", key="a7_open_b7", on_click=open_generated_deletion,
+                  args=(lesson["job_id"], lesson["learner_level"], binding(connection)))
         chunk_context = (lesson["job_id"], lesson["learner_level"])
         if state.get("chunk_context") != chunk_context:
             state["chunk_context"] = chunk_context

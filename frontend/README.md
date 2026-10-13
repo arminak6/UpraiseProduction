@@ -269,6 +269,15 @@ connect 10 seconds); health uses 5 seconds and status checks 15 seconds.
 
 ## Checks and dependencies
 
+**Delete teaching content (B7)** manages generated lessons independently of
+ingested sources. Choose a prepared lesson/level or enter a known job UUID
+(including expired retained text). Selected level is the default; All generated
+levels is explicit. Confirm the displayed scope, then click Delete. Changing the
+target resets confirmation. Cleanup503 retains the same target for a manual Retry;
+no deletion is automatic. Success refreshes the list and clears cached text/audio.
+The A5 workspace and A7 pages link to B7 with their current lesson and level.
+Backend authorization requires `lessons:write`. See [B7](../backend/docs/b7.md).
+
 Streamlit 1.64.0 and httpx 0.28.1 are pinned in requirements.txt. Docker uses
 Python 3.12.14; no host Python is required. The maintained interaction/client
 checks use standard unittest and Streamlit AppTest, without another dependency:

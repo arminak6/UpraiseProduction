@@ -56,6 +56,13 @@ def publish_replacement(jobs, staging, conn, job, revised, ttl, *, legacy=False)
             or target["content_deletion_requested_at"] or target["cleanup_requested_at"]
             or target["status"] != "DONE" or target["expires_at"] <= datetime.now(UTC)):
         raise IngestionError("REVISION_TARGET_UNAVAILABLE", status=409)
+    levels = (set(request.get("target_chunk_sha256_by_level", {})) if request.get("apply_to_all_levels")
+              else {job["metadata"]["options"]["learner_level"]})
+    if levels.intersection(target["deleted_levels"]):
+        raise IngestionError("REVISION_TARGET_LEVEL_DELETED", status=409)
+    if conn.execute("""SELECT 1 FROM lesson_content_deletions
+        WHERE job_id=%s AND completed_at IS NULL LIMIT 1""", (target_id,)).fetchone():
+        raise IngestionError("LESSON_DELETION_PENDING", status=503, retryable=True)
     current = load_current(staging, target)
     selected = next(chunk for chunk in revised.chunks if chunk.chunk_id == str(request["chunk_id"]))
     all_levels = request.get("apply_to_all_levels", False)

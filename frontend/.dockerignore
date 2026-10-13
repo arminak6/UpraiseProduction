@@ -4,6 +4,7 @@
 !ingestion_workspace.py
 !voice_picker.py
 !revision_progress.py
+!generated_deletion.py
 !operations.py
 !chunk_revision.py
 !chunk_end.py

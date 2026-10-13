@@ -71,6 +71,12 @@ the original Word inventory for reference.
 | B5 | `POST /v1/sessions/{id}/end` | Clear chat, cognitive-load state and counters; 204; also clean up on inactivity TTL |
 | B6 | `POST /v1/sessions/{id}/telemetry` | Consent-gated derived telemetry; 202 with no values, 403 without consent; update cognitive-load and prompt-guard state in memory only |
 
+User-approved extension2026-10-13: **B7**, `DELETE /v1/lesson-jobs/{lesson_job_id}`,
+with optional `learner_level`, permanently removes one generated difficulty or
+all levels of a selected lesson. Sources remain; success204/empty. It requires
+author `lessons:write` permission and is independent of learner sessions.
+See [B7](b7.md); B3/B6 keep their reserved responsibilities.
+
 ## C operations and administration APIs
 
 | ID | Original method and path | Responsibility and intended behavior |
