@@ -35,9 +35,16 @@ class Settings(BaseSettings):
     describe_images: bool = True
     max_pdf_size_mb: int = Field(100, ge=1, le=500)
     max_pdf_pages: int = Field(500, ge=1, le=5000)
+    max_csv_size_mb: int = Field(100, ge=1, le=500)
+    max_csv_rows: int = Field(100000, ge=1, le=1000000)
+    max_csv_columns: int = Field(256, ge=1, le=10000)
+    max_word_size_mb: int = Field(100, ge=1, le=500)
+    max_word_uncompressed_mb: int = Field(500, ge=1, le=2000)
+    word_conversion_timeout_seconds: int = Field(180, ge=10, le=900)
+    word_visual_fallback: bool = True
     chunk_max_tokens: int = Field(600, ge=100, le=2000)
     chunk_overlap_tokens: int = Field(60, ge=0)
-    pipeline_version: str = "pdf-ingestion-v1.4"
+    pipeline_version: str = "document-ingestion-v1.6"
     max_attempts: int = Field(3, ge=1, le=10)
     lease_seconds: int = Field(120, ge=30)
     worker_poll_seconds: float = Field(2, ge=0.1)
@@ -155,14 +162,17 @@ class Settings(BaseSettings):
     operations_provider_ttl_seconds: int = Field(900, ge=60, le=3600)
     operations_worker_ttl_seconds: int = Field(150, ge=30, le=600)
     operations_kill_switch: bool = False
+    operations_local_admin: bool = False
     operations_kill_switch_courses: set[str] = Field(default_factory=set)
-    operations_disabled_features: set[Literal["answers", "stt", "tts", "generation"]] = Field(default_factory=set)
+    operations_disabled_features: set[Literal["answers", "stt", "tts", "generation", "adaptive_levels"]] = Field(default_factory=set)
     operations_course_disabled_features: dict[
-        str, set[Literal["answers", "stt", "tts", "generation"]]
+        str, set[Literal["answers", "stt", "tts", "generation", "adaptive_levels"]]
     ] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def operations_courses_are_bounded(self):
+        if self.operations_local_admin and not (self.environment == "development" and self.local_test_mode):
+            raise ValueError("operations_local_admin requires explicit development local_test_mode")
         courses = self.operations_kill_switch_courses | self.operations_course_disabled_features.keys()
         if len(courses) > 1000 or any(not key.strip() or key != key.strip() or len(key) > 120 for key in courses):
             raise ValueError("operations course controls require up to 1000 nonempty course IDs of at most 120 characters")
@@ -188,6 +198,13 @@ class Settings(BaseSettings):
             "describe_images",
             "chunk_max_tokens",
             "chunk_overlap_tokens",
+            "max_csv_size_mb",
+            "max_csv_rows",
+            "max_csv_columns",
+            "max_word_size_mb",
+            "max_word_uncompressed_mb",
+            "word_conversion_timeout_seconds",
+            "word_visual_fallback",
         )
         digest = hashlib.sha256(
             json.dumps({k: getattr(self, k) for k in keys}, sort_keys=True).encode()

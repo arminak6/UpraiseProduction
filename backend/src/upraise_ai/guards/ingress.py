@@ -51,8 +51,11 @@ def ingress(
         if not local:
             raise HTTPException(403, "LOCAL_TEST_NETWORK_REQUIRED")
         request.state.auth_mode = "local-test"
+        scopes = {"documents:write", "documents:read", "lessons:write", "jobs:read", "jobs:write", "sessions:write"}
+        if settings.operations_local_admin:
+            scopes.add("admin:operations")
         return Principal(
-            "local-test-client", (), frozenset({"documents:write", "documents:read", "lessons:write", "jobs:read", "jobs:write", "sessions:write"}),
+            "local-test-client", (), frozenset(scopes),
             local_test=True,
         )
     if not (

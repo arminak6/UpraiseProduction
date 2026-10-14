@@ -110,11 +110,14 @@ async def ingest_document(request: Request, response: Response, principal: Princ
                 raise IngestionError("UNEXPECTED_OR_DUPLICATE_FIELD", status=400)
             upload = form.get("file")
             if not isinstance(upload, UploadFile) or not upload.filename:
-                raise IngestionError("PDF_UPLOAD_REQUIRED", status=400)
+                raise IngestionError("DOCUMENT_UPLOAD_REQUIRED", status=400)
             filename = PurePosixPath(upload.filename.replace("\\", "/")).name
             data = DocumentInput.model_validate({k: form[k] for k in FIELDS if k in form})
             principal.require_course(data.course_id)
-            metadata = IngestionMetadata(**data.model_dump(), source_filename=filename)
+            from upraise_ai.services.formats import upload_format
+
+            source_format = upload_format(filename, upload.content_type)
+            metadata = IngestionMetadata(**data.model_dump(), source_filename=filename, source_format=source_format)
             result = await asyncio.to_thread(submission.submit, metadata, upload.file, principal, key)
     elif content_type == "application/json":
         try:

@@ -3,7 +3,16 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from upraise_ai.schemas.revisions import LessonRevision, RevisionRequest
 
@@ -66,6 +75,17 @@ class ReviewIssue(BaseModel):
     category: Literal["accuracy", "citations", "clarity", "bias", "coverage", "source", "speech"]
     message: str = Field(min_length=1, max_length=4000)
     pages: list[StrictInt] = Field(default_factory=list)
+    row_ranges: list[dict[str, int]] = Field(default_factory=list)
+    source_blocks: list[int] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def serialize_issue(self, handler):
+        data = handler(self)
+        if not self.row_ranges:
+            data.pop("row_ranges", None)
+        if not self.source_blocks:
+            data.pop("source_blocks", None)
+        return data
 
 
 class ReviewReport(BaseModel):
@@ -101,6 +121,24 @@ class LessonSource(BaseModel):
     pages: list[int]
     source_chunk_ids: list[str]
     quality_status: str
+    source_format: str = "pdf"
+    source_blocks: list[int] = Field(default_factory=list)
+    row_ranges: list[dict[str, int]] = Field(default_factory=list)
+    word_references: list[dict] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def serialize_source(self, handler):
+        data = handler(self)
+        if self.source_format == "pdf":
+            for field in ("source_format", "source_blocks", "row_ranges"):
+                data.pop(field, None)
+        if self.source_format not in {"doc", "docx"}:
+            data.pop("word_references", None)
+        return data
+
+    @property
+    def citation_numbers(self):
+        return self.pages if self.source_format == "pdf" else self.source_blocks
 
 
 class Viseme(BaseModel):

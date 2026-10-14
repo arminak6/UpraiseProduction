@@ -300,7 +300,7 @@ class SessionStore:
         with self._lock:
             self._ensure_current_locked(session)
 
-    def chunk_end(self, session, lesson_id, chunk_id, score, audit):
+    def chunk_end(self, session, lesson_id, chunk_id, score, audit, *, adaptive_enabled=True):
         """Keep only the latest consented score in RAM; never extend the TTL.
 
         Audit does not receive the measurement or decision. Do not hold the
@@ -314,10 +314,11 @@ class SessionStore:
                 raise HTTPException(404, "LESSON_CHUNK_NOT_FOUND")
             index = session.chunk_ids.index(chunk_id)
         audit(session, chunk_id)
+        enabled = adaptive_enabled() if callable(adaptive_enabled) else adaptive_enabled
         with self._lock:
             self._ensure_current_locked(session)
             session.current_chunk_index = index
-            session.cognitive_load_state = score if "telemetry" in session.binding.consent_scope else None
+            session.cognitive_load_state = score if enabled and "telemetry" in session.binding.consent_scope else None
             return cognitive_load_decision(score) if session.cognitive_load_state is not None else "PROCEED"
 
     def finish_interrupt(self, session, request_id, fingerprint, response, message):

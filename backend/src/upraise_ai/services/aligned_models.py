@@ -13,6 +13,7 @@ from upraise_ai.services.aligned_responses import ResponseFormatError, parse_res
 from upraise_ai.services.lesson_prompts import learner_level_system_prompt
 from upraise_ai.services.lesson_translation import language_name
 from upraise_ai.services.revision_models import validate_revision_text
+from upraise_ai.services.source_references import citation_policy
 from upraise_ai.services.v3.math_speech_v4 import auto_delimit_math_for_speech, has_unwrapped_math
 
 ALIGNMENT_PROMPT_VERSION = "aligned-teaching-v6"
@@ -228,7 +229,7 @@ def validate_material_format(unit, text):
     # Citations may be regrouped, but cannot invent pages outside this unit.
     for match in re.finditer(r"\[(p|pp)\.\s*(\d+)(?:\s*-\s*(\d+))?\]", text):
         start, end = int(match[2]), int(match[3] or match[2])
-        if end < start or end-start > 5000 or not set(range(start, end+1)).issubset(unit.source.pages):
+        if end < start or end-start > 5000 or not set(range(start, end+1)).issubset(unit.source.citation_numbers):
             raise IngestionError("LESSON_CITATIONS_INVALID", retryable=True)
     return text
 
@@ -238,6 +239,7 @@ def reviewed(models, section, units, texts, language, learner_level, profiles):
                "candidates": texts.model_dump(mode="json"), "source_context": section["chunks"],
                "target_language": language_name(language), "learner_level": learner_level}
     policy = REVIEW_POLICY
+    policy += citation_policy(section)
     if section.get("revision_context"):
         payload["revision_context"] = section["revision_context"]
         policy += "\n" + REVISION_REVIEW_POLICY
@@ -284,7 +286,8 @@ def adapt_units(models, section, units, language, *, learner_level, profiles, ta
                "target_words": target_words, "max_words": max_words}
     if current:
         payload["current_explanations_to_shorten"] = current.model_dump(mode='json')
-    limits = f"\nWrite entirely in {language_name(language)}. Aim for {target_words} words per unit; never exceed {max_words} words or 16000 characters."
+    limits = (f"\nWrite entirely in {language_name(language)}. Aim for {target_words} words per unit; "
+              f"never exceed {max_words} words or 16000 characters." + citation_policy(section))
     drafts = structured(models, POLICY + limits + "\n" + learner_level_system_prompt(
         learner_level, "generator", profiles=profiles), payload, AlignedTexts, "aligned_unit_draft", expected_units=units)
     if notify:

@@ -89,6 +89,30 @@ class AppTests(unittest.TestCase):
             self.assertEqual(text_input(app, 'Bearer token').value, '')
             self.assertFalse(app.exception)
 
+    def test_standalone_csv_upload_uses_csv_mime_and_hash(self):
+        import hashlib
+        from types import SimpleNamespace
+
+        import streamlit as st
+        original = st.file_uploader
+        raw = b"Concept,Definition\nTape,Memory\n"
+        upload = SimpleNamespace(name="teaching.csv", getvalue=lambda: raw, getbuffer=lambda: raw)
+        def uploader(label, *args, **kwargs):
+            if label == "Document (PDF, CSV or Word)":
+                self.assertEqual(kwargs["type"], ["pdf", "csv", "docx", "doc"])
+                return upload
+            return original(label, *args, **kwargs)
+        accepted = Result("POST", "/v1/documents", 202, 1,
+                          {"document_id": str(uuid4()), "job_id": str(uuid4())}, True)
+        with patch("api_client.request", return_value=accepted) as send, patch("streamlit.file_uploader", side_effect=uploader):
+            app = self.app()
+            for key, value in [("course_id", "25"), ("activity_id", "310"), ("source_ref", "file-1")]:
+                app.text_input(key=key).set_value(value)
+            button(app, "Send A1 request").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(send.call_args.kwargs["upload"], ("teaching.csv", raw, "text/csv"))
+            self.assertEqual(send.call_args.kwargs["fields"]["content_hash"], hashlib.sha256(raw).hexdigest())
+
     def test_signed_submission_tracks_location_without_resubmission_on_rerun(self):
         job = str(uuid4())
         accepted = Result('POST', '/v1/documents', 202, 12, {'document_id': 'document', 'job_id': job}, True,

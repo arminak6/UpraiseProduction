@@ -43,8 +43,9 @@ not an automatically loaded file.
   authoring workflow through the real HTTP APIs. Four steps keep the material,
   source documents, generation inputs and job results connected:
 
-  1. **Ingest material — A1** accepts a PDF or signed Moodle URL and computes
-     the uploaded PDF's SHA-256 for `content_hash`. Suggested course/activity IDs
+  1. **Ingest material — A1** accepts a PDF/CSV/Word (.docx/.doc) upload or signed Moodle PDF URL and computes
+     the uploaded file's SHA-256 for `content_hash`. CSV uses UTF-8 with headers
+     and comma/semicolon/tab separators. Suggested course/activity IDs
      and source language sit in the form's **Course and activity** expander.
      Document/job UUIDs come from the API and carry into draft generation.
   2. **Manage material — A2** contains only **Show ingested material** and
@@ -64,7 +65,7 @@ not an automatically loaded file.
      **Course material** selector. Course/activity/document IDs fill automatically
      from that selection and are read-only; A1 inputs stay separate. Set the
      editable generation parameters, then click **Generate lesson · A3**.
-     Defaults are 5 source pages, 200 target words and a 500-word maximum.
+     Defaults are 5 PDF pages, CSV row groups or Word source blocks, 200 target words and a 500-word maximum.
      Output language/voice and optional push callback remain editable. English
      (`en`) and Italian (`it`) have a Polly voice dropdown showing accent and
      gender; locale tags such as `en-GB` narrow the choices. Language changes
@@ -203,7 +204,7 @@ not an automatically loaded file.
   activity, source-language, Moodle file ID, source hash/revision and optional
   version. Uploaded content_hash can be filled from local SHA-256 as a
   convenience; the backend does not verify declared hashes. Any filename/MIME
-  can be submitted for testing; only readable PDFs are currently processed.
+  can be submitted for testing; readable PDFs, supported UTF-8 CSV and Word DOCX/DOC are processed.
   Acceptance returns document_id and ingestion job_id, plus the A4 Location header.
 - **Processing status — A4**: automatically remembers A1's Location header.
   Refresh manually or poll every five seconds. Polling stops after DONE/FAILED/CANCELLED
@@ -222,11 +223,15 @@ not an automatically loaded file.
   A1 pre-fills the latest accepted document/course. Deletion requires an explicit
   button click and does not resubmit on navigation. Invalid UUIDs are rejected
   locally; failed deletes retain their HTTP response for retry.
-- **Health — C1/C2/C5**: explicit GET /health and /ready checks, plus optional-course
+- **Health — C1/C2/C3/C5**: explicit GET /health and /ready checks, plus optional-course
   GET /v1/status. Shows feature states/reasons including UNKNOWN. Credential/course
   changes clear old results; checks do not invoke AI. **Check versions** calls
   GET /v1/version for deployed model/prompt/pipeline/policy metadata.
-  See [C1/C2](../backend/docs/c1-c2.md) and [C5](../backend/docs/c5.md).
+  The C3 form submits a global/course runtime disable or release only after explicit
+  confirmation and Apply. Changing target/action/credentials resets confirmation;
+  success clears cached C2 state, and navigation never resubmits. Admin scope is
+  required; ordinary local testing needs the additional documented admin opt-in.
+  See [C1/C2](../backend/docs/c1-c2.md), [C3](../backend/docs/c3.md) and [C5](../backend/docs/c5.md).
 - **API explorer**: load live OpenAPI and send GET/POST/PUT/PATCH/DELETE requests
   with query parameters and JSON bodies, including negative tests. Use A1's
   dedicated form for multipart delivery.

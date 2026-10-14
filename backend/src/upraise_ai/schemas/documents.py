@@ -1,9 +1,9 @@
 import re
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 
 class DocumentInput(BaseModel):
@@ -36,6 +36,16 @@ class UrlDocumentInput(DocumentInput):
 
 class IngestionMetadata(DocumentInput):
     source_filename: str = Field(min_length=1, max_length=300)
+    source_format: Literal["pdf", "csv", "docx", "doc"] = "pdf"
+
+    @model_serializer(mode="wrap")
+    def serialize_metadata(self, handler):
+        data = handler(self)
+        # Preserve the existing PDF metadata/retry shape. Older stored jobs
+        # without this internal field continue to default to PDF.
+        if self.source_format == "pdf":
+            data.pop("source_format", None)
+        return data
 
     @property
     def document_title(self) -> str:
@@ -110,6 +120,20 @@ class SourceRegion(BaseModel):
     bounding_box: BoundingBox | None = None
 
 
+class RowRange(BaseModel):
+    """CSV record numbers, header = 1; quoted newlines remain one record."""
+
+    start: int = Field(ge=2)
+    end: int = Field(ge=2)
+
+    @field_validator("end")
+    @classmethod
+    def ordered(cls, value, info):
+        if value < info.data.get("start", value):
+            raise ValueError("row range is reversed")
+        return value
+
+
 class DocumentElement(BaseModel):
     element_id: str
     element_index: int
@@ -156,6 +180,10 @@ class Chunk(BaseModel):
     embedding_text: str
     token_count: int
     page_numbers: list[int] = Field(default_factory=list)
+    source_format: Literal["pdf", "csv", "docx", "doc"] = "pdf"
+    source_blocks: list[int] = Field(default_factory=list)
+    word_references: list[dict[str, Any]] = Field(default_factory=list)
+    row_ranges: list[RowRange] = Field(default_factory=list)
     heading_path: list[str] = Field(default_factory=list)
     element_ids: list[str] = Field(default_factory=list)
     element_types: list[ElementType] = Field(default_factory=list)
@@ -163,6 +191,13 @@ class Chunk(BaseModel):
     element_quality: dict[str, ContentQuality] = Field(default_factory=dict)
     source_regions: list[SourceRegion] = Field(default_factory=list)
     element_source_regions: dict[str, list[SourceRegion]] = Field(default_factory=dict)
+
+    @model_serializer(mode='wrap')
+    def serialize_chunk(self, handler):
+        data = handler(self)
+        if self.source_format not in {'doc', 'docx'}:
+            data.pop('word_references', None)
+        return data
 
 
 class ProcessedDocument(BaseModel):
@@ -176,6 +211,9 @@ class ProcessedDocument(BaseModel):
     embedding_model_id: str
     embedding_dimension: int
     page_count: int
+    row_count: int | None = None
+    column_count: int | None = None
+    source_block_count: int | None = None
     elements: list[DocumentElement]
     chunks: list[Chunk]
     warnings: list[str]

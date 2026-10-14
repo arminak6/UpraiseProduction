@@ -69,10 +69,12 @@ class JobRepository:
         from upraise_ai.storage.lessons import LessonRepository
 
         LessonRepository(self.dsn).migrate()
+        from upraise_ai.storage.controls import SCHEMA as CONTROLS_SCHEMA
         from upraise_ai.storage.operations import SCHEMA as OPERATIONS_SCHEMA
 
         with self.connect() as conn:
             conn.execute(OPERATIONS_SCHEMA)
+            conn.execute(CONTROLS_SCHEMA)
 
     def accept(
         self, job_id, document_id, client_id, key, fingerprint, metadata, pipeline_version,
@@ -262,6 +264,12 @@ class JobRepository:
             WHERE job_id=%s AND lease_token=%s""",
             (Jsonb(result), token, job_id, token),
         )
+
+    def pause_for_control(self, conn, job_id, token, code):
+        conn.execute("""UPDATE ingestion_jobs SET status='QUEUED',step='CONTROL_PAUSED',error_code=%s,
+            attempts=greatest(0,attempts-1),lease_token=NULL,lease_until=NULL,
+            available_at=clock_timestamp()+interval '2 seconds',updated_at=clock_timestamp()
+            WHERE job_id=%s AND lease_token=%s""", (code, job_id, token))
 
     def fail(self, conn, job_id, token, code, retry, delay):
         conn.execute(

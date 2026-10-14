@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import api_client
 import streamlit as st
+from api_client import upload_mime
 from generated_deletion import open_generated_deletion
 from learning import binding, expired, readable_text
 from revision_progress import render_revision_progress
@@ -35,7 +36,7 @@ def initialize(connection):
                 del st.session_state[key]
         defaults = {
             "course": suggested_number(), "activity": suggested_number(), "source": suggested_number(),
-            "language": "en", "version": "1", "source_mode": "PDF upload", "hash": "",
+            "language": "en", "version": "1", "source_mode": "PDF / CSV / Word upload", "hash": "",
             "lesson": "test-lesson-" + suggested_number(), "output_language": "en", "voice": "Joanna",
             "document_ids": "", "a1_key": str(uuid4()), "a3_key": str(uuid4()),
             "stage": STAGES[0], "window": 5, "words": 200, "maximum": 500,
@@ -44,6 +45,8 @@ def initialize(connection):
             st.session_state["iw_field_" + key] = value
     if "next_job" in state:
         st.session_state["iw_field_job"] = state.pop("next_job")
+    if st.session_state.get("iw_field_source_mode") in {"PDF upload", "PDF / CSV upload"}:
+        st.session_state["iw_field_source_mode"] = "PDF / CSV / Word upload"
     if st.session_state.get("iw_field_stage") not in STAGES:
         st.session_state["iw_field_stage"] = STAGES[0]
     return state
@@ -168,18 +171,18 @@ def render_material(connection, state, show_response):
         right.text_input("Activity ID", key="iw_field_activity", max_chars=120, on_change=context_changed, args=(state,))
         st.text_input("Source language", key="iw_field_language", max_chars=35)
         st.caption("Suggested test IDs are editable. Use authorized course IDs with your production gateway.")
-    mode = st.radio("Document source", ["PDF upload", "Signed Moodle URL"], horizontal=True, key="iw_field_source_mode")
+    mode = st.radio("Document source", ["PDF / CSV / Word upload", "Signed Moodle URL"], horizontal=True, key="iw_field_source_mode")
     st.button("Prepare a new document", on_click=new_document, args=(state,))
     with st.form("iw_ingestion"):
         left, right = st.columns(2)
         source = left.text_input("Source / Moodle file ID", key="iw_field_source", max_chars=200)
         version = right.text_input("Source version (optional)", key="iw_field_version", max_chars=120)
-        if mode == "PDF upload":
-            upload = st.file_uploader("Teaching material (PDF)", type=["pdf"], max_upload_size=100,
+        if mode == "PDF / CSV / Word upload":
+            upload = st.file_uploader("Teaching material (PDF, CSV or Word)", type=["pdf", "csv", "docx", "doc"], max_upload_size=100,
                                       key=f"iw_upload_{state['upload_nonce']}")
             url = ""
             content_hash = ""
-            st.caption("content_hash will be filled with the uploaded PDF's SHA-256.")
+            st.caption("content_hash is filled from the file. Word: .docx or .doc. CSV: UTF-8 with a header row.")
         else:
             upload = None
             url = st.text_input("Signed Moodle URL", type="password", key="iw_field_url")
@@ -193,14 +196,14 @@ def render_material(connection, state, show_response):
             fields = {**context(), "language": st.session_state["iw_field_language"].strip(),
                       "source_ref": source.strip(), "content_hash": content_hash.strip()}
             file = None
-            if mode == "PDF upload":
+            if mode == "PDF / CSV / Word upload":
                 if upload is None:
-                    raise ValueError("Select a PDF to upload.")
+                    raise ValueError("Select a PDF, CSV or Word file to upload.")
                 data = upload.getvalue()
                 if len(data) > 100 * 1024 * 1024:
-                    raise ValueError("The PDF must be at most 100 MB.")
+                    raise ValueError("The file must be at most 100 MB.")
                 fields["content_hash"] = hashlib.sha256(data).hexdigest()
-                file = (upload.name, data, "application/pdf")
+                file = (upload.name, data, upload_mime(upload.name))
             elif not url.strip():
                 raise ValueError("Enter a signed Moodle URL.")
             if not all(fields.values()):
@@ -208,7 +211,7 @@ def render_material(connection, state, show_response):
             if version.strip():
                 fields["version"] = version.strip()
             payload = fields if file else {**fields, "moodle_url": url.strip()}
-            # Signed URLs can be renewed for a retry; the API fingerprints actual PDF bytes.
+            # Signed URLs can be renewed for a retry; the API fingerprints actual source bytes.
             check_retry(state, "a1", key.strip(), fingerprint("/v1/documents", fields, file))
             with st.spinner("Submitting material…"):
                 options = {"fields": fields, "upload": file} if file else {"json_body": payload}
@@ -393,7 +396,8 @@ def render_generation(connection, state, show_response, *, refresh_on_open=False
             left, right = st.columns(2)
             left.text_input("Course ID", key="iw_field_draft_course", disabled=True)
             right.text_input("Activity ID", key="iw_field_draft_activity", disabled=True)
-            window = left.number_input("Source window (pages)", 1, 50, key="iw_field_window")
+            window = left.number_input("Source window size", 1, 50, key="iw_field_window",
+                                       help="PDF pages, CSV row groups or Word blocks per generation window.")
             words = right.number_input("Target chunk length (words)", 30, 1000, key="iw_field_words")
             maximum = left.number_input("Maximum chunk length (words)", 50, 2000, key="iw_field_maximum")
             st.caption("The backend's configured levels share teaching units, source scope and chunk count.")
@@ -797,7 +801,10 @@ def render_job_tracking(connection, state, show_response, *, course_job=None):
                 extraction = body.get("result")
                 if job.get("kind") == "material" and isinstance(extraction, dict):
                     pages, chunks, quality = st.columns(3)
-                    pages.metric("Source pages", extraction.get("page_count", "—"))
+                    csv = extraction.get("source_format") == "csv"
+                    word = extraction.get('source_format') in {'doc', 'docx'}
+                    pages.metric("Source rows" if csv else 'Word source blocks' if word else "Source pages",
+                                 extraction.get("row_count" if csv else 'source_block_count' if word else "page_count", "—"))
                     chunks.metric("Source chunks", extraction.get("chunk_count", "—"))
                     quality.metric("Source quality", extraction.get("quality_status", "UNVERIFIED"))
                     st.caption("DONE means extraction completed. Automated source checks do not establish human approval.")

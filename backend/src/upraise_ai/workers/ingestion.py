@@ -9,7 +9,7 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
-from upraise_ai.guards.operations import require_ai
+from upraise_ai.guards.operations import control_state, require_ai
 from upraise_ai.schemas.documents import IngestionMetadata, QualityStatus
 from upraise_ai.services.formats import get_processor
 from upraise_ai.services.versions import VersionCatalog
@@ -60,7 +60,7 @@ class IngestionWorker:
         self.vectors = vectors or VectorStore(
             settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension
         )
-        self.processor = processor or get_processor("application/pdf", settings)
+        self.processor = processor
         self.staging = StagingStore(settings.data_dir)
         self.stop = threading.Event()
         self.notify = notify
@@ -81,6 +81,13 @@ class IngestionWorker:
         """
         job_id, token = str(job["job_id"]), str(job["lease_token"])
         code, retryable = classify_error(error)
+        if code in {"AI_DISABLED", "OPERATIONS_STORAGE_UNAVAILABLE"}:
+            try:
+                with self.jobs.owned_transaction(job_id, token) as conn:
+                    self.jobs.pause_for_control(conn, job_id, token, code)
+            except (LeaseLost, psycopg.Error):
+                pass
+            return
         retry = retryable and job["attempts"] < self.settings.max_attempts
         try:
             with self.jobs.owned_transaction(job_id, token) as conn:
@@ -178,7 +185,10 @@ class IngestionWorker:
             self.audit.record(job, "ACCEPTED", {"pipeline_version": job["pipeline_version"]})
             metadata = IngestionMetadata.model_validate(job["metadata"])
             require_ai(self.settings, metadata.course_id)
-            processed, embeddings = self.processor.prepare(
+            from upraise_ai.services.formats import FORMAT_MIMES
+
+            processor = self.processor or get_processor(FORMAT_MIMES[metadata.source_format], self.settings)
+            processed, embeddings = processor.prepare(
                 self.staging.source_path(job_id),
                 metadata,
                 document_id,
@@ -202,6 +212,11 @@ class IngestionWorker:
                     # a consumer to decide whether the material is suitable.
                     "requires_review": processed.quality.status is QualityStatus.NEEDS_REVIEW,
                 }
+                if metadata.source_format == "csv":
+                    result.update(source_format="csv", row_count=processed.row_count,
+                                  column_count=processed.column_count, source_block_count=processed.source_block_count)
+                elif metadata.source_format in {"doc", "docx"}:
+                    result.update(source_format=metadata.source_format, source_block_count=processed.source_block_count)
                 self.audit.record(job, "INDEX_VERIFIED", result, attempt=True)
                 self.jobs.done(conn, job_id, token, result)
             # A DONE job + active_attempt is the authoritative activation boundary.
@@ -228,10 +243,11 @@ class IngestionWorker:
                 except Exception:
                     log.warning("Document deletion pending; recovery will retry")
                 self.job_control.recover_cleanup()
-                if self.settings.operations_kill_switch:
+                controls = control_state(self.settings)
+                if controls.killed():
                     self.stop.wait(self.settings.worker_poll_seconds)
                     continue
-                blocked = sorted(self.settings.operations_kill_switch_courses)
+                blocked = controls.blocked_courses(set())
                 filters = {"excluded_courses": blocked} if blocked else {}
                 job = self.jobs.claim(self.settings.lease_seconds, self.settings.pipeline_signature, **filters)
                 if job:

@@ -15,8 +15,16 @@ class StagingStore:
     def job_dir(self, job_id: str) -> Path:
         return self.root / str(UUID(job_id))
 
-    def source_path(self, job_id: str) -> Path:
-        return self.job_dir(job_id) / "source.pdf"
+    def source_path(self, job_id: str, source_format: str | None = None) -> Path:
+        folder = self.job_dir(job_id)
+        if source_format not in {None, "pdf", "csv", "docx", "doc"}:
+            raise ValueError("unsupported source format")
+        if source_format:
+            return folder / ("source." + source_format)
+        for extension in ("csv", "docx", "doc"):
+            if (folder / ("source." + extension)).is_file():
+                return folder / ("source." + extension)
+        return folder / "source.pdf"
 
     @contextmanager
     def artifact_lock(self, job_id: str, *, shared: bool = False):
@@ -48,7 +56,7 @@ class StagingStore:
         if not folder.exists():
             return
         for child in folder.iterdir():
-            if child.name == "source.pdf":
+            if child.name in {"source.pdf", "source.csv", "source.docx", "source.doc"}:
                 continue
             if child.is_symlink() or not child.is_dir():
                 child.unlink()
@@ -61,7 +69,7 @@ class StagingStore:
             finally:
                 os.close(fd)
 
-    def stage(self, job_id: str, stream, max_bytes: int) -> Path:
+    def stage(self, job_id: str, stream, max_bytes: int, *, source_format: str = "pdf") -> Path:
         folder = self.job_dir(job_id)
         folder.mkdir(mode=0o700)
         temporary = folder / "source.part"
@@ -71,11 +79,13 @@ class StagingStore:
                 while block := stream.read(1024 * 1024):
                     total += len(block)
                     if total > max_bytes:
-                        raise IngestionError("PDF_TOO_LARGE", status=413)
+                        code = "WORD_TOO_LARGE" if source_format in {"doc", "docx"} else (
+                            "CSV_TOO_LARGE" if source_format == "csv" else "PDF_TOO_LARGE")
+                        raise IngestionError(code, status=413)
                     destination.write(block)
                 destination.flush()
                 os.fsync(destination.fileno())
-            path = self.source_path(job_id)
+            path = self.source_path(job_id, source_format)
             temporary.replace(path)
             # Persist the rename before acknowledging acceptance.
             if os.name != "nt":

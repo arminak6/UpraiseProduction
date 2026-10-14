@@ -183,7 +183,7 @@ class IngestionWorkspaceTests(unittest.TestCase):
         data = b"%PDF-1.7 synthetic fixture"
         upload = SimpleNamespace(name="synthetic.pdf", getvalue=lambda: data)
         def uploader(label, *args, **kwargs):
-            return upload if label == "Teaching material (PDF)" else original(label, *args, **kwargs)
+            return upload if label == "Teaching material (PDF, CSV or Word)" else original(label, *args, **kwargs)
         with patch("api_client.request", side_effect=self.response) as send, patch("streamlit.file_uploader", side_effect=uploader):
             app = self.app()
             self.stage(app, 0)
@@ -191,6 +191,45 @@ class IngestionWorkspaceTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertEqual(send.call_args.kwargs["fields"]["content_hash"], hashlib.sha256(data).hexdigest())
             self.assertEqual(send.call_args.kwargs["upload"], ("synthetic.pdf", data, "application/pdf"))
+
+    def test_csv_upload_sends_csv_mime_hash_and_accepts_both_extensions(self):
+        original = st.file_uploader
+        data = b"Concept,Definition\nTape,Read write memory\n"
+        upload = SimpleNamespace(name="teaching.csv", getvalue=lambda: data)
+        def uploader(label, *args, **kwargs):
+            if label == "Teaching material (PDF, CSV or Word)":
+                self.assertEqual(kwargs["type"], ["pdf", "csv", "docx", "doc"])
+                return upload
+            return original(label, *args, **kwargs)
+        with patch("api_client.request", side_effect=self.response) as send, patch("streamlit.file_uploader", side_effect=uploader):
+            app = self.app()
+            self.stage(app, 0)
+            send.assert_not_called()
+            button(app, "Submit material · A1").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(send.call_args.kwargs["upload"], ("teaching.csv", data, "text/csv"))
+            self.assertEqual(send.call_args.kwargs["fields"]["content_hash"], hashlib.sha256(data).hexdigest())
+            app.run()
+            self.assertEqual(send.call_count, 1)
+            self.assertEqual(app.session_state["iw_field_document_ids"], self.document)
+
+    def test_word_upload_sets_mime_and_does_not_resubmit_on_rerun(self):
+        for extension, mime in [('docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+                                ('doc', 'application/msword')]:
+            data = b'Word upload fixture'
+            upload = SimpleNamespace(name='teaching.' + extension, getvalue=lambda: data)
+            original = st.file_uploader
+            def uploader(label, *args, **kwargs):
+                return upload if label == 'Teaching material (PDF, CSV or Word)' else original(label, *args, **kwargs)
+            with patch('api_client.request', side_effect=self.response) as send, patch(
+                    'streamlit.file_uploader', side_effect=uploader):
+                app = self.app()
+                self.stage(app, 0)
+                button(app, 'Submit material · A1').click().run()
+                self.assertFalse(app.exception)
+                self.assertEqual(send.call_args.kwargs['upload'], (upload.name, data, mime))
+                app.run()
+                self.assertEqual(send.call_count, 1)
 
     def test_changed_input_requires_new_key_and_validation_does_not_send(self):
         with patch("api_client.request", side_effect=self.response) as send:
@@ -572,6 +611,20 @@ class IngestionWorkspaceTests(unittest.TestCase):
             self.assertTrue(any(item.label == "Source pages" and item.value == "6" for item in app.metric))
             self.assertTrue(any("review flags" in item.value for item in app.warning))
             self.assertEqual(app.session_state["ingestion_workspace"]["documents"][self.document]["status"], "DONE")
+            self.assertFalse(app.exception)
+
+    def test_a4_csv_status_shows_rows_instead_of_pdf_pages(self):
+        with patch("api_client.request", side_effect=self.response):
+            app = self.app()
+            self.submit_signed(app)
+            self.status_body = {"job_id": self.ingestion, "document_id": self.document,
+                                "status": "DONE", "step": "DONE", "progress": 1,
+                                "result": {"source_format": "csv", "page_count": 0, "row_count": 12,
+                                           "chunk_count": 2, "quality_status": "UNVERIFIED", "requires_review": False}}
+            self.stage(app, 3)
+            button(app, "Refresh selected job · A4").click().run()
+            self.assertTrue(any(item.label == "Source rows" and item.value == "12" for item in app.metric))
+            self.assertFalse(any(item.label == "Source pages" for item in app.metric))
             self.assertFalse(app.exception)
 
     def test_a2_delete_invalidates_sources_and_loaded_delivery(self):

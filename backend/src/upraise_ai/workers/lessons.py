@@ -14,7 +14,12 @@ from psycopg.types.json import Jsonb
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError, LeaseLost
-from upraise_ai.guards.operations import blocked_generation_courses, feature_enabled, require_feature
+from upraise_ai.guards.operations import (
+    blocked_generation_courses,
+    control_state,
+    feature_enabled,
+    require_feature,
+)
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.services.aligned_models import AlignmentModelError
 from upraise_ai.services.aligned_pipeline import AlignedLessonPipeline
@@ -120,6 +125,13 @@ class LessonWorker:
 
     def failure(self, job, error):
         code, retryable = classify_error(error)
+        if code in {"AI_DISABLED", "GENERATION_DISABLED", "TTS_DISABLED", "OPERATIONS_STORAGE_UNAVAILABLE"}:
+            try:
+                with self.jobs.owned_transaction(job["job_id"], job["lease_token"]) as conn:
+                    self.jobs.pause_for_control(conn, job["job_id"], job["lease_token"], code)
+            except (LeaseLost, psycopg.Error):
+                pass
+            return
         retry = retryable and job["attempts"] < self.settings.max_attempts
         details = {"code": code}
         if isinstance(error, AlignmentModelError):
@@ -277,10 +289,12 @@ class LessonWorker:
             while not self.stop.is_set():
                 lesson_worker_heartbeat(self.settings)
                 try:
-                    if not (feature_enabled(self.settings, "generation") and feature_enabled(self.settings, "tts")):
+                    controls = control_state(self.settings)
+                    if not (feature_enabled(self.settings, "generation", state=controls)
+                            and feature_enabled(self.settings, "tts", state=controls)):
                         self.stop.wait(self.settings.worker_poll_seconds)
                         continue
-                    blocked = blocked_generation_courses(self.settings)
+                    blocked = blocked_generation_courses(self.settings, state=controls)
                     filters = {"excluded_courses": blocked} if blocked else {}
                     job = self.jobs.claim(self.settings.lease_seconds,
                                           [self.settings.lesson_signature, self.settings.lesson_v2_signature], **filters)

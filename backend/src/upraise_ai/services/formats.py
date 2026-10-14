@@ -39,6 +39,29 @@ def get_processor(mime_type, settings):
         from upraise_ai.services.pdf.processor import PdfProcessor
 
         return PdfProcessor(settings)
+    if mime_type == "text/csv":
+        from upraise_ai.services.csv_processor import CsvProcessor
+
+        return CsvProcessor(settings)
+    if mime_type in {"application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}:
+        from upraise_ai.services.word_processor import WordProcessor
+
+        return WordProcessor(settings)
     from upraise_ai.core.errors import IngestionError
 
     raise IngestionError("UNSUPPORTED_DOCUMENT_FORMAT", status=415)
+
+
+FORMAT_MIMES = {"pdf": "application/pdf", "csv": "text/csv", "doc": "application/msword",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+
+
+def upload_format(filename, mime_type):
+    """Choose a supported parser; bytes are validated before job acceptance."""
+    extension = Path(filename).suffix.lower().lstrip(".")
+    mime_type = (mime_type or "").split(";")[0].lower()
+    if extension == 'csv' or mime_type in {'text/csv', 'application/csv'}:
+        return 'csv'
+    if extension in FORMAT_MIMES:
+        return extension
+    return next((fmt for fmt, mime in FORMAT_MIMES.items() if mime == mime_type), "pdf")

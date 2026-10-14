@@ -154,6 +154,10 @@ class InterruptService:
             used += len(text)
             unique.append({"chunk_id": key[1], "document_id": key[0], "document_version_id": versions[key[0]],
                            "pages": item["page_numbers"], "text": text,
+                           "source_format": item.get("source_format", "pdf"),
+                           "row_ranges": item.get("row_ranges", []),
+                           "source_blocks": item.get("source_blocks", []),
+                           "word_references": item.get("word_references", []),
                            "quality_status": item.get("quality_status", "UNVERIFIED")})
         return unique
 
@@ -223,7 +227,9 @@ class InterruptService:
                         value.text = text
                         value.sources = [LessonSource(document_id=item["document_id"],
                             document_version_id=item["document_version_id"], pages=item["pages"],
-                            source_chunk_ids=[item["chunk_id"]], quality_status=item["quality_status"])
+                            source_chunk_ids=[item["chunk_id"]], quality_status=item["quality_status"],
+                            source_format=item.get("source_format", "pdf"), row_ranges=item.get("row_ranges", []),
+                            source_blocks=item.get('source_blocks', []), word_references=item.get('word_references', []))
                             for item in chunks]
                         value.warnings.append("GROUNDING_NOT_VERIFIED")
                         if any(source.quality_status != "AUTO_CHECKED" for source in value.sources):

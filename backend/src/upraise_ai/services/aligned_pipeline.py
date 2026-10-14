@@ -8,7 +8,6 @@ from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult, ChunkPlan, ContentUnit
 from upraise_ai.schemas.lessons import (
     DraftParagraph,
-    LessonSource,
     ReviewReport,
     SectionDraft,
     StoredLessonInput,
@@ -34,6 +33,7 @@ from upraise_ai.services.lesson_pipeline import (
 )
 from upraise_ai.services.lesson_speech import split_words
 from upraise_ai.services.lesson_translation import needs_translation
+from upraise_ai.services.source_references import display_citations, display_review, lesson_source
 from upraise_ai.services.versions import VersionCatalog
 
 
@@ -102,7 +102,8 @@ class AlignedLessonPipeline(LessonPipeline):
                     raise IngestionError('LESSON_UNIT_TOO_LARGE')
                 chunk_id = str(uuid5(NAMESPACE_URL, f"upraise:aligned:{job['job_id']}:{level}:{unit.content_unit_id}"))
                 report = ReviewReport.model_validate(item['report'])
-                value = (chunk_id, item['text'], unit.source, report, unit.section_index, 1)
+                value = (chunk_id, display_citations(item['text'], unit.source), unit.source,
+                         display_review(report, unit.source), unit.section_index, 1)
                 by_level[level].append(value)
                 tuples.append((*value, level, unit.content_unit_id))
         # Both durable plan and all finalized text commit before the first TTS request.
@@ -153,11 +154,7 @@ class AlignedLessonPipeline(LessonPipeline):
                 write_json(path, {'signature': signature, 'draft': draft.model_dump(), 'review': report.model_dump()})
             validate_draft(draft, section['pages'])
             for piece, pages in segment(draft, data.options.target_chunk_words):
-                source = LessonSource(document_id=section['document_id'],
-                    document_version_id=section['document_version_id'], pages=pages,
-                    source_chunk_ids=[chunk['chunk_id'] for chunk in section['chunks']
-                                      if set(chunk['page_numbers']) & set(pages)],
-                    quality_status='NEEDS_REVIEW' if source_issues(section) else 'AUTO_CHECKED')
+                source = lesson_source(section, pages)
                 units.append(ContentUnit(content_unit_id=uuid5(NAMESPACE_URL,
                     f"upraise:unit:{job['job_id']}:{index}:{len(units)}:{piece}"), index=len(units),
                     section_index=index, source_language=section['source_language'], material_text=piece,
@@ -211,7 +208,7 @@ class AlignedLessonPipeline(LessonPipeline):
                         validate_ids(texts.units, units)
                         if needs_translation(section['source_language'], data.language):
                             progress('TRANSLATE', position)
-                            draft = SectionDraft(paragraphs=[DraftParagraph(text=item.text, pages=unit.source.pages)
+                            draft = SectionDraft(paragraphs=[DraftParagraph(text=item.text, pages=unit.source.citation_numbers)
                                 for item, unit in zip(texts.units, units, strict=True)])
                             translated = self.models.translate_section(draft, section['source_language'],
                                                                        data.language, learner_level=level)

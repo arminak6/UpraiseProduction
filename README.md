@@ -1,8 +1,8 @@
 # UPRAISE AI Module
 
-A1 PDF ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
+A1 PDF/CSV/Word ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
 A7 chunk revision/audio regeneration, A8 ready-lesson listing, B1 lesson start, B2 chunk-end decisions, B4 learner interruption, B5 session end, B7 generated-content deletion,
-C1 health/readiness, C2 feature status and C5 deployed versions are implemented.
+C1 health/readiness, C2 feature status, C3 runtime kill switch and C5 deployed versions are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
 persistently, and returns HTTP 202 with document_id and job_id. The Location header
 identifies the original A4 job-status URL; durable internal jobs remain. A separate
@@ -51,7 +51,14 @@ On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,
 matching the Word specification. A1 retains processor readability/resource limits and
 OAuth/mTLS INGRESS. content_hash is unverified source metadata; actual SHA-256
-is computed internally as source_hash. Current pipeline: pdf-ingestion-v1.4.
+is computed internally as source_hash. Current pipeline: document-ingestion-v1.5.
+CSV uploads use Python's CSV parser through CsvProcessor, preserving complete
+records, column headers and cell strings. PDF extraction continues with Docling.
+See [CSV ingestion and row citations](backend/docs/csv-ingestion.md).
+
+Word `.docx` and legacy `.doc` uploads use native Docling extraction, retained
+PDF rendering and visual fallback for fragmented content, then the same ingestion
+and course-generation pipeline. See [Word ingestion](backend/docs/word-ingestion.md).
 Source text/HTML and AI candidates are retained separately. Every visual source
 region has its own provenance-backed crop; AI rewrites/descriptions require
 structural checks and a separate source-comparison pass before acceptance.
@@ -88,6 +95,8 @@ overrides for passwords that need URI encoding.
   provider evidence, partial outages and shared API/worker operator controls.
 - Deployed versions: http://localhost:8000/v1/version (INGRESS and jobs:read).
   [C5](backend/docs/c5.md) reports model IDs, prompt hashes, pipelines and B2 policy.
+- Runtime administration: `PUT /v1/admin/kill-switch` requires `admin:operations`;
+  [C3](backend/docs/c3.md) documents shared controls, audit, B2 bypass and rollout.
 - Optional Streamlit Learning and API Testbench: http://localhost:8501
 
 Streamlit is a testing tool in frontend/, separate from the final product.

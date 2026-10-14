@@ -5,6 +5,7 @@ import json
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.services.lesson_compat import legacy_review_report
 from upraise_ai.services.lesson_prompts import learner_level_system_prompt
+from upraise_ai.services.source_references import citation_policy
 from upraise_ai.services.v3.bedrock_teacher import (
     FINAL_LECTURE_JSON_SCHEMA,
     LECTURE_REVIEW_JSON_SCHEMA,
@@ -147,6 +148,7 @@ def finalize_revision(teacher, context, draft_text, turn, review, source_chunks,
 def revise_chunk(models, section, original, feedback, neighbours, *, learner_level, notify):
     teacher = models.teacher
     models.transport.language = section["source_language"]
+    models.transport.source_policy = citation_policy(section)
     document, arguments = models.source(section)
     source_chunks = arguments["chunks"]
     context = json.dumps({
@@ -206,11 +208,13 @@ def revise_chunk(models, section, original, feedback, neighbours, *, learner_lev
         raise IngestionError(code, retryable=True) from None
     finally:
         models.transport.teaching_prompt = None
+        models.transport.source_policy = ""
 
 
 def correct_revision(models, section, candidate, feedback, neighbours, review, language, learner_level):
     """One bounded editor call in the output language; the final reviewer checks it."""
     models.transport.language = language
+    models.transport.source_policy = citation_policy(section)
     models.transport.teaching_prompt = learner_level_system_prompt(
         learner_level, "editor", profiles=section.get("level_profiles"))
     document, arguments = models.source(section)
@@ -235,3 +239,4 @@ def correct_revision(models, section, candidate, feedback, neighbours, review, l
         raise IngestionError("REVISION_CORRECTION_INVALID_OUTPUT", retryable=True) from None
     finally:
         models.transport.teaching_prompt = None
+        models.transport.source_policy = ""

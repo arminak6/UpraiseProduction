@@ -11,8 +11,9 @@ import httpx
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
-from upraise_ai.guards.operations import feature_enabled, kill_switch_active
+from upraise_ai.guards.operations import control_state, feature_enabled, kill_switch_active
 from upraise_ai.schemas.operations import DependencyStatus, FeatureStatus, ReadinessStatus, ServiceStatus
+from upraise_ai.storage.controls import ControlsRepository
 from upraise_ai.storage.operations import OperationsRepository
 
 CORE = ("postgres_jobs", "postgres_audit", "qdrant", "artifacts")
@@ -23,6 +24,7 @@ FEATURE_DEPENDENCIES = {
     # Speech preparation also uses the teaching/review models for math narration.
     "tts": ("polly", "bedrock_generation", "bedrock_review"),
     "generation": (*CORE, "qdrant_collection", "bedrock_generation", "bedrock_review", "polly", "lesson_worker"),
+    "adaptive_levels": ("postgres_jobs", "postgres_audit"),
 }
 
 
@@ -65,7 +67,8 @@ class OperationsMonitor:
 
     def jobs(self):
         return self.database(self.settings.jobs_dsn.get_secret_value(),
-                             ("ingestion_jobs", "lesson_jobs", "prepared_lesson_chunks", "operational_observations"))
+                             ("ingestion_jobs", "lesson_jobs", "prepared_lesson_chunks", "operational_observations",
+                              "operational_controls", "operational_control_events"))
 
     def audit(self):
         # Audit is append-only; it deliberately does not need UPDATE privileges.
@@ -75,7 +78,7 @@ class OperationsMonitor:
         try:
             with psycopg.connect(dsn, connect_timeout=self.settings.operations_probe_timeout_seconds,
                                 options=conninfo_to_dict(dsn).get("options", "") + " -c statement_timeout=1500") as conn:
-                for table in ("ingestion_audit", "lesson_audit"):
+                for table in ("ingestion_audit", "lesson_audit", "admin_audit"):
                     if conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0] is None:
                         return dependency("UNAVAILABLE", "MIGRATION_REQUIRED")
                     if not conn.execute("SELECT has_table_privilege(current_user,%s,'INSERT')", (table,)).fetchone()[0]:
@@ -120,6 +123,11 @@ class OperationsMonitor:
         return dependency("UNKNOWN", "AWS_CREDENTIALS_NOT_VERIFIED")
 
     def refresh(self):
+        try:
+            ControlsRepository(self.settings).project_pending()
+        except Exception:
+            # The durable outbox is retried on the next refresh; never expose database errors.
+            pass
         futures = {key: self.executor.submit(probe) for key, probe in self.probes.items()}
         states = {}
         for key, future in futures.items():
@@ -175,13 +183,14 @@ class OperationsMonitor:
 
     def status(self, course_id=None):
         snapshot = self.snapshot()
+        controls = control_state(self.settings)
         features = {}
         for feature, keys in FEATURE_DEPENDENCIES.items():
-            enabled = feature_enabled(self.settings, feature, course_id)
+            enabled = feature_enabled(self.settings, feature, course_id, state=controls)
             reasons = []
             if not enabled:
                 state = "UNAVAILABLE"
-                reasons = ["AI_DISABLED" if kill_switch_active(self.settings, course_id) else f"{feature.upper()}_DISABLED"]
+                reasons = ["AI_DISABLED" if controls.killed(course_id) else f"{feature.upper()}_DISABLED"]
             else:
                 checks = [snapshot.dependencies[key] for key in keys]
                 state = ("UNAVAILABLE" if any(value.state == "UNAVAILABLE" for value in checks) else
@@ -190,10 +199,10 @@ class OperationsMonitor:
             features[feature] = FeatureStatus(enabled=enabled, state=state,
                 available=None if state == "UNKNOWN" else state == "AVAILABLE", reason_codes=reasons)
         # Audio interruptions and audible answers need a functioning answer pipeline too.
-        if not feature_enabled(self.settings, "tts", course_id):
+        if not feature_enabled(self.settings, "tts", course_id, state=controls):
             features["generation"].state, features["generation"].available = "UNAVAILABLE", False
             features["generation"].reason_codes = list(dict.fromkeys([
-                *features["generation"].reason_codes, "AI_DISABLED" if kill_switch_active(self.settings, course_id)
+                *features["generation"].reason_codes, "AI_DISABLED" if controls.killed(course_id)
                 else "TTS_DISABLED"]))
         for feature in ("stt", "tts"):
             answer = features["answers"]
@@ -205,4 +214,4 @@ class OperationsMonitor:
         return ServiceStatus(course_id=course_id, checked_at=snapshot.checked_at,
             answers_available=features["answers"].available, stt_available=features["stt"].available,
             tts_available=features["tts"].available, generation_available=features["generation"].available,
-            kill_switch_active=kill_switch_active(self.settings, course_id), features=features)
+            kill_switch_active=kill_switch_active(self.settings, course_id, state=controls), features=features)

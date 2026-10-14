@@ -4,7 +4,7 @@ import os
 from uuid import UUID, uuid4
 
 import streamlit as st
-from api_client import Connection, normalize_base_url, request, status_path
+from api_client import Connection, normalize_base_url, request, status_path, upload_mime
 from chunk_end import render_chunk_end
 from chunk_revision import render_chunk_revision
 from generated_deletion import render_generated_deletion
@@ -190,10 +190,12 @@ elif page == "Revise chunk (A7)":
     render_chunk_revision(connection, show_response)
 
 elif page == "Ingest material":
+    if st.session_state.get("source_mode") in {"PDF upload", "PDF / CSV upload"}:
+        st.session_state["source_mode"] = "PDF / CSV / Word upload"
     st.subheader("A1 · Ingest teaching material")
-    st.caption("POST /v1/documents · PDF processing · 202 response contains document_id and job_id")
-    source_mode = st.radio("Document source", ["PDF upload", "Signed Moodle URL"], horizontal=True, key="source_mode")
-    auto_hash = source_mode == "PDF upload" and st.checkbox("Fill content_hash from the uploaded PDF", key="fill_hash")
+    st.caption("POST /v1/documents · PDF / CSV / Word processing · 202 response contains document_id and job_id")
+    source_mode = st.radio("Document source", ["PDF / CSV / Word upload", "Signed Moodle URL"], horizontal=True, key="source_mode")
+    auto_hash = source_mode == "PDF / CSV / Word upload" and st.checkbox("Fill content_hash from the uploaded file", key="fill_hash")
     st.caption("content_hash is source metadata; the backend does not verify it.")
     st.button("Start a new submission", on_click=new_submission)
     with st.form("ingestion_form"):
@@ -205,8 +207,8 @@ elif page == "Ingest material":
         version = right.text_input("version (optional)", key="version")
         content_hash = left.text_input("content_hash", disabled=auto_hash, key="content_hash",
                                        placeholder="Computed on submission" if auto_hash else "Upstream hash or revision")
-        if source_mode == "PDF upload":
-            upload = st.file_uploader("Document (PDF currently supported)", max_upload_size=100, key="document_upload")
+        if source_mode == "PDF / CSV / Word upload":
+            upload = st.file_uploader("Document (PDF, CSV or Word)", type=["pdf", "csv", "docx", "doc"], max_upload_size=100, key="document_upload")
             moodle_url = None
         else:
             upload = None
@@ -214,7 +216,7 @@ elif page == "Ingest material":
         with st.expander("Request options"):
             idempotency_key = st.text_input("Idempotency-Key", key="submission_key",
                                             help="Reuse for a retry. Start a new submission for a new key.")
-            mime = st.text_input("Declared file MIME", key="mime", disabled=source_mode != "PDF upload")
+            mime = st.text_input("Declared file MIME", key="mime", disabled=source_mode != "PDF / CSV / Word upload")
         submitted = st.form_submit_button("Send A1 request", type="primary", width="stretch")
     if submitted:
         fields = {"course_id": course.strip(), "activity_id": activity.strip(), "language": language.strip(),
@@ -226,16 +228,18 @@ elif page == "Ingest material":
         missing = [name for name, value in fields.items() if not value]
         if missing:
             st.error("Enter " + ", ".join(missing) + ".")
-        elif source_mode == "PDF upload" and upload is None:
+        elif source_mode == "PDF / CSV / Word upload" and upload is None:
             st.error("Select a document to upload.")
-        elif source_mode != "PDF upload" and not moodle_url.strip():
+        elif source_mode != "PDF / CSV / Word upload" and not moodle_url.strip():
             st.error("Enter a signed Moodle URL.")
         else:
             headers = {"Idempotency-Key": idempotency_key.strip()} if idempotency_key.strip() else {}
             with st.spinner("Sending document to the API…"):
                 if upload is not None:
                     result = request(connection, "POST", "/v1/documents", fields=fields,
-                                     upload=(upload.name, upload.getvalue(), mime or "application/pdf"), headers=headers)
+                                     upload=(upload.name, upload.getvalue(),
+                                             (mime or 'application/pdf') if upload.name.lower().endswith('.pdf')
+                                             else upload_mime(upload.name)), headers=headers)
                 else:
                     result = request(connection, "POST", "/v1/documents",
                                      json_body={**fields, "moodle_url": moodle_url.strip()}, headers=headers)
@@ -260,7 +264,8 @@ elif page == "Generate lesson":
         course_id = right.text_input("course_id", key="a3_course_id")
         activity_id = left.text_input("activity_id", key="a3_activity_id")
         document_ids = st.text_area("Document UUIDs in order (one per line)", key="a3_document_ids")
-        window = left.number_input("Source window (pages)", min_value=1, max_value=50, value=5, key="a3_window")
+        window = left.number_input("Source window size", min_value=1, max_value=50, value=5, key="a3_window",
+                                   help="PDF pages, CSV row groups or Word blocks per generation window.")
         words = right.number_input("Target chunk length (words)", min_value=30, max_value=1000, value=200, key="a3_words")
         if aligned:
             maximum = left.number_input('Maximum chunk length (words)', min_value=50, max_value=2000,

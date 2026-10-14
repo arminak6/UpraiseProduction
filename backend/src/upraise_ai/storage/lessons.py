@@ -349,6 +349,12 @@ class LessonRepository(JobRepository):
             WHERE job_id=%s AND lease_token=%s""", (Jsonb(result), ttl, job_id, token)
         )
 
+    def pause_for_control(self, conn, job_id, token, code):
+        conn.execute("""UPDATE lesson_jobs SET status='QUEUED',step='CONTROL_PAUSED',error_code=%s,
+            attempts=greatest(0,attempts-1),lease_token=NULL,lease_until=NULL,
+            available_at=clock_timestamp()+interval '2 seconds',updated_at=clock_timestamp()
+            WHERE job_id=%s AND lease_token=%s""", (code, job_id, token))
+
     def fail(self, conn, job_id, token, code, retry, ttl):
         conn.execute(
             """UPDATE lesson_jobs SET status=%s,step=%s,error_code=%s,lease_until=NULL,

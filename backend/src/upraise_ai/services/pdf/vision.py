@@ -442,11 +442,13 @@ class BedrockImageDescriber:
         candidate: str,
         content_type: str,
         page_numbers: list[int],
+        source_references: list[str] | None = None,
     ) -> SourceVerificationOutcome:
         """Compare a candidate with every source crop, failing closed on uncertainty.
 
         This separate comparison pass is an automated check, not proof of source
-        accuracy. Each image must have a corresponding page number, in order.
+        accuracy. Each image must have a corresponding page number, in order,
+        or an explicit native Word picture reference for non-paginated figures.
         Evidence is never truncated or downsampled to obtain a passing result.
         """
 
@@ -454,11 +456,12 @@ class BedrockImageDescriber:
             return self._verification_failure("empty_candidate")
         if content_type not in {"text", "inline_math", "formula", "table", "figure"}:
             return self._verification_failure("unsupported_content_type")
-        if (
-            not image_paths
-            or len(image_paths) != len(page_numbers)
-            or any(type(page) is not int or page <= 0 for page in page_numbers)
-        ):
+        word_mapping = (source_references is not None and content_type == 'figure' and page_numbers == []
+                        and len(source_references) == len(image_paths)
+                        and all(isinstance(ref, str) and ref.strip() for ref in source_references))
+        page_mapping = (source_references is None and len(image_paths) == len(page_numbers)
+                        and all(type(page) is int and page > 0 for page in page_numbers))
+        if not image_paths or not (word_mapping or page_mapping):
             return self._verification_failure("incomplete_source_mapping")
         # Nova 2 direct image uploads have a stricter five-object model limit.
         # https://docs.aws.amazon.com/nova/latest/nova2-userguide/using-multimodal-models.html
@@ -476,12 +479,15 @@ class BedrockImageDescriber:
                 detail=f"Could not prepare complete source evidence ({type(exc).__name__}).",
             )
 
-        context = json.dumps(
-            {
+        context_data = {
                 "content_type": content_type,
                 "ordered_source_pages": page_numbers,
                 "candidate_to_check": candidate,
-            },
+            }
+        if word_mapping:
+            context_data['ordered_word_picture_references'] = source_references
+        context = json.dumps(
+            context_data,
             ensure_ascii=False,
         )
         # Account for base64 overhead, JSON escaping and a small request envelope.
@@ -493,16 +499,19 @@ class BedrockImageDescriber:
         )
         if estimated_request_size > VERIFICATION_MAX_REQUEST_BYTES:
             return self._verification_failure("source_exceeds_request_limit")
-        cache_key = sha256_text(
-            json.dumps(
-                {
+        cache_data = {
                     "prompt_version": VERIFICATION_PROMPT_VERSION,
                     "model_id": self.model_id,
                     "source_hashes": [sha256_bytes(value) for value in prepared],
                     "page_numbers": page_numbers,
                     "candidate": candidate,
                     "content_type": content_type,
-                },
+                }
+        if word_mapping:
+            cache_data['word_picture_references'] = source_references
+        cache_key = sha256_text(
+            json.dumps(
+                cache_data,
                 ensure_ascii=False,
                 sort_keys=True,
             )

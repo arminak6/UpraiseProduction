@@ -76,6 +76,19 @@ def test_compares_all_crops_in_order_with_separate_untrusted_candidate(tmp_path)
     assert "arrow directions and endpoints" in request["system"][0]["text"]
 
 
+def test_word_picture_verification_uses_native_reference_without_inventing_pdf_pages(tmp_path):
+    client = Client()
+    result = check(verifier(tmp_path, client), [crop(tmp_path)], content_type='figure',
+        page_numbers=[], source_references=['#/pictures/2'])
+    assert result.passed and len(client.calls) == 1
+    context = json.loads(client.calls[0]['messages'][0]['content'][-1]['text'])
+    assert context['ordered_source_pages'] == []
+    assert context['ordered_word_picture_references'] == ['#/pictures/2']
+    failed = check(verifier(tmp_path, client), [crop(tmp_path)], content_type='figure',
+        page_numbers=[], source_references=[])
+    assert not failed.passed and len(client.calls) == 1
+
+
 @pytest.mark.parametrize("flag", ["supported", "complete", "readable"])
 def test_mismatch_incomplete_or_unreadable_source_fails_with_review_warning(tmp_path, flag):
     verdict = {**PASSING, flag: False}

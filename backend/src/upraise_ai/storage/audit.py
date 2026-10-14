@@ -1,6 +1,7 @@
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from psycopg.types.json import Jsonb
 
 from upraise_ai.services.versions import VersionCatalog
@@ -20,6 +21,10 @@ CREATE TABLE IF NOT EXISTS lesson_audit (
     details JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX IF NOT EXISTS lesson_audit_job ON lesson_audit(job_id, created_at);
+CREATE TABLE IF NOT EXISTS admin_audit (
+    event_id UUID PRIMARY KEY, event_type TEXT NOT NULL, details JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 """
 
 
@@ -38,6 +43,13 @@ class AuditRepository:
     def migrate(self):
         with psycopg.connect(self.dsn, connect_timeout=5) as conn:
             conn.execute(SCHEMA)
+
+    def admin_control_changed(self, event):
+        options = conninfo_to_dict(self.dsn).get("options", "") + " -c statement_timeout=1000"
+        with psycopg.connect(self.dsn, connect_timeout=1, options=options) as conn:
+            conn.execute("""INSERT INTO admin_audit(event_id,event_type,details,created_at)
+                VALUES (%s,'KILL_SWITCH_UPDATED',%s,%s) ON CONFLICT(event_id) DO NOTHING""",
+                         (event["event_id"], Jsonb(event["details"]), event["created_at"]))
 
     def record(self, job, event_type, details, *, attempt=False):
         identity = f"upraise:{job['job_id']}:{event_type}"

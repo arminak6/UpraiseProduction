@@ -107,7 +107,7 @@ class VersionCatalog:
         level = source_constant("services/lesson_prompts.py", "LEARNER_LEVEL_PROMPT_VERSION")
         draft = source_constant("services/v3/models.py", "EASY_LECTURE_PROMPT_VERSION")
         labels = (("EASY_LECTURE_PROMPT_VERSION", draft), ("LEARNER_LEVEL_PROMPT_VERSION", level))
-        common = ("services/lesson_models.py", "services/lesson_prompts.py", "services/v3/prompts.py",
+        common = ("services/lesson_models.py", "services/lesson_prompts.py", "services/source_references.py", "services/v3/prompts.py",
                   "services/v3/bedrock_teacher.py")
         prompts = {
             "lesson_draft": prompt_version(source_constant("services/lesson_models.py", "DRAFT_PROMPT", labels), common),
@@ -115,7 +115,8 @@ class VersionCatalog:
             "lesson_finalizer": prompt_version(source_constant("services/lesson_models.py", "FINALIZER_PROMPT", labels), common),
             "learner_level": prompt_version(level, ("services/lesson_prompts.py",)),
             'alignment': prompt_version(source_constant('services/aligned_models.py', 'ALIGNMENT_PROMPT_VERSION'),
-                                       ('services/aligned_models.py', 'services/aligned_pipeline.py', 'services/aligned_responses.py')),
+                                       ('services/aligned_models.py', 'services/aligned_pipeline.py', 'services/aligned_responses.py',
+                                        'services/source_references.py')),
             "translation": prompt_version(source_constant("services/lesson_translation.py", "TRANSLATION_PROMPT_VERSION"),
                                           ("services/lesson_translation.py", "services/lesson_models.py")),
             "revision": prompt_version(source_constant("services/revision_models.py", "REVISION_PROMPT_VERSION"),
@@ -150,6 +151,14 @@ class VersionCatalog:
             "prompts": {key: value.model_dump() for key, value in prompts.items()},
             "pipelines": {
                 "ingestion": PipelineVersion(version=settings.pipeline_signature, parameters={
+                    "formats": "pdf,csv,docx,doc", "csv_parser": source_constant("services/csv_processor.py", "CSV_PARSER_VERSION"),
+                    "word_parser": source_constant("services/word_processor.py", "WORD_PARSER_VERSION"),
+                    "max_word_size_mb": settings.max_word_size_mb,
+                    "max_word_uncompressed_mb": settings.max_word_uncompressed_mb,
+                    "word_conversion_timeout_seconds": settings.word_conversion_timeout_seconds,
+                    "word_visual_fallback": settings.word_visual_fallback,
+                    "max_csv_size_mb": settings.max_csv_size_mb, "max_csv_rows": settings.max_csv_rows,
+                    "max_csv_columns": settings.max_csv_columns,
                     "aws_region": settings.aws_region, "embedding_dimension": settings.embedding_dimension,
                     "enable_ocr": settings.enable_ocr, "enable_formula_enrichment": settings.enable_formula_enrichment,
                     "describe_images": settings.describe_images, "chunk_max_tokens": settings.chunk_max_tokens,
@@ -176,6 +185,10 @@ class VersionCatalog:
                     version=source_constant("workflows/lesson_deletion.py", "DELETION_VERSION"),
                     parameters={"selected_level_supported": True, "sources_preserved": True,
                                 "success_status": 204}).model_dump(),
+                "runtime_controls": PipelineVersion(
+                    version=source_constant("storage/controls.py", "CONTROL_VERSION"),
+                    parameters={"durable": True, "adaptive_chunk_end_bypass": True,
+                                "set_end_implemented": False, "admin_writes_per_minute": 30}).model_dump(),
             },
             "cognitive_load": CognitiveLoadVersion(fusion_rule=FusionRule(), threshold_method=ThresholdMethod(
                 version=COGNITIVE_LOAD_POLICY_VERSION, value=COGNITIVE_LOAD_THRESHOLD)).model_dump(),

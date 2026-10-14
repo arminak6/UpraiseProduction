@@ -1,12 +1,23 @@
-"""C1 liveness/readiness, C2 feature status and C5 deployed versions."""
+"""C1 readiness, C2 feature status, C3 admin controls and C5 deployed versions."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
+from upraise_ai.core.config import get_settings
 from upraise_ai.guards.ingress import Principal, ingress
-from upraise_ai.schemas.operations import ReadinessStatus, ServiceStatus
+from upraise_ai.schemas.operations import KillSwitchInput, KillSwitchState, ReadinessStatus, ServiceStatus
 from upraise_ai.schemas.versions import VersionStatus
+from upraise_ai.workflows.controls import ControlService
 
 router = APIRouter(tags=["C - Operations"])
+
+
+@router.put("/v1/admin/kill-switch", response_model=KillSwitchState,
+            summary="C3 - Update an admin-only runtime kill switch")
+def update_kill_switch(data: KillSwitchInput, request: Request, response: Response,
+                      principal: Principal = Depends(ingress), settings=Depends(get_settings)):
+    result = ControlService(settings, catalog=getattr(request.app.state, "versions", None)).update(data, principal)
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 @router.get("/health", summary="Application liveness")

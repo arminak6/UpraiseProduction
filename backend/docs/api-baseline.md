@@ -83,7 +83,7 @@ See [B7](b7.md); B3/B6 keep their reserved responsibilities.
 | --- | --- | --- |
 | C1 | `GET /health`; `GET /ready` | Application liveness and integration readiness; 200/503. `/ready` reports Qdrant, PostgreSQL and AWS status; `/health` has no INGRESS |
 | C2 | `GET /v1/status` | Degraded-mode flags for answers, STT, TTS, generation and kill switch; Middleware uses these to disable questions |
-| C3 | `PUT /v1/admin/kill-switch` | Operator-only feature disabling by global/course scope; return new state and audit |
+| C3 | `PUT /v1/admin/kill-switch` | Implemented: admin:operations runtime disables by global/course scope, durable shared state/audit, B2 adaptation bypass; see [C3](c3.md) |
 | C4 | `GET /v1/admin/audit`; `DELETE /v1/admin/audit` | Operator-only audit JSON/CSV export or erasure by pseudonym; delete returns 204 |
 | C5 | `GET /v1/version` | Model, prompt and pipeline versions for audit and AI-generated labelling; SIN operator use |
 
@@ -126,7 +126,7 @@ A1 decisions.
 | Spoken answer transport | Word gives SSE event order for B4 while common conventions/open points leave SSE versus WebSocket unresolved | User approved initial synchronous B4 response with inline temporary audio on 2026-10-07; streaming remains future work |
 | Runtime providers | Word A3/B4 refer to AWS EU-region speech/LLM. The scaffold prompt leaves providers undecided; diagram's Speech Services is generic | A3 uses original V3 GPT OSS/Qwen and EU-region Polly. B4 reuses those models/speech plus Titan retrieval and in-memory Transcribe Streaming |
 | Audit scope | Common convention says every API ends in AUDIT, but A2 lists audit for delete only, A4 omits an audit step, and B6 says no data are persisted | A1 lifecycle and A2 deletion audit are implemented; A2 list has no audit per the explicit request. Broader API/read/rejection audit scope and retention need clarification |
-| C1/C2 monitoring | Word defines liveness/readiness and feature flags without JSON schemas | On 2026-10-08 user approved C1/C2. `/health` stays dependency-free; `/ready` reports core readiness and feature degradation. `/v1/status` uses jobs:read/course authorization, nullable availability, content-free recent provider evidence and operator controls shared with workers. C3 remains reserved |
+| C1/C2/C3 operations | Word defines liveness/readiness, flags and admin controls without JSON schemas | C1/C2 retain cached dependency observations. User requested C3 on 2026-10-14: admin:operations PUT with strict global/course scope, enabled=true activates a disable, shared PostgreSQL controls and atomic audit outbox. B2 bypasses disabled adaptation; set-end/automatic level switching remain absent. Existing stt/tts controls also supported. See [C3](c3.md) |
 | C5 versions | Word defines version metadata for audit/comparison without a wire schema | On 2026-10-09 user approved GET /v1/version: service ingress/jobs:read, current source/build fingerprint, configured models, source-bundle prompt hashes, pipeline signatures and the actual B2 test-v1 threshold; fusion NOT_IMPLEMENTED. New job/chunk references and audit snapshots preserve history without backfilling old rows. No AI/storage calls in the GET. See c5.md |
 | A7 author revisions | Word proposes edited text and audio-only regeneration | On 2026-10-08 user approved lesson_job_id, chunk_id and teacher_review; retrieve PG text and Qdrant sources, reuse the three A3 roles, and publish one revised chunk in a new complete lesson version with A4/A5/A8 handling. Language/level/voice are inherited. Request idempotency is deferred; existing versions/sessions remain unchanged. See a7.md |
 | A1 enrichment | Earlier Word A1 overview says LLM=No; old extraction uses generative Nova math/figure enrichment | User explicitly approved the old pipeline including Nova on 2026-10-02; applies to A1 extraction only |
@@ -155,6 +155,14 @@ source-grounding and coverage requirements. A5 records the applied level and
 prompt version; prior jobs are not regenerated automatically.
 
 ## Infrastructure sources
+
+On 2026-10-13 the user approved CSV uploads through A1 with a Python csv-based
+CsvProcessor and PDF/CSV frontend upload controls. The A1 metadata/202 IDs remain;
+CSV row groups reuse Titan/Qdrant and A3/A7, with row provenance instead of PDF
+pages. This format extension does not assign any reserved endpoint.
+See [CSV ingestion](csv-ingestion.md).
+Word DOCX/DOC uploads extend the same A1 endpoint and existing course pipeline;
+see [Word ingestion](word-ingestion.md). Signed Moodle URL input remains PDF-only.
 
 The selected versions are explicit. Healthcheck commands are verified against
 the running images during scaffold validation; source documentation alone is

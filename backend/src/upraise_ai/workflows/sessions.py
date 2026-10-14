@@ -7,6 +7,7 @@ import psycopg
 from fastapi import HTTPException
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.guards.operations import feature_enabled
 from upraise_ai.guards.session_jwt import validate_session_jwt
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.chunk_end import ChunkEndResponse
@@ -57,7 +58,9 @@ class SessionService:
         session = authorize_session(self.settings, self.store, session_id, principal, token, lessons=self.lessons)
         try:
             decision = self.store.chunk_end(session, data.lesson_id, str(data.chunk_id),
-                                            data.cognitive_load_score, self.lessons.audit.chunk_ended)
+                                            data.cognitive_load_score, self.lessons.audit.chunk_ended,
+                                            adaptive_enabled=lambda: feature_enabled(
+                                                self.settings, "adaptive_levels", session.binding.course_id))
         except psycopg.Error:
             raise IngestionError("AUDIT_STORAGE_UNAVAILABLE", status=503, retryable=True) from None
         return ChunkEndResponse(decision=decision)

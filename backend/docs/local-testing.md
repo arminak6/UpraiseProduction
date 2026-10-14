@@ -36,6 +36,12 @@ from a loopback/private network peer (including the Compose frontend container),
 using the actual socket address, not forwarded headers. The existing API and
 Streamlit port mappings bind to 127.0.0.1.
 
+C3 administration needs an additional explicit development-only opt-in:
+`UPRAISE_OPERATIONS_LOCAL_ADMIN=true`. Its default is false, so ordinary local
+testing does not grant `admin:operations`. See [C3](c3.md) for the runtime-control
+contract, additive migration and rollout. This option is rejected outside
+development local test mode; production uses an operator OAuth scope.
+
 Streamlit displays a local testing notice for its configured backend. Actual
 backend responses include `X-UPRAISE-Auth-Mode: local-test`; the interface also
 displays that confirmation with each response. Health JSON stays unchanged.

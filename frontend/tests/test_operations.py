@@ -24,6 +24,48 @@ class OperationsTests(unittest.TestCase):
         self.assertFalse(app.exception)
         return app
 
+    def test_c3_explicit_confirmed_change_and_no_automatic_retry(self):
+        with patch("api_client.request", return_value=Result("PUT", "/v1/admin/kill-switch", 200, 2,
+                   {"features_enabled": {"answers": False}, "audit_pending": False}, True)) as send:
+            app = self.app()
+            send.assert_not_called()
+            self.assertTrue(button(app, "Apply kill-switch change").disabled)
+            app.text_input(key="operations_admin_course").set_value("course-1").run()
+            app.checkbox(key="operations_admin_confirm").check().run()
+            button(app, "Apply kill-switch change").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(send.call_args.args[1:3], ("PUT", "/v1/admin/kill-switch"))
+            self.assertEqual(send.call_args.kwargs["json"], {
+                "scope": "course_id", "course_id": "course-1", "feature": "answers", "enabled": True})
+            self.assertFalse(app.checkbox(key="operations_admin_confirm").value)
+            app.run()
+            send.assert_called_once()
+
+    def test_c3_changing_target_or_credentials_resets_confirmation_and_result(self):
+        with patch("api_client.request") as send:
+            app = self.app()
+            app.text_input(key="operations_admin_course").set_value("course-1").run()
+            app.checkbox(key="operations_admin_confirm").check().run()
+            app.selectbox(key="operations_admin_feature").set_value("all").run()
+            self.assertFalse(app.checkbox(key="operations_admin_confirm").value)
+            app.checkbox(key="operations_admin_confirm").check().run()
+            next(item for item in app.text_input if item.label == "Bearer token").set_value("changed-token").run()
+            self.assertFalse(app.checkbox(key="operations_admin_confirm").value)
+            send.assert_not_called()
+
+    def test_c3_global_release_and_failed_change_require_manual_submit(self):
+        with patch("api_client.request", return_value=Result("PUT", "/v1/admin/kill-switch", 403, 2,
+                   {"detail": "INSUFFICIENT_SCOPE"}, True)) as send:
+            app = self.app()
+            app.selectbox(key="operations_admin_scope").set_value("Global").run()
+            app.radio(key="operations_admin_action").set_value("Release runtime disable").run()
+            app.checkbox(key="operations_admin_confirm").check().run()
+            button(app, "Apply kill-switch change").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(send.call_args.kwargs["json"], {"scope": "global", "feature": "answers", "enabled": False})
+            app.run()
+            send.assert_called_once()
+
     def test_readiness_displays_503_without_sending_ai_work(self):
         with patch("api_client.request", return_value=Result("GET", "/ready", 503, 2,
                   {"status": "NOT_READY", "dependencies": {"qdrant": {"state": "UNAVAILABLE"}}}, True)) as send:

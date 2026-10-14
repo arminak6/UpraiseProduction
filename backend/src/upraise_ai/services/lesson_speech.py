@@ -189,7 +189,9 @@ class LessonSpeech:
         locale = language.split("-")[0].lower()
         converter = (_Converter(self.converter, language) if self.converter is not convert_math
                      or locale not in SUPPORTED_MATH_LOCALES else MathJaxSpeechRuleConverter(locale=locale))
-        prepared = prepare_speech_document(text, converter=converter,
+        spoken_text = re.sub(r"\[CSV rows \d+-\d+\]", "", text)
+        spoken_text = re.sub(r"\[Word blocks \d+-\d+\]", "", spoken_text)
+        prepared = prepare_speech_document(spoken_text, converter=converter,
                                            fallback=guarded_fallback)
         if not prepared.plain_text:
             raise IngestionError("LESSON_SPEECH_EMPTY")

@@ -192,7 +192,7 @@ def test_legacy_accepted_request_can_retry_after_guard_removal(integration):
     raw = pdf_bytes()
     meta = metadata(raw)
     fingerprint = hashlib.sha256(
-        json.dumps({"metadata": meta.model_dump(exclude={"source_filename"})}, sort_keys=True).encode()
+        json.dumps({"metadata": meta.model_dump(exclude={"source_filename", "source_format"})}, sort_keys=True).encode()
     ).hexdigest()
     row, _ = jobs.accept(
         str(uuid4()), str(uuid4()), principal.client_id,

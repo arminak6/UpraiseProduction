@@ -239,6 +239,12 @@ def render_player(connection, state, *, local_testing=False):
             pages = sorted({page for source in chunks[index].get("sources", []) for page in source.get("pages", [])})
             if pages:
                 st.caption("Source pages: " + ", ".join(map(str, pages)))
+            for source in chunks[index].get("sources", []):
+                if source.get("source_format") == "csv":
+                    st.caption("CSV source rows: " + ", ".join(f"{span['start']}–{span['end']}"
+                               for span in source.get("row_ranges", [])))
+                elif source.get('source_format') in {'doc', 'docx'}:
+                    st.caption('Word source blocks: ' + ', '.join(map(str, source.get('source_blocks', []))))
             if state.get("audio_error"):
                 st.warning("The text is available, but voice could not be loaded or verified. Try Replay voice.")
             if state["voice"] and state.get("audio") and not interrupted:

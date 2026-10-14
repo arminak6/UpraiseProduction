@@ -162,3 +162,10 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
         result.error = str(error)
     result.elapsed_ms = round((time.monotonic() - started) * 1000)
     return result
+
+
+def upload_mime(filename):
+    extension = filename.rsplit('.', 1)[-1].lower()
+    return {'pdf': 'application/pdf', 'csv': 'text/csv', 'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}.get(
+                extension, 'application/octet-stream')

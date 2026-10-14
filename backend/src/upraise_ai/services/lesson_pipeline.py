@@ -10,7 +10,6 @@ from upraise_ai.schemas.lessons import (
     LessonChunk,
     LessonInput,
     LessonResult,
-    LessonSource,
     ReviewIssue,
     ReviewReport,
     SectionDraft,
@@ -27,6 +26,12 @@ from upraise_ai.services.lesson_models import (
 from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION
 from upraise_ai.services.lesson_speech import split_words
 from upraise_ai.services.lesson_translation import TRANSLATION_PROMPT_VERSION, needs_translation
+from upraise_ai.services.source_references import (
+    citation_chunks,
+    display_citations,
+    display_review,
+    lesson_source,
+)
 from upraise_ai.services.versions import VersionCatalog
 
 
@@ -58,7 +63,12 @@ def plan_sections(documents, window_pages):
         source_language = row["metadata"].get("language")
         if not isinstance(source_language, str) or not source_language.strip():
             raise IngestionError("LESSON_SOURCE_LANGUAGE_MISSING")
-        page_count = int(row["result"]["page_count"])
+        source_format = row['metadata'].get('source_format', 'pdf')
+        csv = source_format == 'csv'
+        blocks = source_format in {'csv', 'doc', 'docx'}
+        if blocks:
+            chunks = citation_chunks(chunks)
+        page_count = int(row["result"]["source_block_count"] if blocks else row["result"]["page_count"])
         for start in range(1, page_count+1, window_pages):
             end = min(page_count, start+window_pages-1)
             selected = [chunk for chunk in chunks if chunk["chunk_id"] not in seen
@@ -76,6 +86,11 @@ def plan_sections(documents, window_pages):
                              "document_version_id": selected[0]["document_version_id"],
                              "active_attempt": str(row["active_attempt"]),
                              "window": [start, end], "pages": pages, "chunks": selected})
+            if csv:
+                sections[-1].update(source_format="csv", reference_kind="csv_source_block",
+                                    row_count=row["result"]["row_count"])
+            elif blocks:
+                sections[-1].update(source_format=source_format, reference_kind='word_source_block')
         if len(seen) != len(chunks):
             raise IngestionError("LESSON_SOURCE_COVERAGE_INVALID")
     return sections
@@ -224,12 +239,9 @@ class LessonPipeline:
             for text, pages in segment(draft, data.options.target_chunk_words):
                 chunk_index = len(all_chunks)
                 chunk_id = str(uuid5(NAMESPACE_URL, f"upraise:lesson:{job_id}:{chunk_index}"))
-                source_chunks = [chunk for chunk in section["chunks"] if set(chunk["page_numbers"]) & set(pages)]
-                source = LessonSource(document_id=section["document_id"],
-                                      document_version_id=section["document_version_id"], pages=pages,
-                                      source_chunk_ids=[chunk["chunk_id"] for chunk in source_chunks],
-                                      quality_status="NEEDS_REVIEW" if any(source_issues(section)) else "AUTO_CHECKED")
-                all_chunks.append((chunk_id, text, source, report, index, revisions))
+                source = lesson_source(section, pages)
+                text = display_citations(text, source)
+                all_chunks.append((chunk_id, text, source, display_review(report, source), index, revisions))
         versions = {**version_refs, "pipeline": job["pipeline_version"],
                     "generator_model": self.settings.lesson_generation_model_id,
                     "review_model": self.settings.lesson_review_model_id,

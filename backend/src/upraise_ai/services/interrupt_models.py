@@ -96,6 +96,12 @@ class InterruptTeacher:
         class TeachingClient:
             def converse(_, **request):
                 request["system"] = [*request["system"], {"text": self.policy}]
+                if any(item.get("source_format") == "csv" for item in chunks):
+                    request["system"].append({"text": "CSV evidence contains exact column headers and numbered records, "
+                        "not PDF pages. Refer to its CSV row numbers when identifying source locations."})
+                if any(item.get('source_format') in {'doc', 'docx'} for item in chunks):
+                    request['system'].append({'text': 'Word evidence uses source blocks and native document references, '
+                        'not PDF pages. Refer to Word block numbers when identifying source locations.'})
                 request["messages"][0]["content"].insert(0, {"text":
                     "Current prepared teaching text (context, not original evidence):\n"
                     "<PREPARED_TEACHING_BEGIN>\n" + context + "\n<PREPARED_TEACHING_END>"})

@@ -14,6 +14,7 @@ from upraise_ai.services.aws import aws_session
 from upraise_ai.services.lesson_compat import legacy_review_report, turn_to_draft
 from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION, learner_level_system_prompt
 from upraise_ai.services.lesson_translation import LessonTranslator, language_name
+from upraise_ai.services.source_references import citation_policy
 from upraise_ai.services.v3.bedrock_teacher import BedrockTeacherV1, TeacherGenerationError
 from upraise_ai.services.v3.math_speech import MathNarrationRequest
 from upraise_ai.services.v3.models import EASY_LECTURE_PROMPT_VERSION, LearningChunk, LearningDocument
@@ -52,10 +53,13 @@ class _LanguageClient:
         self.teaching_prompt = None
         self.raw = ""
         self.stop_reason = None
+        self.source_policy = ""
 
     def converse(self, **request):
         # Keep V3 schemas/recovery intact; add trusted API teaching policy only
         # during generation, review and editing, not mathematical narration.
+        if self.source_policy:
+            request["system"] = [*request.get("system", []), {"text": self.source_policy}]
         if self.teaching_prompt is not None:
             request["system"] = [*request["system"], {"text": self.teaching_prompt}]
         if self.language.lower() not in {"en", "en-us", "en-gb"}:
@@ -121,6 +125,7 @@ class LessonModels:
 
     def generate_section(self, section, language, source_path=None, *, learner_level="intermediate", notify=None, level_profiles=None):
         self.transport.language = language
+        self.transport.source_policy = citation_policy(section)
         teaching_prompt = learner_level_system_prompt(learner_level, "generator", profiles=level_profiles)
         self.transport.raw = ""
         document, arguments = self.source(section)
@@ -149,6 +154,7 @@ class LessonModels:
             raise IngestionError(code, retryable=True) from None
         finally:
             self.transport.teaching_prompt = None
+            self.transport.source_policy = ""
 
     def narrate_math_fallback(self, requests, language):
         self.transport.language = language
@@ -174,9 +180,12 @@ class LessonModels:
 
     def adapt_units(self, section, units, language, *, learner_level, profiles, target_words, max_words, notify=None, current=None):
         from upraise_ai.services.aligned_models import adapt_units
+        self.transport.source_policy = citation_policy(section)
         try:
             return adapt_units(self, section, units, language, learner_level=learner_level, profiles=profiles,
                                target_words=target_words, max_words=max_words, notify=notify, current=current)
         except IngestionError as error:
             self.diagnose("alignment:" + error.stage if hasattr(error, "stage") else "alignment", error)
             raise
+        finally:
+            self.transport.source_policy = ""

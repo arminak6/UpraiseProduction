@@ -24,6 +24,12 @@ from upraise_ai.services.revision_models import (
     validate_revision_text,
 )
 from upraise_ai.services.revision_validation import MAX_ALIGNMENT_CORRECTIONS, validate_aligned_revision
+from upraise_ai.services.source_references import (
+    citation_chunks,
+    display_citations,
+    display_review,
+    model_citations,
+)
 from upraise_ai.services.versions import VersionCatalog
 
 
@@ -100,11 +106,16 @@ class RevisionPipeline(LessonPipeline):
             raise IngestionError("REVISION_SOURCE_UNAVAILABLE")
         if sum(len(chunk["text"]) for chunk in chunks) > self.settings.lesson_max_source_characters:
             raise IngestionError("REVISION_SOURCE_CONTEXT_TOO_LARGE")
+        blocks = source.source_format in {'csv', 'doc', 'docx'}
+        chunks = citation_chunks(chunks)
         pages = sorted({page for chunk in chunks for page in chunk["page_numbers"]})
         section = {"document_id": source.document_id, "document_version_id": source.document_version_id,
                    "source_language": document["metadata"]["language"], "pages": pages,
                    "window": [min(pages), max(pages)], "page_count": document["result"]["page_count"],
                    "course_id": data.course_id, "chunks": chunks}
+        if blocks:
+            section.update(source_format=source.source_format, reference_kind=source.source_format + '_source_block',
+                           page_count=document["result"]["source_block_count"])
         if revision.aligned_unit:
             section.update(alignment_unit=revision.aligned_unit, level_profiles=data.level_profiles)
         version_refs = VersionCatalog(self.settings).references("revision_")
@@ -125,7 +136,7 @@ class RevisionPipeline(LessonPipeline):
         else:
             try:
                 text, report, edits = self.models.revise_chunk(
-                    section, selected.text, revision.teacher_review, neighbours,
+                    section, model_citations(selected.text, source), revision.teacher_review, neighbours,
                     learner_level=data.options.learner_level,
                     notify=lambda step: progress(step, 0.25 if step == "REVIEW" else 0.40))
             except RevisionModelInvalidOutput as error:
@@ -148,9 +159,12 @@ class RevisionPipeline(LessonPipeline):
             text, correction_rounds = validate_aligned_revision(self.models, section, data, selected, neighbours,
                 saved, checkpoint_path, progress, reviewed)
             edits = saved["edits"]
-        selected.text, selected.reviewer_report, selected.revisions = text, report, edits
+        selected.text, selected.reviewer_report, selected.revisions = display_citations(text, source), display_review(report, source), edits
         if not revision.aligned_unit:
-            selected.sources[0].pages = pages
+            if blocks:
+                selected.sources[0].source_blocks = pages
+            else:
+                selected.sources[0].pages = pages
         result.job_id, result.expires_at = job_id, None
         result.revision = LessonRevision(parent_job_id=revision.parent_job_id, chunk_id=revision.chunk_id, number=revision.number)
         result.versions.update(**version_refs,
