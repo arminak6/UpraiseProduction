@@ -8,8 +8,8 @@ Streamlit is an HTTP testbench/player. PG DRAFT text/plans and Qdrant sources pe
 A5 JSON/WAV has independent24hTTL. Moodle owns human approval. Do not stage/commit
 without request. ../Uprise/v2 is reference-only. Semantic source/math/review
 defects and historical course deletion evidence are documented under codex_helper.
-frontend2/ is a separate client-facing UPRAISE visual prototype, pending UI approval
-before backend integration. Static HTML/CSS/JS, curated sample data, memory only.
+frontend2/ is the approved client UI, connected through a stdlib Python HTTP bridge.
+Its Docker service runs on localhost:8502; original frontend/backend remain separate.
 
 ## Architecture and data flow
 
@@ -17,18 +17,18 @@ before backend integration. Static HTML/CSS/JS, curated sample data, memory only
   paginated A8 Jobs grouped job->level->chunk, deferred WAV/hash download; Advanced
   UUID/A4/A6. Retry keys survive navigation, auth/context clears caches, no auto
   mutations. Standalone v1/v2. EN/IT25neural voices, Joanna/Bianca defaults.
-- frontend2 has Upload material / Generate course / Start learning. File selection
-  retains metadata only; generation/playback/questions are explicitly simulated.
-  No backend/network calls, audio, storage, or auth; CSP connect-src 'none'. English
-  sample lessons vary by level; language/voice settings are illustrative. Reset or
-  reload restores fixtures. Keep disconnected until user approves the interface.
+- frontend2: A1/A2 material, A3v2/A4/A5/A7 courses, A8/B1/B4/B5 learning. Same-origin
+  route/header-limited bridge; nonce/Host/Origin checks, verified TLS/no redirects,
+  server-side OAuth/mTLS env. Signed learner JWT stays in tab RAM. Real WAV SHA256,
+  result-hash/session/expiry checks; B4 exact offset/retry, B5 cleanup/late-response
+  fences. No seeded data/storage/AWS/direct DB; no automatic POST or A6 RECEIVED.
+  A7 uncertain submission requires explicit new-request preparation. Backend calls
+  remain authoritative; custom levels come from A5. Refresh loses local retry state.
 - A1 PDF Docling/vision/math, CSV CsvProcessor or DOCX/DOC WordProcessor -> Titan
   -> ordered Qdrant chunks;active attempt fences revisions.document-ingestion-v1.6;
-  CSV selects .csv/MIME,
-  UTF-8/BOM, unique nonempty headers, comma/semicolon/tab; whole records, repeated
-  headers, strings/empty values preserved. Limits100MB/100krows/256columns, oversized
-  header/record fails422; no truncation/OCR/AI extraction. A1 IDs/A4/A6 unchanged;
-  old PDF metadata/fingerprints preserved. Signed Moodle URL remains PDF-only.
+  CSV: .csv/MIME, UTF8/BOM headers, comma/semicolon/tab, whole records/no truncation,
+  OCR or AI extraction; oversized records422. Limits100MB/100krows/256columns.
+  PDF metadata/fingerprints/A1-A6 contracts preserved; signed URL remains PDF-only.
   A2 owner-scoped source/course deletion across all levels/languages/statuses removes
   dependent PG/plans/artifacts/feedback, preserves minimal IDs/audit. Admission/
   source/writer fences, durable503 recovery, RAM revocation; fresh A1 after deletion.
@@ -41,16 +41,13 @@ before backend integration. Static HTML/CSS/JS, curated sample data, memory only
   target200/max500words, max2shared refinements, no level-only splits.
   v2.5/promptv6 bounded ID-aware recovery, ambiguous/truncated output fails closed;
   original math/speech recovery retained.
-- CSV page_count0/page_numbers[]/page=null; row_count/column_count, source_blocks/
-  count/row_ranges (header1, multiline cells one record). A3 mixed-source row-group
-  windows adapt legacy numeric slots to CSV blocks. Public pages[]/row ranges/
-  [CSV rows N-M] text; speech omits markers. A7 all-level/B4 preserve rows. PDF
-  source/review JSON keeps original shape for old PG; CSV remains UNVERIFIED.
-- Word Docling + bounded LibreOffice DOC conversion/rendering;>5%token mismatch
-  or fragmented text selects PDF fidelity. Recovered clipped paragraphs retain
-  review flags/XML refs;pages[]/page_count0,blocks/word refs/extraction/rendered pages.
-  [Word blocks N-M] omitted from speech;A3/A7/B4/UI share lifecycle. Native picture
-  verification binds picture refs without fabricated PDF pages.
+- CSV page_count0/pages[]/page=null; row/column counts, source_blocks/row_ranges
+  (header1, multiline cells one record). A3 row-group windows/A7/B4 preserve rows;
+  [CSV rows N-M] omitted from speech. PDF JSON shape preserved; CSV UNVERIFIED.
+- Word Docling/LibreOffice; >5%token mismatch/fragmentation selects PDF fidelity.
+  Clipped-paragraph recovery retains review/XML refs; pages[]/page_count0 and
+  source_blocks/word refs. Native picture refs never fabricate PDF pages.
+  [Word blocks N-M] omitted from speech; A3/A7/B4 share lifecycle.
 - A4 counts per level/total; A5 whole bundle or learner_level slice with one full
   integrity hash; A8 expands levels before pagination. A6 temporary receipt/cancel/
   TTL fences writers; retained A3 text/plans have independent lifecycle.
@@ -74,24 +71,17 @@ before backend integration. Static HTML/CSS/JS, curated sample data, memory only
   TTS outage keeps text,grounding=null/GROUNDING_NOT_VERIFIED. B5 fences late replies,
   clears RAM,idempotent content-free audit30min. docs/b1-b5 contracts are authoritative.
 - B7 DELETE /v1/lesson-jobs/{id}?learner_level;lessons:write. Omit/last level removes
-  whole lesson,sources preserved. Durable tombstones/fences/recoverable503;repeat204.
-  Partial atomic PG/manifest/hash update preserves sibling IDs/plan/expiry;whole
-  deletion scrubs/cancels. Running selected-level409;expired text deletable,no audio
-  revival. A2 cleans B7 artifacts. UI requires pinned scope/confirmation/manualretry.
-  New frontend modules require Docker COPY and packaging allowlist.
-- C1 health/ready; C2 cached dependency evidence plus fresh shared control reads,
-  UNKNOWN without recent evidence,no AWS polling. C3 admin:operations PUT uses
-  global/course_id scope;enabled=true activates a disable. Runtime PG controls
-  combine with deployment disables (cannot override);answers/generation/adaptive_levels/
-  stt/tts/all. State+audit outbox commit atomically; idempotent admin_audit projection
-  retries via operations refresh. Shared30writes/min/client,1000runtimecourse limit.
-  API/worker admission fails closed on unavailable control store;queued jobs pause,
-  claim races restore attempts. B2 rechecks after audit,PROCEED/discards score when
-  adaptation/all disabled;start level pinned,no set-end. In-flight AI not hard-cancelled.
-  Health UI confirmed manual PUT;local admin requires explicit development opt-in.
-  C5 source/config/model/prompt hashes; A7 revision refs/strategy,
-  max2alignment/max2final corrections, chunk-revision-v3. Checkpoints bind config.
-  Human approval remains external; all results DRAFT.
+  whole lesson, sources preserved; tombstones/fences/recoverable503/repeat204.
+  Partial atomic update preserves siblings/plan/expiry. Running-level409; expired
+  text deletable, no audio revival. UI pinned confirmation/manual retry; docs/b7.md.
+- C1 health/ready; C2 cached evidence/fresh shared controls, UNKNOWN without recent
+  evidence, no AWS polling. C3 admin:operations global/course PUT; enabled=true
+  disables. PG controls cannot override deployment disables. Atomic audit outbox;
+  30writes/min/client,1000courses. Admission fails closed; queued jobs pause without
+  consuming attempts. B2 disabled adaptation discards scores/PROCEED; level pinned.
+  In-flight AI not hard-cancelled; local admin requires opt-in. docs/c3.md.
+  C5 hashes/provenance/checkpoint config; A7 max2alignment/max2final corrections,
+  chunk-revision-v3. Human approval external; all results DRAFT.
 
 ## Important paths
 
@@ -107,8 +97,8 @@ before backend integration. Static HTML/CSS/JS, curated sample data, memory only
   learning_session,learning_interrupt,lesson_audio}.py; tests/: AppTest/fakeHTTP.
   frontend/README.md UI commands; backend/{pyproject.toml,uv.lock,Dockerfile,
   math_runtime/} builds. Chunk uniqueness(job_id,level_key,index), legacy level_key=''.
-- frontend2/{index.html,styles.css,app.js,demo-data.js,favicon.svg}; README.md explains
-  preview boundaries. serve.py exposes only static assets on local loopback.
+- frontend2/{app,api,ui}.js + index.html/styles.css; serve.py HTTP bridge,
+  tests/{test_server.py,ui.test.cjs}; README.md auth/run/verification. Docker allowlist.
 - codex_helper/: ignored helpers/evidence; FUTURE_UPDATES.md ignored backlog.
   turing-content-verification.md/level-content-assessment.md: semantic findings.
 
@@ -125,9 +115,11 @@ before backend integration. Static HTML/CSS/JS, curated sample data, memory only
   fake providers,no live volumes/credentials;default image upraise-word-validation
   includes LibreOffice. Rebuild via codex_helper/word-ingestion/Validation.Dockerfile.
 - Frontend: docker compose run --rm --no-deps -v ./frontend:/workspace:ro frontend python -m unittest discover -s /workspace/tests -q
-- Visual prototype: python frontend2/serve.py -> http://127.0.0.1:8502 (optional
-  --port). Python3.10+, modern browser; no install/Docker needed. Syntax: node
-  --check frontend2/app.js and node --check frontend2/demo-data.js.
+- Client UI: python frontend2/serve.py [--port 8502 --backend http://127.0.0.1:8000]
+  or docker compose up --build -d --no-deps --wait frontend2. Python3.10+ stdlib;
+  Compose backend default http://backend:8000; gateway env in frontend2/README.md.
+- UI tests: python -m unittest discover -s frontend2/tests -p test_server.py -v;
+  npm --prefix frontend2 ci --ignore-scripts; npm --prefix frontend2 test.
 - Ruff backend config backend/pyproject.toml; frontend scoped E4,E7,E9,F with test
   E402 excluded. git diff --check. One-off logs/evidence under codex_helper/.
 
@@ -164,32 +156,26 @@ Gateway/Moodle callbacks/model access,HA/backups/erasure/orphans unverified.
 Independent post-edit review/grounding deferred. Live generation needs user
 permission(granted for Word test);tests use fake providers. Semantic findings and
 historical A7 failure diagnostics live in codex_helper reports. No auto-resubmit.
+frontend2 browser rendering/audible playback unverified; text is escaped without
+a rich Markdown/LaTeX typesetter. Runtime has no npm dependency; jsdom is test-only.
 
 ## Recent decisions
 
-- A7 replaces existing chunks; optional all-level atomic edit, processing IDs hidden.
-- A2/B7 retained-content deletion; A6 temporary cleanup. Changed hash closes sessions.
-- B7 user-approved extension; B6 reserved. CSV uses A1/Python csv; PDF keeps Docling.
-- Word DOCX/DOC uses native Docling/retained rendering and existing visual fallback;
-  source quality flags remain independent of DONE. No new final semantic judge.
-- User requested a disconnected visual review before connecting frontend2. Use a
-  buildless static prototype for this stage; existing frontend/backend are separate.
+- User approved frontend2 design and backend integration. Replaced demo fixtures
+  with real APIs through a same-origin bridge; existing backend contracts unchanged.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-14 frontend2: static source/README/serve.py; JS/Python syntax, HTML/CSS
-parsing, local HTTP assets/non-asset denial, 18 DOM interaction checks passed.
-Ad hoc jsdom harness/dependencies are ignored under codex_helper/frontend2-validation/.
-Visual browser QA unverified: no browser available through the preview tool.
+2026-10-14 frontend2 source/tests/README, compose.yaml/.env.example: 14 HTTP bridge
+and 18 DOM tests pass; JS syntax/diff/Compose config/build pass. Service healthy
+on8502, read-only live A2/A8/A4/A5/WAV checksum pass (7sources/2generations/3levels).
+No live AI/upload/revision/deletion/session calls; browser QA unavailable.
 
-2026-10-14 C3:api/operations,guards/{ingress,operations},storage/{controls,audit,
-jobs,lessons,sessions},workflows/{controls,sessions},workers/{ingestion,lessons},
-services/{operations,versions},config/schemas,frontend operations/tests,docs/c3.md.
-107focused/955fullbackend and115UI pass;Ruff,diff,Compose config,backend/frontend
-builds pass;new image OpenAPI exposes C3. Disposable stores/fake providers only.
-Live migration/recreation pending;local admin defaults off.
+Prior 2026-10-14 C3:operations/guards/stores/workflows/workers/config/docs/UI;
+107focused/955backend/115Streamlit tests, Ruff/builds passed with disposable stores.
+C3 live migration/recreation pending; local admin defaults off.
 
 Prior Word/CSV quality defects remain in codex_helper/word-ingestion/*quality*.md
 and csv-course-751551-*;formula/level/reviewJSON/citation/SSML defects;audio unheard.

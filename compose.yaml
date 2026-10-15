@@ -237,6 +237,36 @@ services:
       retries: 5
       start_period: 15s
 
+  frontend2:
+    profiles: ["tools"]
+    build:
+      context: ./frontend2
+    ports:
+      - "127.0.0.1:${FRONTEND2_PORT:-8502}:8502"
+    environment:
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://backend:8000}
+      FRONTEND2_PUBLIC_PORT: ${FRONTEND2_PORT:-8502}
+      FRONTEND2_ACTIVITY_ID: ${FRONTEND2_ACTIVITY_ID:-upraise-learning}
+      FRONTEND2_BACKEND_TOKEN: ${FRONTEND2_BACKEND_TOKEN:-}
+      FRONTEND2_CLIENT_CERT: ${FRONTEND2_CLIENT_CERT:-}
+      FRONTEND2_CLIENT_KEY: ${FRONTEND2_CLIENT_KEY:-}
+      FRONTEND2_KEY_PASSWORD: ${FRONTEND2_KEY_PASSWORD:-}
+      FRONTEND2_CA_CERT: ${FRONTEND2_CA_CERT:-}
+      UPRAISE_LESSON_LEVEL_PROFILES: ${UPRAISE_LESSON_LEVEL_PROFILES:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,os; p=os.environ.get('FRONTEND2_PUBLIC_PORT','8502'); r=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8502/',headers={'Host':'127.0.0.1:'+p}),timeout=3); assert r.status == 200"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   qdrant:
     image: qdrant/qdrant:v1.19.1
     volumes:

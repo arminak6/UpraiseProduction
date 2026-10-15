@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!serve.py
+!index.html
+!styles.css
+!api.js
+!ui.js
+!app.js
+!favicon.svg

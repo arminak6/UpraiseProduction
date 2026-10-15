@@ -1,144 +1,109 @@
-/* UPRAISE visual prototype. All state is in memory; no backend or network calls. */
+/* UPRAISE: real authoring and learning through the existing backend contracts. */
 (() => {
   "use strict";
-
-  const fixtures = window.UPRAISE_DEMO;
+  const api = window.UpraiseAPI;
+  const { icon, escape, art } = window.UpraiseUI;
   const main = document.querySelector("#main");
   const modal = document.querySelector("#modal");
-  const toastElement = document.querySelector("#toast");
+  const lectureAudio = new Audio();
+  const replyAudio = new Audio();
   const languages = { en: "English", it: "Italian" };
+  const levelDescriptions = {
+    beginner: "Start with the essentials. Clear language and step-by-step explanations.",
+    intermediate: "Build on what you know. A balance of practical ideas and detail.",
+    advanced: "Go deeper with precise concepts and technical detail.",
+  };
+  const terminal = new Set(["DONE", "FAILED", "CANCELLED"]);
+  const uuidPattern = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
   const state = {
-    materials: structuredClone(fixtures.materials),
-    courses: structuredClone(fixtures.courses),
-    selectedFile: null,
-    selectedMaterial: "material-ai",
-    uploadName: "",
-    uploadLanguage: "en",
-    draft: { title: "AI essentials for everyone", language: "en", voice: "Joanna", words: 200, window: 5 },
-    generation: null,
-    generatedId: null,
-    player: null,
-    search: "",
-    courseSearch: "",
-    question: "",
-    answer: "",
-    questionOpen: false,
-    questionPending: false,
-    page: "materials",
+    config: null, local: false, connected: false, loading: true, refreshing: false,
+    materials: [], materialError: "", catalogItems: [], courses: [], catalogError: "", more: false,
+    selectedFile: null, selectedMaterial: null, uploadName: "", uploadLanguage: "en", activityId: "",
+    uploadBusy: false, uploadError: "", uploadAttempt: null, uploadJobs: new Map(),
+    draft: { title: "", language: "en", voice: "Joanna", words: 200, window: 5, maximum: 500 },
+    generationBusy: false, generationError: "", generationAttempt: null, activeJobId: null,
+    jobs: new Map(), bundles: new Map(), generatedId: null, resultLevel: "", resultPart: 0,
+    search: "", courseSearch: "", page: "materials", player: null, playerBusy: false,
+    question: "", questionOpen: false, questionPending: false, questionOffset: 0, turn: null,
+    startAttempt: null, startPending: null, sessionToken: "", questionsConsent: true,
+    deletion: null, revision: null, revisionUncertain: new Set(),
   };
   let toastTimer;
-  let generationTimer;
-  let playbackTimer;
-  let questionTimer;
-  let lastModalTrigger;
-  const uploadTimers = new Set();
+  let pollTimer;
+  let polling = false;
+  let modalTrigger;
+  let modalEpoch = 0;
+  let questionController;
+  let playerEpoch = 0;
+  let lectureUrl;
+  let replyUrl;
+  let expiryTimer;
+  let workspaceEpoch = 0;
 
-  const paths = {
-    upload: '<path d="M12 16V4m-4 4 4-4 4 4M4 16v4h16v-4"/>',
-    document: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
-    book: '<path d="M12 5c-3-2-6-2-10-1v15c4-1 7-1 10 1 3-2 6-2 10-1V4c-4-1-7-1-10 1zm0 0v15"/>',
-    sparkles: '<path d="m12 3 2.3 6.7L21 12l-6.7 2.3L12 21l-2.3-6.7L3 12l6.7-2.3L12 3zM20 2v4m-2-2h4M3 19v4m-2-2h4"/>',
-    arrow: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
-    back: '<path d="M20 12H5m6-6-6 6 6 6"/>',
-    check: '<path d="m5 12 4 4L19 6"/>',
-    checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
-    lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/>',
-    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
-    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
-    trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
-    close: '<path d="m6 6 12 12M6 18 18 6"/>',
-    layers: '<path d="m12 3 10 5-10 5L2 8l10-5zm-9 9 9 5 9-5m-18 5 9 5 9-5"/>',
-    play: '<path d="m9 5 11 7-11 7z" fill="currentColor" stroke-width="1"/>',
-    pause: '<path d="M8 5h2v14H8zm6 0h2v14h-2z" fill="currentColor" stroke-width="1"/>',
-    replay: '<path d="M3 10a9 9 0 1 1 1 7M3 4v6h6"/>',
-    chat: '<path d="M21 11a8 8 0 0 1-8 8H7l-5 3V11a9 9 0 0 1 19 0z"/><path d="M7 10h9M7 14h5"/>',
-    send: '<path d="m22 2-7 20-4-9-9-4 20-7zm0 0L11 13"/>',
-    headphones: '<path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="12" width="4" height="8" rx="2"/><rect x="17" y="12" width="4" height="8" rx="2"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    lightbulb: '<path d="M9 18v-1a7 7 0 1 1 6 0v1M9 21h6M9 18h6"/>',
-    leaf: '<path d="M20 3C7 2 2 8 5 15c4 9 16 2 15-12zM5 20 16 8"/>',
-    loader: '<path d="M21 12a9 9 0 1 1-6-8.5"/>',
-    edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zm-2 2 5 5"/>',
-    eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    flag: '<path d="M5 22V3m0 1c5-4 9 4 14 0v12c-5 4-9-4-14 0"/>',
-  };
-
-  function icon(name, className = "") {
-    return `<svg class="icon ${className}" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.info}</svg>`;
-  }
-
-  function escape(value) {
-    return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-  }
-
-  function languageLabel(code) { return languages[code] || code; }
-  function getMaterial(id = state.selectedMaterial) { return state.materials.find(item => item.id === id); }
-  function getCourse(id) { return state.courses.find(item => item.id === id); }
-  function getParts(course) { return fixtures.lessons[course?.contentKey] || fixtures.lessons.ai; }
-  function levelLabel(id) { return fixtures.levels.find(level => level.id === id)?.label || "Intermediate"; }
-  function time(seconds) { return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`; }
-  function fileIcon(material) { return `<span class="file-icon ${escape(material.format.toLowerCase())}">${escape(material.format)}</span>`; }
   function badge(text, type = "", symbol = "") { return `<span class="badge ${type}">${symbol ? icon(symbol) : ""}${escape(text)}</span>`; }
-  function levelChips() { return `<div class="level-chips">${fixtures.levels.map(level => `<span class="level-chip">${icon("check")}${escape(level.label)}</span>`).join("")}</div>`; }
-
-  function art(theme = "teal", index = "01") {
-    return `<div class="course-art ${theme}"><span class="art-label">A new way to understand</span>
-      <svg class="book-art" viewBox="0 0 120 110" fill="none" aria-hidden="true">
-        <ellipse cx="60" cy="94" rx="41" ry="5" fill="currentColor" opacity=".08"/>
-        <path d="M20 28c16-5 27 0 40 8 13-8 24-13 40-8v51c-16-4-27 1-40 9-13-8-24-13-40-9V28z" fill="white" fill-opacity=".65" stroke="currentColor" stroke-opacity=".4" stroke-width="1.5"/>
-        <path d="M60 36v52M28 41c8-1 16 2 24 7m-24 3c8-1 16 2 24 7m-24 3c8-1 16 2 24 7m16-20c8-5 16-8 24-7m-24 17c8-5 16-8 24-7m-24 17c8-5 16-8 24-7" stroke="currentColor" stroke-opacity=".5" stroke-width="1.6" stroke-linecap="round"/>
-        <path d="m87 10 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6z" fill="currentColor" opacity=".7"/>
-        <circle cx="28" cy="15" r="3" stroke="currentColor" stroke-opacity=".5"/><path d="M106 47h6m-3-3v6" stroke="currentColor" stroke-opacity=".5"/>
-      </svg><span class="art-number">UPRAISE / ${index}</span></div>`;
+  function levelLabel(level) { return String(level).replace(/_/g, " ").replace(/^./, char => char.toUpperCase()); }
+  function languageLabel(code) { return languages[code] || languages[String(code).split("-")[0]] || code; }
+  function time(seconds = 0) { return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`; }
+  function percent(progress) { return Math.max(0, Math.min(100, Number(progress || 0) * 100)); }
+  function expired(value) { return Boolean(value) && (!Number.isFinite(Date.parse(value)) || Date.parse(value) <= Date.now()); }
+  function getMaterial(id = state.selectedMaterial) { return state.materials.find(item => item.document_id === id); }
+  function getCourse(id) { return state.courses.find(item => item.id === id) || (state.bundles.has(id) ? summaryFromBundle(state.bundles.get(id)) : null); }
+  function levelsFor(course) { return Object.keys(course?.variants || {}); }
+  function variantsOf(bundle) { return bundle?.variants || (bundle?.learner_level ? { [bundle.learner_level]: bundle } : {}); }
+  function configuredLevels() { return state.config?.levels || []; }
+  function levelChips(levels = configuredLevels()) { return `<div class="level-chips">${levels.map(level => `<span class="level-chip">${icon("check")}${escape(levelLabel(level))}</span>`).join("")}</div>`; }
+  function languageOptions(selected) {
+    const choices = { ...languages };
+    if (selected && !choices[selected]) choices[selected] = languageLabel(selected);
+    return Object.entries(choices).map(([value, label]) => `<option value="${escape(value)}" ${value === selected ? "selected" : ""}>${escape(label)}</option>`).join("");
   }
-
-  function intro(step, label, title, copy, counts = false) {
-    return `<div class="page-intro"><div><p class="eyebrow">${step} <span>/</span> ${label}</p><h1>${title}</h1><p class="intro-copy">${copy}</p></div>
-      ${counts ? `<dl class="intro-count"><div><dd>${state.materials.length}</dd><dt>Materials</dt></div><div><dd>${state.courses.length}</dd><dt>Courses</dt></div><div><dd>3</dd><dt>Learning levels</dt></div></dl>` : ""}</div>`;
+  function fileIcon(material) {
+    const format = String(material.filename || "").split(".").pop().toUpperCase();
+    const safeFormat = ["PDF", "DOCX", "DOC", "CSV"].includes(format) ? format : "FILE";
+    return `<span class="file-icon ${safeFormat.toLowerCase()}">${safeFormat}</span>`;
   }
-
+  function errorBox(message, action = "", label = "Try again") {
+    return `<div class="error-banner" role="alert">${icon("info")}<div><p>${escape(message)}</p>${action ? `<button class="text-button" data-action="${action}">${escape(label)}</button>` : ""}</div></div>`;
+  }
   function toast(message) {
     clearTimeout(toastTimer);
-    toastElement.textContent = message;
-    toastElement.hidden = false;
-    toastTimer = setTimeout(() => { toastElement.hidden = true; }, 4800);
+    const element = document.querySelector("#toast"); element.textContent = message; element.hidden = false;
+    toastTimer = setTimeout(() => { element.hidden = true; }, 6500);
   }
-
   function openModal(content) {
-    if (modal.open) modal.close();
-    lastModalTrigger = document.activeElement;
-    modal.innerHTML = content;
-    modal.showModal();
-  }
-
-  function modalHeader(title, eyebrow = "UPRAISE PREVIEW") {
-    return `<div class="modal-top"><div><p class="eyebrow">${eyebrow}</p><h2 id="modal-title">${escape(title)}</h2></div><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon("close")}</button></div>`;
-  }
-
-  modal.addEventListener("close", () => { if (lastModalTrigger?.isConnected) lastModalTrigger.focus(); });
-  modal.addEventListener("click", event => { if (event.target === modal) { const rect = modal.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) modal.close(); } });
-
-  function navigate(page) {
-    if (location.hash === `#${page}`) render();
-    else location.hash = page;
-  }
-
-  function selectMaterial(id) {
-    if (state.generation && state.generation.materialId !== id) {
-      clearInterval(generationTimer);
-      state.generation = null;
+    ++modalEpoch;
+    if (!modal.open) {
+      modalTrigger = document.activeElement; modal.innerHTML = content; modal.showModal();
+    } else {
+      modal.innerHTML = content;
+      modal.querySelector("button, input, select, textarea")?.focus();
     }
-    state.selectedMaterial = id;
-    const material = getMaterial();
-    if (!material) return;
-    state.draft.title = material.id === "material-ai" ? "AI essentials for everyone" : material.id === "material-responsible" ? "Responsible AI in practice" : `${material.course || material.name.replace(/\.[^.]+$/, "")} — introduction`;
-    state.draft.language = material.language;
-    state.draft.voice = material.language === "it" ? "Bianca" : "Joanna";
-    state.generatedId = null;
   }
-
+  function modalHeader(title, eyebrow = "UPRAISE") {
+    return `<div class="modal-top"><div><p class="eyebrow">${escape(eyebrow)}</p><h2 id="modal-title">${escape(title)}</h2></div><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon("close")}</button></div>`;
+  }
+  function intro(step, label, title, copy, counts = false) {
+    const levels = new Set(state.catalogItems.map(item => item.learner_level));
+    return `<div class="page-intro"><div><p class="eyebrow">${step} <span>/</span> ${label}</p><h1>${title}</h1><p class="intro-copy">${copy}</p></div>${counts ? `<dl class="intro-count"><div><dd>${state.materials.length}</dd><dt>Materials</dt></div><div><dd>${state.courses.length}</dd><dt>Available courses</dt></div><div><dd>${levels.size || configuredLevels().length}</dd><dt>Learning levels</dt></div></dl>` : ""}</div>`;
+  }
+  function navigate(page) { if (location.hash === `#${page}`) render(); else location.hash = page; }
+  function selectedSource(id) {
+    const material = getMaterial(id);
+    if (!material) return;
+    if (state.selectedMaterial !== id) {
+      state.selectedMaterial = id;
+      state.draft.title = material.filename.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").slice(0, 120);
+      const language = material.language.split("-")[0];
+      state.draft.language = language in languages ? language : "en";
+      state.draft.voice = language === "it" ? "Bianca" : "Joanna";
+      state.generationAttempt = null; state.generationError = "";
+    }
+  }
+  function updateConnection() {
+    document.querySelector("#connection-label").textContent = state.loading ? "Connecting…" : state.connected ? "Backend connected" : "Connection needs attention";
+    document.querySelector("#connection-description").textContent = state.local ? "Development draft preview · Your real material and courses." : "Your material, courses, and learning sessions in one place.";
+    document.querySelector("#connection-dot").classList.toggle("offline", !state.connected);
+  }
   function render() {
     const page = location.hash.slice(1);
     state.page = ["materials", "generate", "learn"].includes(page) ? page : "materials";
@@ -148,448 +113,751 @@
       link.classList.toggle("active", active);
       if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
     }
+    if (state.loading) { main.innerHTML = `<div class="card empty-state">${icon("loader", "spinner")}<h3>Opening your learning studio…</h3><p>Loading material and available courses.</p></div>`; return; }
     if (state.page === "materials") renderMaterials();
     if (state.page === "generate") renderGenerate();
     if (state.page === "learn") renderLearn();
     document.title = `UPRAISE · ${{ materials: "Your material", generate: "Generate course", learn: "Start learning" }[state.page]}`;
   }
 
+  async function loadMaterials() {
+    try {
+      const data = await api.request("/v1/documents", { timeout: 45000 });
+      if (!Array.isArray(data)) throw new Error("The material list could not be read.");
+      state.materials = data; state.materialError = "";
+      if (!getMaterial() && !state.activeJobId) {
+        const ready = data.find(item => item.status === "DONE");
+        if (ready) selectedSource(ready.document_id); else state.selectedMaterial = null;
+      }
+      return true;
+    } catch (error) { state.materialError = error.message; return false; }
+  }
+  function groupCatalog() {
+    const grouped = new Map();
+    for (const item of state.catalogItems) {
+      if (expired(item.expires_at)) continue;
+      if (!grouped.has(item.job_id)) grouped.set(item.job_id, { ...item, id: item.job_id, title: item.lesson_id.replace(/[_-]/g, " "), variants: {} });
+      grouped.get(item.job_id).variants[item.learner_level] = item;
+    }
+    state.courses = [...grouped.values()];
+  }
+  async function loadCourses(more = false) {
+    const offset = more ? state.catalogItems.length : 0;
+    try {
+      const data = await api.request(`/v1/lesson-jobs?limit=100&offset=${offset}`, { timeout: 45000 });
+      if (!Array.isArray(data)) throw new Error("The course collection could not be read.");
+      const combined = more ? [...state.catalogItems, ...data] : data;
+      state.catalogItems = [...new Map(combined.map(item => [`${item.job_id}:${item.learner_level}`, item])).values()];
+      state.more = data.length === 100; state.catalogError = ""; groupCatalog();
+      return true;
+    } catch (error) { state.catalogError = error.message; return false; }
+  }
+  async function refreshWorkspace() {
+    if (state.refreshing) return;
+    state.refreshing = true;
+    const epoch = ++workspaceEpoch;
+    try {
+      if (!state.config) { state.config = await api.initialize(); state.activityId = state.config.activity_id; }
+      const results = await Promise.allSettled([loadMaterials(), loadCourses()]);
+      if (epoch !== workspaceEpoch) return;
+      state.connected = results.every(result => result.status === "fulfilled" && result.value);
+    } catch (error) { state.materialError = error.message; state.catalogError = error.message; state.connected = false; }
+    finally {
+      if (epoch === workspaceEpoch) {
+        state.loading = false; state.refreshing = false; updateConnection();
+        // Keep an active player and editable forms stable while refreshing collections.
+        if (state.page === "materials" && document.querySelector("#upload-form")) updateMaterialList();
+        else if (!(state.page === "learn" && state.player)) render();
+        schedulePoll();
+      }
+    }
+  }
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    const hasJobs = [...state.jobs.values()].some(job => !terminal.has(job.status) && !job.trackingError);
+    const hasMaterials = !state.materialError && state.materials.some(item => ["QUEUED", "RUNNING"].includes(item.status));
+    if (hasJobs || hasMaterials) pollTimer = setTimeout(poll, 5000);
+  }
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    try {
+      for (const job of [...state.jobs.values()]) if (!terminal.has(job.status) && !job.trackingError) await refreshJob(job);
+      if (!state.materialError && state.materials.some(item => ["QUEUED", "RUNNING"].includes(item.status))) {
+        await loadMaterials();
+        if (state.page === "materials") updateMaterialList();
+        if (state.page === "generate" && !document.querySelector("#generation-form") && !state.activeJobId && !state.generatedId) renderGenerate();
+      }
+    } finally { polling = false; schedulePoll(); }
+  }
+
   function renderMaterials() {
     main.innerHTML = `${intro("01", "YOUR MATERIAL", "Great learning starts<br>with <em>your material.</em>", "Bring your documents. We’ll help turn them into clear, engaging learning<br class=\"desktop-break\"> experiences, at a level that feels right.", true)}
-      <div class="grid-upload">
-        <section class="card card-padding" aria-labelledby="upload-title">
-          <div class="card-title-row"><h2 id="upload-title">Add your teaching material</h2>${icon("upload")}</div>
-          <form id="upload-form">
-            <div class="drop-zone" id="drop-zone">
-              <span class="upload-symbol">${icon("upload")}</span>
-              <strong id="file-heading">${state.selectedFile ? escape(state.selectedFile.name) : "Drag your document here"}</strong>
-              <p>or <label class="file-label" for="file-input" tabindex="0">browse files</label> to get started</p>
-              <span class="file-note" id="file-note">${state.selectedFile ? `${escape(formatSize(state.selectedFile.size))} · Selected for preview` : "PDF, Word or CSV · Up to 100 MB"}</span>
-              <input type="file" class="sr-only" id="file-input" accept=".pdf,.docx,.doc,.csv" aria-label="Choose a PDF, Word or CSV document">
-            </div>
-            <div class="form-grid"><div class="field"><label for="upload-course">Course name</label><input id="upload-course" name="course" maxlength="100" placeholder="e.g. Introduction to artificial intelligence" value="${escape(state.uploadName)}" required></div>
-              <div class="field"><label for="upload-language">Document language</label><select id="upload-language" name="language">${languageOptions(state.uploadLanguage)}</select></div></div>
-            <div class="form-bottom"><span>${icon("lock")}Files stay on your device in this preview</span><button class="button" type="submit">${icon("upload")}Upload material</button></div>
-            <p class="inline-error" id="upload-error" role="alert" hidden></p>
-          </form>
-        </section>
-        <aside class="journey-card" aria-label="How UPRAISE works"><p class="eyebrow">SMALL STEPS. NEW POSSIBILITIES.</p><h2>From something you have,<br>to something you know.</h2>
-          <div class="journey-step"><span class="journey-icon">${icon("document")}</span><div><h3>Bring your knowledge</h3><p>Start with material you already trust.</p></div></div>
-          <div class="journey-step"><span class="journey-icon">${icon("sparkles")}</span><div><h3>Make it a learning experience</h3><p>Clear explanations, at different levels.</p></div></div>
-          <div class="journey-step"><span class="journey-icon">${icon("headphones")}</span><div><h3>Learn your way</h3><p>Read, listen, and ask along the way.</p></div></div>
-          <p class="journey-footnote">${icon("leaf")}Built around people. Supported by AI.</p>
-        </aside>
-      </div>
-      <section class="library" aria-labelledby="library-title"><div class="section-heading"><div><h2 id="library-title">Your material <span class="count-pill" id="material-count">${state.materials.length}</span></h2><p>A home for the knowledge your courses are built on.</p></div>
-        <label class="search-field">${icon("search")}<span class="sr-only">Search material</span><input id="material-search" type="search" placeholder="Search material…" value="${escape(state.search)}"></label></div>
-        <div id="material-results">${materialTable()}</div>
-        <p class="tip-line">${icon("info")}These are sample documents. Add one of your own to preview the upload journey; its contents won’t be read.</p>
-      </section>`;
+      <div class="grid-upload"><section class="card card-padding" aria-labelledby="upload-title"><div class="card-title-row"><h2 id="upload-title">Add your teaching material</h2>${icon("upload")}</div>
+      <form id="upload-form"><fieldset class="plain-fieldset" ${state.uploadBusy ? "disabled" : ""}><div class="drop-zone" id="drop-zone"><span class="upload-symbol">${icon("upload")}</span><strong id="file-heading">${state.selectedFile ? escape(state.selectedFile.name) : "Drag your document here"}</strong><p>or <label class="file-label" for="file-input" tabindex="0">browse files</label> to get started</p><span class="file-note" id="file-note">${state.selectedFile ? `${escape(formatSize(state.selectedFile.size))} · Ready to upload` : "PDF, Word or CSV · Up to 100 MB"}</span><input type="file" class="sr-only" id="file-input" accept=".pdf,.docx,.doc,.csv" aria-label="Choose a PDF, Word or CSV document"></div>
+      <div class="form-grid"><div class="field"><label for="upload-course">Course name or reference</label><input id="upload-course" name="course" maxlength="120" placeholder="e.g. Introduction to artificial intelligence" value="${escape(state.uploadName)}" required></div><div class="field"><label for="upload-language">Document language</label><select id="upload-language" name="language">${languageOptions(state.uploadLanguage)}</select></div></div>
+      <details class="advanced upload-advanced"><summary>Course settings</summary><div class="field"><label for="upload-activity">Activity reference</label><input id="upload-activity" name="activity" maxlength="120" value="${escape(state.activityId)}" required><small>For an existing Moodle course, enter its authorized course reference above and the matching activity here.</small></div></details>
+      <div class="form-bottom"><span>${icon("lock")}Securely sent through your UPRAISE connection</span><button class="button" type="submit">${icon(state.uploadBusy ? "loader" : "upload", state.uploadBusy ? "spinner" : "")}${state.uploadBusy ? "Uploading…" : state.uploadAttempt?.failed ? "Retry upload" : "Upload material"}</button></div></fieldset><p class="inline-error" id="upload-error" role="alert" ${state.uploadError ? "" : "hidden"}>${escape(state.uploadError)}</p></form></section>
+      <aside class="journey-card" aria-label="How UPRAISE works"><p class="eyebrow">SMALL STEPS. NEW POSSIBILITIES.</p><h2>From something you have,<br>to something you know.</h2><div class="journey-step"><span class="journey-icon">${icon("document")}</span><div><h3>Bring your knowledge</h3><p>Start with material you already trust.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("sparkles")}</span><div><h3>Make it a learning experience</h3><p>Clear explanations, at different levels.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("headphones")}</span><div><h3>Learn your way</h3><p>Read, listen, and ask along the way.</p></div></div><p class="journey-footnote">${icon("leaf")}Built around people. Supported by AI.</p></aside></div>
+      <section class="library" aria-labelledby="library-title"><div class="section-heading"><div><h2 id="library-title">Your material <span class="count-pill" id="material-count">${state.materials.length}</span></h2><p>A home for the knowledge your courses are built on.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search material</span><input id="material-search" type="search" placeholder="Search material…" value="${escape(state.search)}"></label></div><div id="material-results">${materialTable()}</div><p class="tip-line">${icon("info")}PDF, Word and UTF-8 CSV are supported. Processing completion does not establish source accuracy.</p></section>`;
     const fileInput = document.querySelector("#file-input");
     fileInput.addEventListener("change", () => chooseFile(fileInput.files[0]));
     const zone = document.querySelector("#drop-zone");
-    zone.addEventListener("dragover", event => { event.preventDefault(); zone.classList.add("dragging"); });
+    zone.addEventListener("dragover", event => { event.preventDefault(); if (!state.uploadBusy) zone.classList.add("dragging"); });
     zone.addEventListener("dragleave", () => zone.classList.remove("dragging"));
-    zone.addEventListener("drop", event => { event.preventDefault(); zone.classList.remove("dragging"); if (event.dataTransfer.files.length > 1) showUploadError("Please choose one document at a time."); else chooseFile(event.dataTransfer.files[0]); });
-    document.querySelector(".file-label").addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInput.click(); } });
+    zone.addEventListener("drop", event => { event.preventDefault(); zone.classList.remove("dragging"); if (state.uploadBusy) return; if (event.dataTransfer.files.length > 1) showUploadError("Choose one document at a time."); else chooseFile(event.dataTransfer.files[0]); });
+    document.querySelector(".file-label").addEventListener("keydown", event => { if (["Enter", " "].includes(event.key) && !state.uploadBusy) { event.preventDefault(); fileInput.click(); } });
   }
-
-  function languageOptions(selected) { return Object.entries(languages).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join(""); }
   function formatSize(bytes) { return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`; }
-  function showUploadError(message) { const error = document.querySelector("#upload-error"); error.textContent = message; error.hidden = false; }
-
+  function showUploadError(message) { state.uploadError = message; const error = document.querySelector("#upload-error"); if (error) { error.textContent = message; error.hidden = false; } }
   function chooseFile(file) {
-    if (!file) return;
+    if (!file || state.uploadBusy) return;
     let error = "";
     if (!/\.(pdf|docx|doc|csv)$/i.test(file.name)) error = "Choose a PDF, Word (.docx or .doc), or CSV document.";
-    else if (file.size === 0) error = "This file is empty. Please choose another document.";
-    else if (file.size > 100 * 1024 * 1024) error = "Please choose a document smaller than 100 MB.";
-    if (error) {
-      state.selectedFile = null;
-      document.querySelector("#file-input").value = "";
-      document.querySelector("#file-heading").textContent = "Drag your document here";
-      document.querySelector("#file-note").textContent = "PDF, Word or CSV · Up to 100 MB";
-      showUploadError(error);
-      return;
+    else if (!file.size) error = "This file is empty. Please choose another document.";
+    else if (file.size > 100 * 1024 * 1024) error = "Please choose a document up to 100 MB.";
+    state.selectedFile = error ? null : file;
+    document.querySelector("#file-heading").textContent = error ? "Drag your document here" : file.name;
+    document.querySelector("#file-note").textContent = error ? "PDF, Word or CSV · Up to 100 MB" : `${formatSize(file.size)} · Ready to upload`;
+    if (error) { document.querySelector("#file-input").value = ""; showUploadError(error); return; }
+    if (!state.uploadName) {
+      state.uploadName = file.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").slice(0, 120);
+      document.querySelector("#upload-course").value = state.uploadName;
     }
-    state.selectedFile = file;
-    document.querySelector("#file-heading").textContent = file.name;
-    document.querySelector("#file-note").textContent = `${formatSize(file.size)} · Selected for preview`;
-    const nameInput = document.querySelector("#upload-course");
-    if (!nameInput.value.trim()) { state.uploadName = file.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").slice(0, 100); nameInput.value = state.uploadName; }
-    document.querySelector("#upload-error").hidden = true;
+    state.uploadError = ""; document.querySelector("#upload-error").hidden = true;
   }
-
   function materialTable() {
-    const materials = state.materials.filter(item => `${item.name} ${item.course}`.toLowerCase().includes(state.search.toLowerCase()));
-    if (!materials.length) return `<div class="card empty-state">${icon("document")}<h3>${state.search ? "No matching material" : "A fresh start for your next course"}</h3><p>${state.search ? "Try another filename or course name." : "Choose a document above to add your first piece of material."}</p></div>`;
-    return `<div class="table-shell"><table><thead><tr><th scope="col">Document</th><th class="table-course" scope="col">Course</th><th class="table-language" scope="col">Language</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${materials.map(item => `
-      <tr><td><div class="material-name">${fileIcon(item)}<div><strong>${escape(item.name)}</strong><small>${escape(item.size)} <span aria-hidden="true">·</span> ${escape(item.detail)}</small></div></div></td><td class="muted table-course">${escape(item.course)}</td><td class="muted table-language">${escape(languageLabel(item.language))}</td><td>${badge(item.status === "ready" ? "Ready to use" : "Processing preview", item.status === "ready" ? "" : "badge-amber", item.status === "ready" ? "check" : "clock")}</td>
-      <td><div class="row-actions"><button class="text-button" data-action="create-from-material" data-id="${escape(item.id)}" ${item.status !== "ready" ? "disabled" : ""} aria-label="Create course from ${escape(item.name)}">Create course ${icon("arrow")}</button><button class="icon-button" data-action="remove-material" data-id="${escape(item.id)}" aria-label="Remove ${escape(item.name)}">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>`;
+    const alert = state.materialError ? errorBox(state.materialError, "refresh-workspace", "Refresh material") : "";
+    const deletion = state.deletion?.error ? errorBox(`Removal pending for ${state.deletion.name}. ${state.deletion.error}`, "retry-removal", "Retry this removal") : "";
+    const materials = state.materials.filter(item => `${item.filename} ${item.course_id}`.toLowerCase().includes(state.search.toLowerCase()));
+    if (!materials.length) return `${alert}${deletion}<div class="card empty-state">${icon("document")}<h3>${state.search ? "No matching material" : "A fresh start for your next course"}</h3><p>${state.search ? "Try another filename or course name." : "Upload a document above to add your first piece of material."}</p></div>`;
+    return `${alert}${deletion}<div class="table-shell"><table><thead><tr><th scope="col">Document</th><th class="table-course" scope="col">Course</th><th class="table-language" scope="col">Language</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${materials.map(item => {
+      const ready = item.status === "DONE";
+      const pending = ["QUEUED", "RUNNING"].includes(item.status);
+      const status = ready ? "Ready to use" : pending ? `Processing · ${percent(item.progress).toFixed(2)}%` : item.status === "FAILED" ? "Couldn’t process" : "Cancelled";
+      return `<tr><td><div class="material-name">${fileIcon(item)}<div><strong>${escape(item.filename)}</strong><small>${Number(item.chunk_count || 0)} source sections${state.uploadJobs.has(item.document_id) ? " · Recently uploaded" : ""}</small></div></div></td><td class="muted table-course">${escape(item.course_id)}</td><td class="muted table-language">${escape(languageLabel(item.language))}</td><td>${badge(status, ready ? "" : "badge-amber", ready ? "check" : "clock")}</td><td><div class="row-actions"><button class="text-button" data-action="create-from-material" data-id="${escape(item.document_id)}" ${ready ? "" : "disabled"} aria-label="Create course from ${escape(item.filename)}">Create course ${icon("arrow")}</button><button class="icon-button" data-action="remove-material" data-id="${escape(item.document_id)}" aria-label="Remove ${escape(item.filename)}">${icon("trash")}</button></div></td></tr>`;
+    }).join("")}</tbody></table></div>`;
   }
-
-  function uploadMaterial(form) {
-    if (!state.selectedFile) { showUploadError("Choose a document first, or explore the sample material below."); return; }
-    const courseName = form.elements.course.value.trim();
-    if (!courseName) { showUploadError("Give your material a course name."); form.elements.course.focus(); return; }
+  function updateMaterialList() {
+    const target = document.querySelector("#material-results");
+    if (target) { target.innerHTML = materialTable(); document.querySelector("#material-count").textContent = state.materials.length; }
+  }
+  async function uploadMaterial(form) {
+    if (state.uploadBusy) return;
+    if (!state.selectedFile) { showUploadError("Choose a document before uploading."); return; }
+    const fields = { course_id: form.elements.course.value.trim(), activity_id: form.elements.activity.value.trim(), language: form.elements.language.value, source_ref: state.selectedFile.name.slice(0, 200) };
+    if (!fields.course_id || !fields.activity_id) { showUploadError("Enter the course name and activity reference."); return; }
     const file = state.selectedFile;
-    const id = `material-${crypto.randomUUID()}`;
-    state.materials.unshift({ id, name: file.name, course: courseName, language: form.elements.language.value, size: formatSize(file.size), format: file.name.split(".").pop().toUpperCase(), detail: "Preview file · contents not read", status: "processing", local: true });
-    state.selectedFile = null;
-    state.uploadName = "";
-    state.search = "";
-    renderMaterials();
-    toast("Added to this preview. No document was uploaded or processed.");
-    const timer = setTimeout(() => {
-      uploadTimers.delete(timer);
-      const material = getMaterial(id);
-      if (!material) return;
-      material.status = "ready";
-      if (state.page === "materials") {
-        document.querySelector("#material-results").innerHTML = materialTable();
-      } else if (state.page === "generate" && !state.generation && !state.generatedId) renderGenerate();
-      toast("Your material is ready for the next preview step. Course content will use sample text.");
-    }, 1800);
-    uploadTimers.add(timer);
+    state.uploadBusy = true; state.uploadError = ""; renderMaterials();
+    try {
+      fields.content_hash = await api.sha256(await file.arrayBuffer());
+      const signature = JSON.stringify({ ...fields, filename: file.name, size: file.size });
+      if (state.uploadAttempt?.signature !== signature) state.uploadAttempt = { signature, key: crypto.randomUUID() };
+      const body = new FormData(); Object.entries(fields).forEach(([key, value]) => body.append(key, value)); body.append("file", file, file.name);
+      const accepted = await api.request("/v1/documents", { method: "POST", body, headers: { "Idempotency-Key": state.uploadAttempt.key } });
+      if (!uuidPattern.test(accepted?.document_id) || !uuidPattern.test(accepted?.job_id)) throw new Error("The backend accepted an unexpected upload response. Refresh material before retrying.");
+      state.uploadJobs.set(accepted.document_id, accepted.job_id);
+      state.selectedFile = null; state.uploadName = ""; state.uploadAttempt = null;
+      await loadMaterials(); schedulePoll(); toast("Material uploaded. You can follow its processing in your library.");
+    } catch (error) {
+      if (state.uploadAttempt) state.uploadAttempt.failed = true;
+      state.uploadError = `${error.message}${error.uncertain ? " Retry with the same file and settings to reuse this upload request." : ""}`;
+    } finally { state.uploadBusy = false; if (state.page === "materials") renderMaterials(); }
   }
-
   function removeMaterialDialog(id) {
+    if (state.deletion?.error && state.deletion.id !== id) { toast("Finish retrying the pending removal before removing another document."); return; }
     const material = getMaterial(id);
     if (!material) return;
-    const dependent = state.courses.filter(course => course.materialId === id).length;
-    openModal(`${modalHeader("Remove this material?", "YOUR MATERIAL")}<p class="modal-copy"><strong>${escape(material.name)}</strong><br>${dependent ? `This will also remove ${dependent === 1 ? "the sample course" : `${dependent} sample courses`} created from it.` : "This removes the document from this preview workspace."} You can restore the original examples with Reset demo.</p><p class="modal-disclaimer">Only sample data in this browser tab will change.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Keep material</button><button class="button button-danger" data-action="confirm-remove" data-id="${escape(id)}">Remove material</button></div>`);
+    state.deletion = { id, name: material.filename, error: "", busy: false };
+    openModal(`${modalHeader("Remove this material?", "YOUR MATERIAL")}<p class="modal-copy"><strong>${escape(material.filename)}</strong><br>Every generated course that uses this document will also be permanently removed, across all levels and languages. This cannot be undone.</p><div id="deletion-error"></div><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Keep material</button><button class="button button-danger" data-action="confirm-remove">Remove material and courses</button></div>`);
+  }
+  async function confirmRemove() {
+    const target = state.deletion;
+    if (!target || target.busy) return;
+    target.busy = true;
+    const button = modal.querySelector('[data-action="confirm-remove"]'); if (button) button.disabled = true;
+    try {
+      await api.request(`/v1/documents/${target.id}`, { method: "DELETE" });
+      if (state.player?.lesson.chunks.some(chunk => chunk.sources.some(source => source.document_id === target.id))) await endLearning("ERROR", true);
+      for (const [id, job] of state.jobs) if (job.materialId === target.id) { state.jobs.delete(id); if (state.activeJobId === id) state.activeJobId = null; }
+      state.bundles.clear(); state.generatedId = null; state.deletion = null;
+      modal.close(); await Promise.allSettled([loadMaterials(), loadCourses()]); render(); toast("The material and its dependent courses were removed.");
+    } catch (error) {
+      target.error = error.message;
+      const message = document.querySelector("#deletion-error"); if (message) message.innerHTML = errorBox(error.message);
+      if (button) { button.disabled = false; button.textContent = "Retry this removal"; }
+      if (state.page === "materials") updateMaterialList();
+    } finally { target.busy = false; }
   }
 
-  function confirmRemove(id) {
-    if (state.generation?.materialId === id) { clearInterval(generationTimer); state.generation = null; }
-    if (state.player && getCourse(state.player.courseId)?.materialId === id) { pausePlayback(); state.player = null; clearQuestion(); }
-    state.materials = state.materials.filter(item => item.id !== id);
-    state.courses = state.courses.filter(item => item.materialId !== id);
-    if (!getCourse(state.generatedId)) state.generatedId = null;
-    if (!getMaterial()) selectMaterial(state.materials.find(item => item.status === "ready")?.id || null);
-    modal.close();
-    render();
-    toast("Removed from the preview. Reset demo restores the original sample data.");
+  function summaryFromBundle(bundle) {
+    const variants = variantsOf(bundle);
+    const first = Object.values(variants)[0];
+    return { ...first, id: bundle.job_id, title: first.lesson_id.replace(/[_-]/g, " "), variants };
   }
-
+  function validateLesson(lesson, jobId) {
+    if (!lesson || lesson.job_id !== jobId || !uuidPattern.test(jobId) || !lesson.learner_level
+      || !Array.isArray(lesson.chunks) || !lesson.chunks.length || expired(lesson.expires_at)
+      || !["course_id", "activity_id", "lesson_id", "language"].every(key => typeof lesson[key] === "string")) throw new Error("This course is unavailable or its content could not be verified.");
+    const ids = new Set();
+    for (const [index, chunk] of lesson.chunks.entries()) {
+      if (chunk.index !== index || !uuidPattern.test(chunk.chunk_id) || ids.has(chunk.chunk_id)
+        || typeof chunk.text !== "string" || !chunk.text.trim() || !Array.isArray(chunk.sources)
+        || !Number.isFinite(chunk.duration_seconds) || chunk.duration_seconds <= 0
+        || !/^[a-f0-9]{64}$/i.test(chunk.audio_sha256 || "")) throw new Error("This course’s text or audio metadata could not be verified.");
+      ids.add(chunk.chunk_id);
+    }
+    return lesson;
+  }
+  async function fetchBundle(id) {
+    const bundle = await api.request(`/v1/jobs/${encodeURIComponent(id)}/result`);
+    const variants = variantsOf(bundle);
+    if (!Object.keys(variants).length) throw new Error("This course has no available learning levels.");
+    for (const lesson of Object.values(variants)) validateLesson(lesson, id);
+    state.bundles.set(id, bundle);
+    return bundle;
+  }
+  function partTitle(chunk) {
+    const line = chunk.text.split(/\r?\n/).map(value => value.trim()).find(Boolean) || `Part ${chunk.index + 1}`;
+    const plain = line.replace(/^#+\s*/, "").replace(/\*\*/g, "");
+    return plain.length > 75 ? plain.slice(0, 72) + "…" : plain;
+  }
+  function textParagraphs(text, className = "lesson-paragraph") {
+    return String(text).split(/\n\s*\n/).filter(Boolean).map(paragraph => `<p class="${className}">${escape(paragraph.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+  }
+  function sourceReferences(sources) {
+    return sources.map(source => {
+      if (source.source_format === "csv") return (source.row_ranges || []).map(span => `CSV rows ${Number(span.start)}–${Number(span.end)}`).join(", ");
+      if (["doc", "docx"].includes(source.source_format)) return source.source_blocks?.length ? `Word blocks ${source.source_blocks.map(Number).join(", ")}` : "Word source";
+      return source.pages?.length ? `Pages ${source.pages.map(Number).join(", ")}` : "Course material";
+    }).filter(Boolean).join(" · ");
+  }
+  function reviewDetails(report) {
+    if (!report) return "";
+    return `<details class="advanced"><summary>Automated review and source evidence</summary><p class="small-copy">${escape(report.summary || "Automated checks are supporting evidence; human review remains required.")}</p>${report.issues?.length ? `<ul class="review-findings">${report.issues.map(issue => `<li>${escape(issue.message)}</li>`).join("")}</ul>` : ""}<p class="small-copy">AI checks do not constitute human approval.</p></details>`;
+  }
   function renderGenerate() {
-    const ready = state.materials.filter(item => item.status === "ready");
-    if (!getMaterial() || getMaterial()?.status !== "ready") { if (ready.length) selectMaterial(ready[0].id); }
-    const material = getMaterial();
+    const ready = state.materials.filter(item => item.status === "DONE");
+    if (!getMaterial() && ready.length) selectedSource(ready[0].document_id);
+    const job = state.jobs.get(state.activeJobId);
     const generated = getCourse(state.generatedId);
     main.innerHTML = `${intro("02", "CREATE SOMETHING WORTH LEARNING", "Your knowledge.<br><em>A whole new learning experience.</em>", "Choose your material and a few preferences. We’ll take it from there.")}
-      ${generated ? `<div class="success-banner" role="status">${icon("checkCircle")}<div><strong>Your sample course is ready to explore.</strong><p>This is a preview of the generated result. No AI generation has taken place.</p></div></div>` : ""}
-      <div class="two-column"><section class="card card-padding" aria-label="Course settings">${state.generation ? generationView() : generated ? generatedView(generated) : ready.length ? generationForm(ready) : `<div class="empty-state">${icon("document")}<h3>Let’s start with your material</h3><p>Add a document in the first step.<br>It will appear here when it is ready.</p><a class="button" href="#materials">${icon("upload")}Upload material</a></div>`}</section>
-      <aside class="card course-summary" id="course-summary" aria-label="Course preview">${courseSummary(generated, material)}</aside></div>`;
+      ${generated && !job ? `<div class="success-banner" role="status">${icon("checkCircle")}<div><strong>Your course is ready for review.</strong><p>Explore the generated text and narration. Human approval remains separate.</p></div></div>` : ""}
+      <div class="two-column"><section class="card card-padding" aria-label="Course settings">${job ? generationView(job) : generated ? generatedView(generated) : ready.length ? generationForm(ready) : `${state.materialError ? errorBox(state.materialError, "refresh-workspace") : ""}<div class="empty-state">${icon("document")}<h3>Let’s start with your material</h3><p>Upload a document in the first step.<br>It will appear here when processing is complete.</p><a class="button" href="#materials">${icon("upload")}Upload material</a></div>`}</section><aside class="card course-summary" id="course-summary" aria-label="Course summary">${courseSummary(generated)}</aside></div>
+      <section class="library" id="recent-jobs">${recentJobs()}</section>`;
   }
-
   function generationForm(ready) {
-    return `<form id="generation-form"><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.name)}</strong><small>${escape(item.detail)} · ${escape(languageLabel(item.language))}</small></span><input type="radio" name="source" value="${escape(item.id)}" ${item.id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>
-      <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div>
-        <div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
-      <div class="form-section"><div class="step-label"><span>3</span>One course. Different ways to understand.</div>${levelChips()}<p class="small-copy" style="margin:12px 0 0">The same ideas, explained at three levels. Learners choose the level that suits them before they start.</p></div>
-      <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="500" value="${state.draft.words}"></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}"><small>Pages or source blocks per window</small></div></div><p class="small-copy" style="margin:12px 0 0">Preferences are illustrative in this preview.</p></details>
-      <button class="button button-wide generate-submit" type="submit">${icon("sparkles")}Generate course ${icon("arrow")}</button><p class="preview-note">${icon("info")}This preview uses a sample course outline. Documents aren’t read; language and voice settings won’t change the sample English content.</p><p class="inline-error" id="generation-error" role="alert" hidden></p></form>`;
+    return `<form id="generation-form"><fieldset class="plain-fieldset" ${state.generationBusy ? "disabled" : ""}><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.filename)}</strong><small>${escape(item.course_id)} · ${escape(languageLabel(item.language))}</small></span><input type="radio" name="source" value="${escape(item.document_id)}" ${item.document_id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>
+      <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div><div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
+      <div class="form-section"><div class="step-label"><span>3</span>One course. Different ways to understand.</div>${levelChips()}<p class="small-copy" style="margin:12px 0 0">All configured difficulty levels are generated together. Learners choose an available level before starting.</p></div>
+      <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
+      <button class="button button-wide generate-submit" type="submit">${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
   }
-
   function voiceOptions(language) {
-    const voices = language === "it" ? [["Bianca", "Bianca · Italian"]] : [["Joanna", "Joanna · US English"], ["Amy", "Amy · British English"]];
+    const voices = language.split("-")[0] === "it" ? [["Bianca", "Bianca · Italian"], ["Adriano", "Adriano · Italian"]] : [["Joanna", "Joanna · US English"], ["Matthew", "Matthew · US English"], ["Amy", "Amy · British English"], ["Brian", "Brian · British English"]];
     return voices.map(([value, label]) => `<option value="${value}" ${value === state.draft.voice ? "selected" : ""}>${label}</option>`).join("");
   }
-
-  function courseSummary(course, material) {
-    const contentKey = course?.contentKey || (material?.id === "material-responsible" ? "responsible" : "ai");
-    const parts = fixtures.lessons[contentKey];
-    const theme = contentKey === "responsible" ? "sand" : "teal";
-    return `<div class="card-title-row"><h2>A little look ahead</h2>${icon("eye")}</div>${art(course?.theme || theme)}<div class="summary-body"><span class="sample-label">${course ? "SAMPLE COURSE" : "ILLUSTRATIVE COURSE PREVIEW"}</span><h3 id="summary-title">${escape(course?.title || state.draft.title || "Your next learning experience")}</h3><p class="small-copy">${escape(course?.description || "A guided path through your material, with text, voice, and room for questions.")}</p>
-      <div class="summary-meta"><span>${icon("book")}${parts.length} sample parts</span><span>${icon("layers")}3 levels</span></div><hr class="summary-divider"><span class="field-label">Your sample learning path</span><ol class="outline-list">${parts.slice(0, 4).map((part, i) => `<li><span>${String(i + 1).padStart(2, "0")}</span><span>${escape(part.title)}</span></li>`).join("")}${parts.length > 4 ? `<li><span>···</span><span>And ${parts.length - 4} more parts to explore</span></li>` : ""}</ol><p class="preview-note" style="margin-top:22px">${icon("info")}Actual course structure will come from your material once the backend is connected.</p></div>`;
+  function courseSummary(course) {
+    const bundle = course && state.bundles.get(course.id);
+    const variants = variantsOf(bundle);
+    const lesson = Object.values(variants)[0];
+    const material = getMaterial(state.jobs.get(state.activeJobId)?.materialId || state.selectedMaterial);
+    const title = course?.title || state.jobs.get(state.activeJobId)?.title || state.draft.title || "Your next learning experience";
+    return `<div class="card-title-row"><h2>${course ? "Your learning experience" : "A little look ahead"}</h2>${icon("book")}</div>${art("teal")}<div class="summary-body"><span class="sample-label">${course ? "AI-GENERATED DRAFT" : "BUILT FROM YOUR MATERIAL"}</span><h3 id="summary-title">${escape(title)}</h3><p class="small-copy">${material ? `Source: ${escape(material.filename)}` : "A guided path through your material, with text, voice, and room for questions."}</p>${lesson ? `<div class="summary-meta"><span>${icon("book")}${lesson.chunks.length} parts</span><span>${icon("layers")}${Object.keys(variants).length} levels</span></div><hr class="summary-divider"><span class="field-label">Your learning path</span><ol class="outline-list">${lesson.chunks.slice(0, 5).map((chunk, index) => `<li><span>${String(index + 1).padStart(2, "0")}</span><span>${escape(partTitle(chunk))}</span></li>`).join("")}</ol>` : `<hr class="summary-divider"><div class="journey-step"><span class="journey-icon">${icon("document")}</span><div><h3>Your source comes first</h3><p>The learning path will be based on the selected material.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("headphones")}</span><div><h3>Read, listen, and ask</h3><p>Text and narration are prepared for each learning level.</p></div></div>`}<p class="preview-note" style="margin-top:22px">${icon("info")}Courses remain AI-generated drafts until reviewed through your approval process.</p></div>`;
   }
-
-  function generationView() {
-    const generation = state.generation;
-    const stages = ["Understanding your material", "Shaping a clear learning path", "Preparing text and narration"];
-    const step = Math.min(2, Math.floor(generation.progress / 34));
-    return `<div class="progress-card" role="status"><div class="progress-symbol">${icon("sparkles")}</div><span class="sample-label">SIMULATED GENERATION</span><h2 style="margin-top:12px">Good learning takes a little care.</h2><p class="small-copy">A preview of how we’ll keep you in the loop.</p><div class="progress-track" role="progressbar" aria-label="Sample generation progress" aria-valuenow="${generation.progress}" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:${generation.progress}%"></div></div><div class="progress-description"><span>Sample progress</span><span>${generation.progress}%</span></div>${stages.map((stage, i) => `<div class="progress-stage ${i < step ? "done" : i > step ? "pending" : ""}">${icon(i < step ? "checkCircle" : i === step ? "loader" : "clock", i === step ? "spinner" : "")}<span>${stage}</span></div>`).join("")}<p class="preview-note" style="text-align:left;margin-top:28px">${icon("info")}This animation demonstrates the experience. No file processing, AI generation, or audio creation is running.</p><button class="text-button" data-action="cancel-generation" style="margin-top:15px">Cancel preview</button></div>`;
-  }
-
-  function startGeneration(form) {
-    const title = form.elements.title.value.trim();
-    if (!title) { const error = document.querySelector("#generation-error"); error.textContent = "Give your course a title before continuing."; error.hidden = false; form.elements.title.focus(); return; }
+  async function startGeneration(form) {
+    if (state.generationBusy) return;
     const material = getMaterial(form.elements.source.value);
-    if (!material || material.status !== "ready") return;
-    state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words: Number(form.elements.words.value), window: Number(form.elements.window.value) };
-    state.generation = { materialId: material.id, draft: { ...state.draft }, progress: 0 };
-    state.generatedId = null;
-    renderGenerate();
-    clearInterval(generationTimer);
-    generationTimer = setInterval(() => {
-      if (!state.generation) { clearInterval(generationTimer); return; }
-      state.generation.progress = Math.min(100, state.generation.progress + 10);
-      if (state.generation.progress >= 100) {
-        const generation = state.generation;
-        const contentKey = material.id === "material-responsible" ? "responsible" : "ai";
-        const course = { id: `course-${crypto.randomUUID()}`, materialId: material.id, title: generation.draft.title, language: generation.draft.language, voice: generation.draft.voice, theme: contentKey === "responsible" ? "sand" : "teal", contentKey, minutes: contentKey === "responsible" ? 8 : 12, description: "A sample learning experience. Explore the structure, explanations, and learning controls.", created: "Just added · preview", completed: false, local: true };
-        state.courses.unshift(course);
-        state.generatedId = course.id;
-        state.generation = null;
-        clearInterval(generationTimer);
-        if (state.page === "generate") renderGenerate();
-        else if (state.page === "learn" && !state.player) renderLearn();
-        toast("Your sample course is ready. Preview it or start learning.");
-      } else if (state.page === "generate") renderGenerate();
-    }, 450);
+    const title = form.elements.title.value.trim();
+    const words = Number(form.elements.words.value), maximum = Number(form.elements.maximum.value), windowSize = Number(form.elements.window.value);
+    if (!material || material.status !== "DONE" || !title) { state.generationError = "Choose ready material and enter a course title."; renderGenerate(); return; }
+    if (words > maximum) { state.generationError = "Target words must be at or below the maximum words per part."; renderGenerate(); return; }
+    state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize };
+    const body = { lesson_id: title, course_id: material.course_id, activity_id: material.activity_id, document_ids: [material.document_id], language: state.draft.language, voice: state.draft.voice, options: { source_window_pages: windowSize, target_chunk_words: words, max_chunk_words: maximum } };
+    const signature = JSON.stringify(body);
+    if (state.generationAttempt?.signature !== signature) state.generationAttempt = { signature, key: crypto.randomUUID() };
+    state.generationBusy = true; state.generationError = ""; renderGenerate();
+    try {
+      const accepted = await api.request("/v2/lesson-jobs", { method: "POST", json: body, headers: { "Idempotency-Key": state.generationAttempt.key } });
+      if (!uuidPattern.test(accepted?.job_id)) throw new Error("The generation response could not be read. Refresh processing before retrying.");
+      const job = { job_id: accepted.job_id, title, materialId: material.document_id, status: "QUEUED", step: "QUEUED", progress: 0, type: "generation", trackingError: "" };
+      state.jobs.set(job.job_id, job); state.activeJobId = job.job_id; state.generatedId = null; state.generationAttempt = null;
+      await refreshJob(job); schedulePoll();
+    } catch (error) {
+      if (state.generationAttempt) state.generationAttempt.failed = true;
+      state.generationError = `${error.message}${error.uncertain ? " Retry unchanged settings to reuse the same generation request." : ""}`;
+    } finally { state.generationBusy = false; if (state.page === "generate") renderGenerate(); }
   }
-
+  function stageLabel(step) {
+    const labels = { QUEUED: "Waiting to begin", SOURCE: "Understanding your material", GENERATE: "Preparing the learning content", REVIEW: "Checking the explanations", FINALIZE: "Refining the course", TRANSLATE: "Preparing your selected language", SPEECH: "Creating the narration", PUBLISH: "Saving the complete course", DONE: "Ready for review", FAILED: "Processing stopped", CANCELLED: "Cancelled" };
+    return labels[step] || "Processing your course";
+  }
+  function generationView(job) {
+    const done = job.status === "DONE", failed = ["FAILED", "CANCELLED"].includes(job.status);
+    const details = job.error;
+    return `<div class="progress-card"><div class="progress-symbol">${icon(done ? "checkCircle" : failed ? "info" : "sparkles")}</div><span class="sample-label">${job.type === "revision" ? "COURSE REVISION" : "COURSE GENERATION"}</span><h2 style="margin-top:12px">${done ? "Ready for your next learning moment." : failed ? "This request couldn’t be completed." : "Good learning takes a little care."}</h2><p class="small-copy">${escape(job.title)}</p><div class="progress-track" role="progressbar" aria-label="Course processing progress" aria-valuenow="${percent(job.progress)}" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:${percent(job.progress)}%"></div></div><div class="progress-description"><span>${escape(stageLabel(job.step))}</span><span>${percent(job.progress).toFixed(2)}%</span></div>
+      ${job.trackingError ? errorBox(`Status updates paused. ${job.trackingError}`, "retry-tracking", "Refresh status") : ""}${details ? `<div class="error-banner"><div><p>${escape(details.reason || details.code || "The backend reported a processing failure.")}</p>${details.review?.issues?.length ? `<ul class="review-findings">${details.review.issues.map(issue => `<li>${escape(issue)}</li>`).join("")}</ul>` : ""}${details.review?.revision_instructions?.length ? `<p>${escape(details.review.revision_instructions.join(" "))}</p>` : ""}</div></div>` : ""}
+      ${done ? `<button class="button button-wide" data-action="open-job-result" data-id="${escape(job.job_id)}">Open updated course ${icon("arrow")}</button>` : !failed ? `<p class="preview-note" style="margin-top:25px;text-align:left">${icon("info")}Updates refresh every five seconds. Generation continues on the backend while you browse.</p><button class="text-button" data-action="cancel-generation" data-id="${escape(job.job_id)}" ${job.cancelling ? "disabled" : ""}>${job.cancelling ? "Cancelling…" : "Cancel this request"}</button>` : ""}
+      <button class="text-button" data-action="new-generation" style="display:flex;margin:18px auto 0">${icon("plus")}${terminal.has(job.status) ? "Prepare a new course" : "Prepare another course"}</button></div>`;
+  }
+  function recentJobs() {
+    if (!state.jobs.size) return "";
+    return `<div class="section-heading"><div><h2>Recent processing</h2><p>Requests submitted in this tab. Accepted work continues after navigation.</p></div></div><div class="card activity-list">${[...state.jobs.values()].reverse().map(job => `<div class="activity-row"><div><strong>${escape(job.title)}</strong><small>${job.type === "revision" ? "Revision" : "Course generation"} · ${escape(stageLabel(job.step))}</small></div>${badge(job.status === "DONE" ? "Ready for review" : job.trackingError ? "Tracking paused" : `${percent(job.progress).toFixed(2)}%`, job.status === "DONE" ? "" : "badge-amber")}<button class="text-button" data-action="open-tracking" data-id="${escape(job.job_id)}">View ${icon("arrow")}</button></div>`).join("")}</div>`;
+  }
+  async function refreshJob(job) {
+    try {
+      const status = await api.request(`/v1/jobs/${job.job_id}`, { timeout: 30000 });
+      if (status.job_id !== job.job_id) throw new Error("The processing status did not match this request.");
+      Object.assign(job, status, { trackingError: "" });
+      if (job.status === "DONE" && !job.resultLoaded) {
+        const targetId = job.type === "revision" ? job.targetId : job.job_id;
+        await fetchBundle(targetId); job.resultLoaded = true;
+        await loadCourses();
+        if (job.type === "revision" && state.player?.lesson.job_id === targetId) await invalidatePlayer("This course was revised. Start a fresh session to use the updated content.");
+        if (state.activeJobId === job.job_id) { state.generatedId = targetId; state.activeJobId = null; state.resultLevel = job.level || ""; state.resultPart = job.partIndex || 0; }
+        toast(job.type === "revision" ? "The course revision is ready for review." : "Your generated course is ready for review.");
+      }
+    } catch (error) { job.trackingError = error.message; }
+    if (state.page === "generate") {
+      if (state.activeJobId === job.job_id || state.generatedId && job.resultLoaded) renderGenerate();
+      else { const list = document.querySelector("#recent-jobs"); if (list) list.innerHTML = recentJobs(); }
+    }
+  }
+  async function cancelGeneration(id) {
+    const job = state.jobs.get(id);
+    if (!job || terminal.has(job.status) || job.cancelling) return;
+    job.cancelling = true; renderGenerate();
+    try { await api.request(`/v1/jobs/${job.job_id}?reason=CANCEL`, { method: "DELETE" }); await refreshJob(job); }
+    catch (error) { job.trackingError = error.message; toast(`${error.message} Refresh status before retrying cancellation.`); }
+    finally { job.cancelling = false; if (state.page === "generate") renderGenerate(); schedulePoll(); }
+  }
   function generatedView(course) {
-    return `<div class="card-title-row"><h2>Ready for a first look</h2>${badge("Sample result", "badge-outline")}</div><h3 style="font-size:24px;font-weight:500;letter-spacing:-.6px;line-height:1.4;overflow-wrap:anywhere">${escape(course.title)}</h3><p class="small-copy">Your material, brought together as a guided experience. Choose a level to see how learning will feel.</p><div class="summary-meta"><span>${icon("book")}${getParts(course).length} parts</span><span>${icon("globe")}${escape(languageLabel(course.language))} selected</span><span>${icon("headphones")}Text & voice</span></div>${levelChips()}<hr class="summary-divider">${badge("AI-generated draft · Human review required", "badge-amber")}<p class="small-copy" style="margin:16px 0 22px">This result contains curated sample text, not content extracted from your document. Playback and questions demonstrate the interface.</p><button class="button button-wide" data-action="start-course" data-id="${escape(course.id)}">${icon("play")}Start learning</button><div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 0"><button class="button button-secondary" data-action="preview-course" data-id="${escape(course.id)}">${icon("eye")}Preview course</button><button class="button button-secondary" data-action="revise-course" data-id="${escape(course.id)}">${icon("edit")}Request changes</button></div><button class="text-button" data-action="new-generation" style="margin-top:25px">${icon("plus")}Create another course</button>`;
+    const variants = variantsOf(state.bundles.get(course.id));
+    if (!variants[state.resultLevel]) state.resultLevel = Object.keys(variants).find(level => level === "intermediate") || Object.keys(variants)[0];
+    const lesson = variants[state.resultLevel];
+    state.resultPart = Math.min(state.resultPart, lesson.chunks.length - 1);
+    const chunk = lesson.chunks[state.resultPart];
+    return `<div class="card-title-row"><h2>Ready for a first look</h2>${badge("AI-generated draft", "badge-amber")}</div><h3 class="result-course-title">${escape(course.title)}</h3><p class="small-copy">Choose a level and part to review the generated text and source references.</p><div class="form-grid"><div class="field"><label for="result-level">Learning level</label><select id="result-level">${Object.keys(variants).map(level => `<option value="${escape(level)}" ${state.resultLevel === level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="result-part">Course part</label><select id="result-part">${lesson.chunks.map((part, index) => `<option value="${index}" ${index === state.resultPart ? "selected" : ""}>Part ${index + 1}</option>`).join("")}</select></div></div><div class="result-text">${textParagraphs(chunk.text, "preview-text")}</div><p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report)}<div class="summary-meta"><span>${icon("clock")}${time(chunk.duration_seconds)}</span><span>${icon("globe")}${escape(languageLabel(lesson.language))}</span><span>${icon("headphones")}${escape(lesson.voice)}</span></div><p class="small-copy">Human review is required. Audio is available in the learning player while this course’s temporary output is retained.</p><button class="button button-wide" data-action="start-course" data-id="${escape(course.id)}">${icon("play")}Start learning</button><div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 0"><button class="button button-secondary" data-action="preview-course" data-id="${escape(course.id)}">${icon("eye")}Preview course</button><button class="button button-secondary" data-action="revise-course" data-id="${escape(course.id)}">${icon("edit")}Request changes</button></div><button class="text-button" data-action="new-generation" style="margin-top:25px">${icon("plus")}Create another course</button>`;
   }
-
   function renderLearn() {
     if (state.player) { if (state.player.complete) renderCompletion(); else renderPlayer(); return; }
-    main.innerHTML = `${intro("03", "A LITTLE CURIOSITY GOES A LONG WAY", "Make room for<br><em>your next ‘I get it.’</em>", "Pick a course. Find your level. Learn at your own pace.")}
-      <section aria-labelledby="courses-title"><div class="section-heading"><div><h2 id="courses-title">Your learning collection <span class="count-pill">${state.courses.length}</span></h2><p>Clear ideas, thoughtful explanations, and an AI teacher to ask along the way.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses</span><input id="course-search" type="search" placeholder="Find a course…" value="${escape(state.courseSearch)}"></label></div><div id="course-results">${courseCards()}</div></section>
-      <aside class="learning-note">${icon("lightbulb")}<div><strong>Same knowledge. Your way of understanding.</strong><p>Every course offers different difficulty levels. Choose one before starting; you can read, listen, and pause to ask a question.</p></div></aside>`;
+    main.innerHTML = `${intro("03", "A LITTLE CURIOSITY GOES A LONG WAY", "Make room for<br><em>your next ‘I get it.’</em>", "Pick a course. Find your level. Learn at your own pace.")}<section aria-labelledby="courses-title"><div class="section-heading"><div><h2 id="courses-title">Your learning collection <span class="count-pill">${state.courses.length}</span></h2><p>Generated courses with available text and narration, ready for draft preview.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses</span><input id="course-search" type="search" placeholder="Find a course…" value="${escape(state.courseSearch)}"></label></div><div id="course-results">${courseCards()}</div>${state.more ? `<button class="button button-secondary load-more" data-action="load-more">Load more courses ${icon("plus")}</button>` : ""}</section><aside class="learning-note">${icon("lightbulb")}<div><strong>Same knowledge. Your way of understanding.</strong><p>Choose an available level before starting. Generated courses are drafts; temporary audio normally expires after 24 hours.</p></div></aside>`;
   }
-
   function courseCards() {
     const courses = state.courses.filter(course => course.title.toLowerCase().includes(state.courseSearch.toLowerCase()));
-    if (!courses.length && state.courseSearch) return `<div class="card empty-state">${icon("search")}<h3>No courses found</h3><p>Try a different title.</p></div>`;
-    return `<div class="course-grid">${courses.map((course, index) => `<article class="card course-card">${art(course.theme, String(index + 1).padStart(2, "0"))}<div class="course-card-body"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px">${badge(course.completed ? "Preview completed" : "Ready to explore", course.completed ? "" : "badge-outline", course.completed ? "check" : "")}${badge("Sample", "badge-neutral")}</div><h2>${escape(course.title)}</h2><p class="small-copy">${escape(course.description)}</p><div class="summary-meta"><span>${icon("book")}${getParts(course).length} parts</span><span>${icon("clock")}~${course.minutes} min</span><span>${icon("globe")}${escape(languageLabel(course.language))}${course.local ? " selected" : ""}</span></div><div class="course-card-bottom">${levelChips()}<div class="course-card-cta"><button class="button" data-action="start-course" data-id="${escape(course.id)}">${course.completed ? "Explore again" : "Start learning"}${icon("arrow")}</button><button class="icon-button" data-action="preview-course" data-id="${escape(course.id)}" aria-label="Preview ${escape(course.title)}">${icon("eye")}</button></div></div></div></article>`).join("")}
-      <article class="create-course-card"><span class="upload-symbol">${icon("plus")}</span><h2>What will you learn next?</h2><p>There’s a learning experience waiting inside your material.</p><a class="button button-secondary" href="#generate">Create a course ${icon("arrow")}</a></article></div>`;
+    const alert = state.catalogError ? errorBox(state.catalogError, "refresh-workspace", "Refresh courses") : "";
+    if (!courses.length && state.courseSearch) return `${alert}<div class="card empty-state">${icon("search")}<h3>No courses found</h3><p>Try a different title or load more courses.</p></div>`;
+    return `${alert}<div class="course-grid">${courses.map((course, index) => `<article class="card course-card">${art(index % 2 ? "sand" : "teal", String(index + 1).padStart(2, "0"))}<div class="course-card-body">${badge("Draft · Human review required", "badge-amber")}<h2>${escape(course.title)}</h2><p class="small-copy">${escape(course.course_id)} · ${escape(course.activity_id)}</p><div class="summary-meta"><span>${icon("book")}${Number(course.chunk_count || course.chunks?.length || 0)} parts</span><span>${icon("globe")}${escape(languageLabel(course.language))}</span><span>${icon("headphones")}${escape(course.voice)}</span></div><div class="course-card-bottom">${levelChips(levelsFor(course))}<div class="course-card-cta"><button class="button" data-action="start-course" data-id="${escape(course.id)}">Start learning ${icon("arrow")}</button><button class="icon-button" data-action="preview-course" data-id="${escape(course.id)}" aria-label="Preview ${escape(course.title)}">${icon("eye")}</button></div></div></div></article>`).join("")}<article class="create-course-card"><span class="upload-symbol">${icon("plus")}</span><h2>What will you learn next?</h2><p>There’s a learning experience waiting inside your material.</p><a class="button button-secondary" href="#generate">Create a course ${icon("arrow")}</a></article></div>`;
+  }
+  async function previewCourse(id) {
+    openModal(`${modalHeader("Opening your course…")}<p class="modal-copy">Checking availability and loading the current learning path.</p>`);
+    const epoch = modalEpoch;
+    try {
+      const bundle = await fetchBundle(id);
+      if (!modal.open || epoch !== modalEpoch) return;
+      const lesson = Object.values(variantsOf(bundle))[0];
+      modal.innerHTML = `${modalHeader(lesson.lesson_id, "A FIRST LOOK")}<p class="modal-copy">${lesson.chunks.length} parts · ${Object.keys(variantsOf(bundle)).length} levels · ${escape(languageLabel(lesson.language))}</p>${lesson.chunks.map(chunk => `<section class="preview-part"><h3>${chunk.index + 1}. ${escape(partTitle(chunk))}</h3><p>${escape(chunk.text.slice(0, 350))}${chunk.text.length > 350 ? "…" : ""}</p></section>`).join("")}<p class="modal-disclaimer">AI-generated draft · Human review required.<br>Text and audio are available until ${escape(new Date(lesson.expires_at).toLocaleString())}.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close preview</button><button class="button" data-action="start-course" data-id="${escape(id)}">Start learning ${icon("arrow")}</button></div>`;
+    } catch (error) { if (modal.open && epoch === modalEpoch) modal.innerHTML = `${modalHeader("This course couldn’t be opened")}${errorBox(error.message)}<div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button></div>`; }
   }
 
-  function startCourseDialog(id) {
-    const course = getCourse(id);
-    if (!course) return;
-    openModal(`${modalHeader("Find your starting point", "LEARN YOUR WAY")}<p class="modal-copy">${escape(course.title)}<br>Choose the explanation style that feels right for you.</p><form id="start-form" data-id="${escape(id)}"><div class="level-options">${fixtures.levels.map(level => `<label class="level-option"><input type="radio" name="level" value="${level.id}" ${level.id === "intermediate" ? "checked" : ""}><span><strong>${level.label}</strong><small>${level.description}</small></span></label>`).join("")}</div><button class="button button-wide" type="submit">${icon("play")}Start learning</button><p class="modal-disclaimer">AI-generated draft · Human review required.<br>Sample English text, simulated playback, and example answers. Your progress lasts until this page is reloaded.</p></form>`);
+  async function startCourseDialog(id) {
+    if (state.player && !state.player.closed && !state.player.complete) {
+      navigate("learn"); toast("End your current learning session before starting another course."); return;
+    }
+    openModal(`${modalHeader("Finding your starting point…", "LEARN YOUR WAY")}<p class="modal-copy">Checking the available course and learning levels.</p>`);
+    const epoch = modalEpoch;
+    const pending = { id, busy: false, error: "" }; state.startPending = pending;
+    try {
+      pending.bundle = await fetchBundle(id);
+      if (state.startPending !== pending || !modal.open || epoch !== modalEpoch) return;
+      renderStartDialog();
+    } catch (error) {
+      if (state.startPending === pending && modal.open && epoch === modalEpoch) modal.innerHTML = `${modalHeader("This course is unavailable")}${errorBox(error.message)}<div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button></div>`;
+    }
   }
-
-  function startCourse(id, level) {
-    pausePlayback();
-    clearQuestion();
-    state.player = { courseId: id, level, index: 0, offset: 0, playing: false, speed: 1, complete: false, visited: new Set([0]) };
-    modal.close();
-    navigate("learn");
-    main.focus({ preventScroll: true });
-    window.scrollTo({ top: 0, behavior: "instant" });
+  function renderStartDialog() {
+    const pending = state.startPending;
+    if (!pending?.bundle) return;
+    const variants = variantsOf(pending.bundle);
+    const defaultLevel = pending.level || (variants.intermediate ? "intermediate" : Object.keys(variants)[0]);
+    modal.innerHTML = `${modalHeader("Find your starting point", "LEARN YOUR WAY")}<p class="modal-copy">${escape(Object.values(variants)[0].lesson_id)}<br>Choose the explanation style that feels right for you.</p><form id="start-form"><fieldset class="plain-fieldset" ${pending.busy ? "disabled" : ""}><div class="level-options">${Object.keys(variants).map(level => `<label class="level-option"><input type="radio" name="level" value="${escape(level)}" ${level === defaultLevel ? "checked" : ""}><span><strong>${escape(levelLabel(level))}</strong><small>${escape(levelDescriptions[level] || "An explanation profile configured for this course.")}</small></span></label>`).join("")}</div>
+      ${state.local ? `<label class="checkbox-label"><input id="questions-consent" type="checkbox" ${state.questionsConsent ? "checked" : ""}>Enable AI teacher questions for this development session</label>` : ""}
+      <details class="advanced" ${state.local ? "" : "open"}><summary>Session authorization</summary><div class="field" style="margin-top:15px"><label for="session-jwt">Signed lesson session token</label><input id="session-jwt" type="password" autocomplete="off" value="${escape(state.sessionToken)}" ${state.local ? "" : "required"}><small>${state.local ? "Optional in local development mode. A supplied token is always verified." : "Your Middleware must issue a signed token for this exact course, result and learning level. Questions follow its consent scope."}</small></div></details>
+      <button class="button button-wide generate-submit" type="submit">${icon(pending.busy ? "loader" : "play", pending.busy ? "spinner" : "")}${pending.busy ? "Opening your session…" : pending.error ? "Retry session start" : "Start learning"}</button></fieldset>${pending.error ? errorBox(pending.error) : ""}<p class="modal-disclaimer">AI-generated draft · Human review required.<br>${state.local ? "This opens a local draft preview, with real course text and audio." : "Your signed session assertion must attest the external approval of this exact result."}</p></form>`;
+    const close = modal.querySelector('[data-action="close-modal"]'); if (close) close.disabled = pending.busy;
   }
-
-  function paragraphsFor(part, level) {
-    if (level === "beginner") return [part.simple, part.paragraphs[0], part.example];
-    if (level === "advanced") return [part.advanced, ...part.paragraphs.slice(1)];
-    return part.paragraphs;
+  function sessionHeaders(player) { return player?.token ? { "X-UPRAISE-Session-JWT": player.token } : {}; }
+  async function startCourse(form) {
+    const pending = state.startPending;
+    if (!pending || pending.busy) return;
+    pending.level = form.elements.level.value;
+    state.sessionToken = form.querySelector("#session-jwt").value.trim();
+    state.questionsConsent = Boolean(form.querySelector("#questions-consent")?.checked);
+    if (!state.local && !state.sessionToken) { pending.error = "Enter the signed session token for this course."; renderStartDialog(); return; }
+    const selected = variantsOf(pending.bundle)[pending.level];
+    const body = { course_id: selected.course_id, activity_id: selected.activity_id, lesson_id: selected.lesson_id, language: selected.language, lesson_job_id: selected.job_id };
+    if (selected.generation_version === "a3-v2") body.learner_level = selected.learner_level;
+    const signature = JSON.stringify({ body, token: state.sessionToken, questions: state.questionsConsent });
+    if (state.startAttempt?.signature !== signature) state.startAttempt = { signature, id: crypto.randomUUID() };
+    if (!state.sessionToken) { body.session_id = state.startAttempt.id; body.consent_scope = state.questionsConsent ? ["questions"] : []; }
+    const token = state.sessionToken;
+    pending.busy = true; pending.error = ""; renderStartDialog();
+    let session;
+    try {
+      session = await api.request("/v1/sessions", { method: "POST", json: body, headers: token ? { "X-UPRAISE-Session-JWT": token } : {} });
+      if (!session || !uuidPattern.test(session.session_id) || session.lesson_job_id !== selected.job_id
+        || session.learner_level !== selected.learner_level || session.course_id !== selected.course_id
+        || session.activity_id !== selected.activity_id || session.lesson_id !== selected.lesson_id
+        || session.language !== selected.language || !/^[a-f0-9]{64}$/.test(session.result_sha256 || "") || expired(session.expires_at)) throw new Error("The session did not match the selected course. Please start again.");
+      releasePlayerMedia(); clearQuestion();
+      state.player = { lesson: selected, course: summaryFromBundle(pending.bundle), session, token,
+        index: 0, offset: 0, speed: 1, complete: false, closed: false, invalid: "", busy: false,
+        questionsEnabled: token ? true : state.questionsConsent, visited: new Set([0]), audioError: "", audioHash: "", endPending: null };
+      state.startAttempt = null; pending.busy = false; state.startPending = null; state.sessionToken = "";
+      modal.close(); navigate("learn");
+      await loadPart(0, { autoplay: false });
+      if (state.page === "learn") renderPlayer();
+      scheduleExpiry(); window.scrollTo({ top: 0, behavior: "instant" });
+    } catch (error) {
+      if (session && state.player?.session?.session_id !== session.session_id && uuidPattern.test(session.session_id)) {
+        try { await api.request(`/v1/sessions/${session.session_id}/end`, { method: "POST", json: { reason: "ERROR" }, headers: token ? { "X-UPRAISE-Session-JWT": token } : {} }); state.startAttempt = null; } catch { /* Session expires on the backend if cleanup is unavailable. */ }
+      }
+      pending.error = error.message; pending.busy = false;
+      if (state.startPending === pending && modal.open) renderStartDialog(); else toast(error.message);
+    }
   }
-
+  function pausePlayback() { lectureAudio.pause(); replyAudio.pause(); updatePlayback(); }
+  function releasePlayerMedia() {
+    ++playerEpoch; pausePlayback(); clearTimeout(expiryTimer);
+    lectureAudio.removeAttribute("src"); lectureAudio.load();
+    if (lectureUrl) URL.revokeObjectURL(lectureUrl); lectureUrl = null;
+    releaseReply();
+  }
+  function releaseReply() { replyAudio.pause(); replyAudio.removeAttribute("src"); replyAudio.load(); if (replyUrl) URL.revokeObjectURL(replyUrl); replyUrl = null; }
+  function clearQuestion() {
+    questionController?.abort(); questionController = null; releaseReply();
+    state.question = ""; state.questionOpen = false; state.questionPending = false; state.turn = null;
+  }
+  function scheduleExpiry() {
+    clearTimeout(expiryTimer);
+    const player = state.player;
+    if (!player || player.closed || player.complete) return;
+    const deadline = Math.min(Date.parse(player.session.expires_at), Date.parse(player.lesson.expires_at || player.session.expires_at));
+    expiryTimer = setTimeout(() => { if (state.player === player) void invalidatePlayer("This learning session has expired. Start a fresh session to continue.", "TIMEOUT"); }, Math.max(0, Math.min(2147483647, deadline - Date.now())));
+  }
+  async function currentLesson(player) {
+    const id = player.lesson.job_id;
+    const lesson = validateLesson(await api.request(`/v1/jobs/${id}/result?learner_level=${encodeURIComponent(player.lesson.learner_level)}`), id);
+    const status = await api.request(`/v1/jobs/${id}`, { timeout: 30000 });
+    if (status.status !== "DONE" || status.cleanup_pending || status.acknowledged || status.result?.result_sha256 !== player.session.result_sha256
+      || lesson.learner_level !== player.session.learner_level || lesson.course_id !== player.session.course_id
+      || lesson.activity_id !== player.session.activity_id || lesson.lesson_id !== player.session.lesson_id
+      || lesson.language !== player.session.language || expired(player.session.expires_at)) throw new Error("This course changed or its session expired. Start a fresh learning session.");
+    return lesson;
+  }
+  async function loadPart(index, { autoplay = false, offset = 0 } = {}) {
+    const player = state.player;
+    if (!player || player.busy || player.closed || player.invalid || player.endPending) return false;
+    const epoch = ++playerEpoch;
+    player.busy = true; pausePlayback();
+    if (state.page === "learn") renderPlayer();
+    try {
+      const lesson = await currentLesson(player);
+      if (state.player !== player || epoch !== playerEpoch) return false;
+      if (index < 0 || index >= lesson.chunks.length) return false;
+      const changed = index !== player.index;
+      if (changed) clearQuestion();
+      player.lesson = lesson; player.index = index; player.offset = offset; player.visited.add(index);
+      const chunk = lesson.chunks[index];
+      player.audioError = "";
+      try {
+        if (player.audioHash !== chunk.audio_sha256 || !lectureUrl) {
+          const blob = await api.verifiedAudio(lesson.job_id, chunk);
+          if (state.player !== player || epoch !== playerEpoch) return false;
+          if (lectureUrl) URL.revokeObjectURL(lectureUrl);
+          lectureUrl = URL.createObjectURL(blob); lectureAudio.src = lectureUrl; player.audioHash = chunk.audio_sha256;
+          lectureAudio.load();
+        }
+        lectureAudio.playbackRate = player.speed;
+        try { lectureAudio.currentTime = Math.max(0, Math.min(offset, chunk.duration_seconds)); } catch { /* loadedmetadata applies the saved offset. */ }
+      } catch (error) {
+        if ([401, 403, 404, 409, 410].includes(error.status)) throw error;
+        player.audioError = error.message; player.audioHash = "";
+        lectureAudio.removeAttribute("src"); if (lectureUrl) URL.revokeObjectURL(lectureUrl); lectureUrl = null;
+      }
+      scheduleExpiry();
+      if (state.page === "learn") renderPlayer();
+      if (autoplay && lectureUrl && state.page === "learn" && !state.questionOpen) {
+        try { await lectureAudio.play(); } catch { toast("Your browser paused autoplay. Press Play to start the narration."); }
+      }
+      return true;
+    } catch (error) {
+      if (state.player === player && epoch === playerEpoch) await invalidatePlayer(error.message);
+      return false;
+    } finally { player.busy = false; if (state.player === player && state.page === "learn") renderPlayer(); }
+  }
+  async function invalidatePlayer(message, reason = "ERROR") {
+    const player = state.player; if (!player) return;
+    player.invalid = message; releasePlayerMedia(); clearQuestion();
+    await endLearning(reason, false);
+  }
+  async function endLearning(reason = "STOPPED_BY_LEARNER", back = true) {
+    const player = state.player; if (!player) return true;
+    releasePlayerMedia(); clearQuestion();
+    if (player.closed) { if (back) state.player = null; if (state.page === "learn") renderLearn(); return true; }
+    if (!player.endPending) player.endPending = { reason, back }; else if (back) player.endPending.back = true;
+    if (player.ending) return false;
+    player.ending = true; if (state.page === "learn") renderPlayer();
+    try {
+      try { await api.request(`/v1/sessions/${player.session.session_id}/end`, { method: "POST", json: { reason: player.endPending.reason }, headers: sessionHeaders(player) }); }
+      catch (error) { if (![404, 410].includes(error.status)) throw error; }
+      player.closed = true; player.token = "";
+      const completed = player.endPending.reason === "COMPLETED", returnToCourses = player.endPending.back;
+      player.endPending = null; player.endError = "";
+      if (returnToCourses) state.player = null; else if (completed) player.complete = true;
+      if (state.page === "learn") renderLearn();
+      return true;
+    } catch (error) { player.endError = error.message; if (state.page === "learn") renderPlayer(); return false; }
+    finally { player.ending = false; if (state.page === "learn") renderLearn(); }
+  }
   function renderPlayer() {
-    const player = state.player;
-    const course = getCourse(player.courseId);
-    if (!course) { state.player = null; renderLearn(); return; }
-    const parts = getParts(course);
-    const part = parts[player.index];
-    main.innerHTML = `<button class="back-button" data-action="leave-player">${icon("back")}Back to courses</button>
-      <div class="player-top"><div><p class="eyebrow">YOUR LEARNING MOMENT</p><h1>${escape(course.title)}</h1><div class="player-meta"><span>${escape(levelLabel(player.level))}</span><span>·</span><span>${escape(languageLabel(course.language))}${course.local ? " selected" : ""}</span><span>·</span>${badge("AI-generated draft · Human review required", "badge-amber")}</div></div><button class="button button-secondary button-sm" data-action="leave-player">End preview</button></div>
-      <div class="player-grid"><aside class="card parts-card" aria-label="Course contents"><h2 class="parts-title">Your learning path <span>Part ${player.index + 1} of ${parts.length}</span></h2><div class="progress-track"><div class="progress-fill" style="width:${(player.index + 1) / parts.length * 100}%"></div></div><ol class="part-list">${parts.map((item, i) => `<li><button class="part-button ${i === player.index ? "active" : ""}" data-action="go-part" data-index="${i}" ${i === player.index ? 'aria-current="step"' : ""}><span class="part-number">${player.visited.has(i) && i !== player.index ? icon("check") : String(i + 1).padStart(2, "0")}</span><span>${escape(item.title)}<small>${time(item.duration)} · Sample part</small></span></button></li>`).join("")}</ol></aside>
-      <div><article class="card lesson-card"><div class="lesson-heading"><p class="eyebrow">PART ${String(player.index + 1).padStart(2, "0")} <span>/</span> ${escape(part.kicker)}</p>${badge("Sample lesson", "badge-neutral")}</div><h2>${escape(part.title)}</h2>${paragraphsFor(part, player.level).map(text => `<p class="lesson-paragraph">${escape(text)}</p>`).join("")}<aside class="takeaway"><strong>${icon("lightbulb")}The idea to take with you</strong><p>${escape(part.takeaway)}</p></aside>
-        <div class="audio-player" aria-label="Playback controls preview"><div class="audio-top"><button class="play-button" data-action="toggle-play" aria-label="${player.playing ? "Pause preview" : "Play preview"}">${icon(player.playing ? "pause" : "play")}</button><div class="audio-timeline"><label class="sr-only" for="playback-position">Preview playback position</label><input id="playback-position" type="range" min="0" max="${part.duration}" value="${player.offset}" step="1"><div class="audio-time"><span id="current-time">${time(player.offset)}</span><span>${time(part.duration)}</span></div></div><button class="speed-button" data-action="playback-speed" aria-label="Playback speed ${player.speed} times">${player.speed}×</button><button class="icon-button" data-action="replay" aria-label="Replay preview">${icon("replay")}</button></div><p class="audio-caption">${icon("info")}Playback preview · The timer moves; no audio is played.</p></div>
-        <div class="lesson-navigation"><button class="button button-secondary" data-action="previous-part" ${player.index === 0 ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button" data-action="${player.index === parts.length - 1 ? "finish-course" : "next-part"}">${player.index === parts.length - 1 ? "Finish preview" : "Next part"}${icon(player.index === parts.length - 1 ? "check" : "arrow")}</button></div></article>
-        <section class="card question-card" aria-labelledby="teacher-title"><div class="question-card-head"><div class="teacher-intro"><span class="teacher-avatar">${icon("sparkles")}</span><div><h3 id="teacher-title">A little more clarity?</h3><p>Pause here and ask your AI teacher.</p></div></div><button class="button button-soft button-sm" data-action="toggle-question" aria-expanded="${state.questionOpen}">${icon(state.questionOpen ? "close" : "chat")}${state.questionOpen ? "Close questions" : "Ask a question"}</button></div>
-        <div id="question-content" ${state.questionOpen ? "" : "hidden"} class="question-content">${questionContent()}</div></section>
-        <p class="tip-line">${icon("info")}Sample English content · Example answers · Progress is kept only in this tab until reload.</p>
-      </div></div>`;
+    const player = state.player; if (!player) { renderLearn(); return; }
+    if (player.complete) { renderCompletion(); return; }
+    if (player.endPending || player.invalid || player.closed) {
+      main.innerHTML = `<section class="card complete-card">${icon("info")}<h1>${player.endPending ? "Closing your session" : "Time for a fresh start"}</h1><p>${escape(player.invalid || "Playback has stopped and your temporary question history is being cleared.")}</p>${player.endError ? errorBox(player.endError) : ""}<button class="button" data-action="${player.endPending ? "retry-session-end" : "leave-player"}" ${player.ending ? "disabled" : ""}>${player.endPending ? player.ending ? "Closing…" : "Retry session end" : "Back to courses"}</button></section>`; return;
+    }
+    const lesson = player.lesson, parts = lesson.chunks, part = parts[player.index];
+    main.innerHTML = `<button class="back-button" data-action="leave-player">${icon("back")}Back to courses</button><div class="player-top"><div><p class="eyebrow">YOUR LEARNING MOMENT</p><h1>${escape(lesson.lesson_id)}</h1><div class="player-meta"><span>${escape(levelLabel(lesson.learner_level))}</span><span>·</span><span>${escape(languageLabel(lesson.language))}</span><span>·</span>${badge("AI-generated draft · Human review required", "badge-amber")}</div></div><button class="button button-secondary button-sm" data-action="leave-player">End lesson</button></div><p class="ai-notice">${icon("sparkles")}${escape(player.session.ai_notice || "You are interacting with an AI teacher.")}</p>
+      <div class="player-grid"><aside class="card parts-card" aria-label="Course contents"><h2 class="parts-title">Your learning path <span>Part ${player.index + 1} of ${parts.length}</span></h2><div class="progress-track"><div class="progress-fill" style="width:${(player.index + 1) / parts.length * 100}%"></div></div><ol class="part-list">${parts.map((chunk, index) => `<li><button class="part-button ${index === player.index ? "active" : ""}" data-action="go-part" data-index="${index}" ${index === player.index ? 'aria-current="step"' : ""} ${player.busy ? "disabled" : ""}><span class="part-number">${player.visited.has(index) && index !== player.index ? icon("check") : String(index + 1).padStart(2, "0")}</span><span>${escape(partTitle(chunk))}<small>${time(chunk.duration_seconds)}</small></span></button></li>`).join("")}</ol></aside>
+      <div><article class="card lesson-card"><div class="lesson-heading"><p class="eyebrow">PART ${String(player.index + 1).padStart(2, "0")} <span>/</span> ${escape(levelLabel(lesson.learner_level))}</p>${badge(player.busy ? "Checking availability…" : "Your course", "badge-neutral")}</div><h2>${escape(partTitle(part))}</h2>${textParagraphs(part.text)}<p class="tip-line">${icon("document")}${escape(sourceReferences(part.sources))}</p>
+      <div class="audio-player" aria-label="Course narration"><div class="audio-top"><button class="play-button" data-action="toggle-play" aria-label="${lectureAudio.paused ? "Play narration" : "Pause narration"}" ${player.busy ? "disabled" : ""}>${icon(player.busy ? "loader" : lectureAudio.paused ? "play" : "pause", player.busy ? "spinner" : "")}</button><div class="audio-timeline"><label class="sr-only" for="playback-position">Narration position</label><input id="playback-position" type="range" min="0" max="${part.duration_seconds}" value="${player.offset}" step="0.01" ${player.busy ? "disabled" : ""}><div class="audio-time"><span id="current-time">${time(player.offset)}</span><span>${time(part.duration_seconds)}</span></div></div><button class="speed-button" data-action="playback-speed" aria-label="Playback speed ${player.speed} times">${player.speed}×</button><button class="icon-button" data-action="replay" aria-label="Replay narration" ${player.busy ? "disabled" : ""}>${icon("replay")}</button></div><p class="audio-caption">${icon(player.audioError ? "info" : "check")}${escape(player.audioError || `Verified narration · ${lesson.voice}`)}</p></div>
+      <div class="lesson-navigation"><button class="button button-secondary" data-action="previous-part" ${player.index === 0 || player.busy ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button" data-action="${player.index === parts.length - 1 ? "finish-course" : "next-part"}" ${player.busy ? "disabled" : ""}>${player.index === parts.length - 1 ? "Finish lesson" : "Next part"}${icon(player.index === parts.length - 1 ? "check" : "arrow")}</button></div></article>
+      <section class="card question-card" aria-labelledby="teacher-title"><div class="question-card-head"><div class="teacher-intro"><span class="teacher-avatar">${icon("sparkles")}</span><div><h3 id="teacher-title">A little more clarity?</h3><p>${player.questionsEnabled ? "Pause here and ask your AI teacher." : "Questions were not enabled for this session."}</p></div></div><button class="button button-soft button-sm" data-action="toggle-question" aria-expanded="${state.questionOpen}" aria-controls="question-content" ${player.questionsEnabled && !player.busy ? "" : "disabled"}>${icon(state.questionOpen ? "close" : "chat")}${state.questionOpen ? "Close questions" : "Ask a question"}</button></div><div id="question-content" class="question-content" ${state.questionOpen ? "" : "hidden"}>${questionContent()}</div></section><p class="tip-line">${icon("info")}Progress stays in this tab. Session ends at ${escape(new Date(player.session.expires_at).toLocaleTimeString())}.</p></div></div>`;
   }
-
-  function questionContent() {
-    return `<form class="question-form" id="question-form"><label for="question-input">What would you like to understand?</label><textarea id="question-input" maxlength="2000" placeholder="Ask a question about this part…" required ${state.questionPending ? "disabled" : ""}>${escape(state.question)}</textarea><div class="question-suggestions"><button type="button" data-action="suggest-question" data-question="Explain this more simply">Explain this more simply</button><button type="button" data-action="suggest-question" data-question="Give me an example">Give me an example</button><button type="button" data-action="suggest-question" data-question="What is the key takeaway?">What is the key takeaway?</button></div><div class="form-bottom"><span>${icon("info")}Preview only · No AI is connected</span><button class="button button-sm" type="submit" ${state.questionPending ? "disabled" : ""}>${icon(state.questionPending ? "loader" : "send", state.questionPending ? "spinner" : "")}${state.questionPending ? "Showing sample reply…" : "Send question"}</button></div><p class="inline-error" id="question-error" role="alert" hidden></p></form>
-      ${state.answer ? `<div class="answer-bubble" role="status"><span>Example answer · Not generated by AI</span><p>${escape(state.answer)}</p><button class="button button-secondary button-sm" data-action="resume-learning">${icon("play")}Continue learning</button></div>` : ""}`;
-  }
-
-  function updateQuestionPanel() {
-    const panel = document.querySelector("#question-content");
-    if (panel) { panel.hidden = !state.questionOpen; panel.innerHTML = questionContent(); }
-    const button = document.querySelector('[data-action="toggle-question"]');
-    if (button) { button.setAttribute("aria-expanded", String(state.questionOpen)); button.innerHTML = `${icon(state.questionOpen ? "close" : "chat")}${state.questionOpen ? "Close questions" : "Ask a question"}`; }
-  }
-
-  function clearQuestion() { clearTimeout(questionTimer); state.question = ""; state.answer = ""; state.questionOpen = false; state.questionPending = false; }
-
-  function pausePlayback() {
-    clearInterval(playbackTimer);
-    if (state.player) state.player.playing = false;
-    updatePlayback();
-  }
-
   function updatePlayback() {
-    const player = state.player;
-    if (!player || state.page !== "learn") return;
-    const playButton = document.querySelector('[data-action="toggle-play"]');
-    if (playButton) { playButton.setAttribute("aria-label", player.playing ? "Pause preview" : "Play preview"); playButton.innerHTML = icon(player.playing ? "pause" : "play"); }
-    const timeline = document.querySelector("#playback-position");
-    if (timeline) { timeline.value = player.offset; document.querySelector("#current-time").textContent = time(player.offset); }
+    const player = state.player; if (!player || state.page !== "learn") return;
+    const button = document.querySelector('[data-action="toggle-play"]');
+    if (button && !player.busy) { button.setAttribute("aria-label", lectureAudio.paused ? "Play narration" : "Pause narration"); button.innerHTML = icon(lectureAudio.paused ? "play" : "pause"); }
+    const range = document.querySelector("#playback-position"); if (range) { range.value = player.offset; document.querySelector("#current-time").textContent = time(player.offset); }
   }
-
-  function playPreview() {
-    const player = state.player;
-    if (!player) return;
-    const part = getParts(getCourse(player.courseId))[player.index];
-    if (player.offset >= part.duration) player.offset = 0;
-    if (state.questionOpen) { clearQuestion(); updateQuestionPanel(); }
-    player.playing = true;
-    updatePlayback();
-    clearInterval(playbackTimer);
-    playbackTimer = setInterval(() => {
-      player.offset = Math.min(part.duration, player.offset + player.speed);
-      if (player.offset >= part.duration) pausePlayback(); else updatePlayback();
-    }, 1000);
+  function questionContent() {
+    const turn = state.turn;
+    const reply = turn?.response;
+    return `<form class="question-form" id="question-form"><label for="question-input">What would you like to understand?</label><textarea id="question-input" maxlength="6000" placeholder="Ask a question about this part…" required ${state.questionPending ? "disabled" : ""}>${escape(state.question)}</textarea><div class="question-suggestions"><button type="button" data-action="suggest-question" data-question="Explain this more simply">Explain this more simply</button><button type="button" data-action="suggest-question" data-question="Give me an example">Give me an example</button><button type="button" data-action="suggest-question" data-question="What is the key takeaway?">What is the key takeaway?</button></div><div class="form-bottom"><span>${icon("info")}Your lesson is paused at ${time(state.questionOffset)}</span><div class="question-actions">${turn?.error ? `<button class="button button-secondary button-sm" type="button" data-action="retry-question" ${state.questionPending ? "disabled" : ""}>Retry question</button>` : ""}<button class="button button-sm" type="submit" ${state.questionPending ? "disabled" : ""}>${icon(state.questionPending ? "loader" : "send", state.questionPending ? "spinner" : "")}${state.questionPending ? "Your teacher is thinking…" : "Send question"}</button></div></div>${turn?.error ? errorBox(turn.error) : ""}</form>
+      ${reply ? `<div class="answer-bubble" role="status"><span>Your AI teacher</span>${reply.text ? textParagraphs(reply.text, "answer-text") : ""}${replyUrl ? `<button class="button button-secondary button-sm" data-action="listen-answer">${icon("headphones")}Listen to answer</button>` : ""}${reply.playback_action ? `<p class="small-copy">Playback instruction: ${escape(({ REPLAY: "Replay this part", RESUME: "Resume this part", PAUSE: "Keep the lesson paused", SET_SPEED: `Set speed to ${reply.playback_action.rate}×` })[reply.playback_action.action] || "Continue")}</p>` : ""}${reply.sources?.length ? `<p class="small-copy">${escape(sourceReferences(reply.sources))}</p>` : ""}${reply.grounded == null ? `<p class="small-copy">Source grounding has not been independently verified.</p>` : `<p class="small-copy">Source support: ${reply.grounded ? "verified" : "not verified"}.</p>`}${reply.warnings?.length ? `<p class="small-copy">${escape(reply.warnings.filter(warning => warning !== "GROUNDING_NOT_VERIFIED").map(warning => warning.replace(/_/g, " ").toLowerCase()).join(" · "))}</p>` : ""}<button class="button button-secondary button-sm" data-action="resume-learning">${icon("play")}Continue learning</button></div>` : ""}`;
   }
-
-  function goPart(index) {
-    const player = state.player;
-    const course = getCourse(player?.courseId);
-    if (!course || index < 0 || index >= getParts(course).length) return;
+  function updateQuestionPanel() {
+    const panel = document.querySelector("#question-content"); if (panel) { panel.hidden = !state.questionOpen; panel.innerHTML = questionContent(); }
+    const button = document.querySelector('[data-action="toggle-question"]'); if (button) { button.setAttribute("aria-expanded", String(state.questionOpen)); button.innerHTML = `${icon(state.questionOpen ? "close" : "chat")}${state.questionOpen ? "Close questions" : "Ask a question"}`; }
+  }
+  function openQuestions() {
+    const player = state.player; if (!player || player.busy || !player.questionsEnabled) return;
     pausePlayback();
-    clearQuestion();
-    player.index = index;
-    player.offset = 0;
-    player.visited.add(index);
-    renderPlayer();
-    document.querySelector(".lesson-card h2").setAttribute("tabindex", "-1");
-    document.querySelector(".lesson-card h2").focus({ preventScroll: true });
+    state.questionOffset = Number.isFinite(lectureAudio.currentTime) && lectureUrl ? lectureAudio.currentTime : player.offset;
+    state.questionOpen = true; updateQuestionPanel(); document.querySelector("#question-input")?.focus();
   }
-
-  function sendQuestion(form) {
-    if (state.questionPending || !state.player) return;
-    const question = form.querySelector("textarea").value.trim();
-    if (!question) { const error = document.querySelector("#question-error"); error.textContent = "Write a question or choose one of the suggestions."; error.hidden = false; return; }
-    state.question = question;
-    state.questionPending = true;
-    state.answer = "";
-    pausePlayback();
-    updateQuestionPanel();
+  async function sendQuestion(retry = false) {
     const player = state.player;
-    const part = getParts(getCourse(player.courseId))[player.index];
-    questionTimer = setTimeout(() => {
-      if (state.player !== player) return;
-      const key = question.toLowerCase();
-      state.answer = key === "explain this more simply" ? part.simple : key === "give me an example" ? part.example : key === "what is the key takeaway?" ? part.takeaway : "This is where a reply to your question will appear. In the connected version, the AI teacher will use the course material and the part you are learning. For this preview, try one of the suggested questions to see an example explanation.";
-      state.questionPending = false;
-      if (state.page === "learn" && state.questionOpen) updateQuestionPanel();
-    }, 650);
+    if (!player || state.questionPending || player.closed || player.invalid || player.busy) return;
+    if (expired(player.session.expires_at)) { await invalidatePlayer("This learning session has expired.", "TIMEOUT"); return; }
+    const question = state.question.trim();
+    if (!question) { toast("Write a question or choose one of the suggestions."); return; }
+    if (!retry || !state.turn) {
+      releaseReply();
+      state.turn = { body: { request_id: crypto.randomUUID(), chunk_id: player.lesson.chunks[player.index].chunk_id, text: question, playback_offset_ms: Math.round(state.questionOffset * 1000) }, error: "", response: null };
+    }
+    const turn = state.turn;
+    state.questionPending = true; turn.error = ""; pausePlayback(); updateQuestionPanel();
+    questionController = new AbortController();
+    try {
+      const reply = await api.request(`/v1/sessions/${player.session.session_id}/interrupts`, { method: "POST", json: turn.body, headers: sessionHeaders(player), timeout: 610000, signal: questionController.signal });
+      if (state.player !== player || state.turn !== turn || player.closed || player.endPending) return;
+      if (reply.request_id !== turn.body.request_id || reply.chunk_id !== turn.body.chunk_id) throw new Error("The teacher reply did not match this question. Retry the same question.");
+      turn.response = reply;
+      if (reply.audio?.encoding === "base64" && reply.audio.media_type === "audio/wav") {
+        try {
+          const bytes = Uint8Array.from(atob(reply.audio.data), character => character.charCodeAt(0));
+          releaseReply(); replyUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" })); replyAudio.src = replyUrl; replyAudio.load();
+        } catch { toast("The answer text is ready, but its audio could not be opened."); }
+      }
+    } catch (error) {
+      if (error.name === "AbortError" || state.player !== player || state.turn !== turn) return;
+      turn.error = error.message;
+      if ([404, 410].includes(error.status) || ["SESSION_EXPIRED", "INVALID_SESSION", "SESSION_RESULT_CHANGED"].includes(error.code)) await invalidatePlayer(error.message);
+    } finally {
+      if (state.turn === turn) { state.questionPending = false; if (state.page === "learn") updateQuestionPanel(); }
+    }
   }
-
+  async function resumeLearning() {
+    const player = state.player; if (!player) return;
+    const action = state.turn?.response?.playback_action;
+    const offset = action?.action === "REPLAY" ? 0 : state.questionOffset;
+    if (action?.action === "SET_SPEED" && action.rate >= .5 && action.rate <= 2) player.speed = action.rate;
+    clearQuestion(); await loadPart(player.index, { autoplay: action?.action !== "PAUSE", offset });
+  }
   function renderCompletion() {
-    const course = getCourse(state.player.courseId);
-    main.innerHTML = `<section class="card complete-card"><div class="complete-symbol">${icon("check")}</div><p class="eyebrow" style="justify-content:center">A LITTLE FURTHER THAN BEFORE</p><h1>That’s a wrap.<br><em>Keep the curiosity.</em></h1><p>You’ve reached the end of the sample course<br><strong>${escape(course.title)}</strong>.</p><div class="complete-stats"><div><strong>${getParts(course).length}</strong><span>Course parts</span></div><div><strong>${escape(levelLabel(state.player.level))}</strong><span>Your chosen level</span></div></div><button class="button" data-action="leave-player">Explore more courses ${icon("arrow")}</button><p class="preview-note" style="justify-content:center;margin-top:22px">${icon("info")}Preview complete · No learning record or certificate is saved.</p></section>`;
+    const player = state.player;
+    main.innerHTML = `<section class="card complete-card"><div class="complete-symbol">${icon("check")}</div><p class="eyebrow" style="justify-content:center">A LITTLE FURTHER THAN BEFORE</p><h1>That’s a wrap.<br><em>Keep the curiosity.</em></h1><p>You’ve reached the end of<br><strong>${escape(player.lesson.lesson_id)}</strong>.</p><div class="complete-stats"><div><strong>${player.lesson.chunks.length}</strong><span>Course parts</span></div><div><strong>${escape(levelLabel(player.lesson.learner_level))}</strong><span>Your chosen level</span></div></div><button class="button" data-action="leave-player">Explore more courses ${icon("arrow")}</button><p class="preview-note" style="justify-content:center;margin-top:22px">${icon("check")}Your session is closed. Progress is held only in this tab; no certificate is issued.</p></section>`;
   }
 
-  function previewCourse(id) {
-    const course = getCourse(id);
-    if (!course) return;
-    openModal(`${modalHeader(course.title, "A FIRST LOOK")}<p class="modal-copy">Sample course outline · ${getParts(course).length} parts · 3 learning levels</p>${getParts(course).map((part, index) => `<section class="preview-part"><h3>${String(index + 1).padStart(2, "0")} · ${escape(part.title)}</h3><p>${escape(part.takeaway)}</p></section>`).join("")}<p class="modal-disclaimer">AI-generated draft · Human review required.<br>This prototype uses curated sample English text and simulated playback.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close preview</button><button class="button" data-action="start-course" data-id="${escape(id)}">Start learning ${icon("arrow")}</button></div>`);
+  async function reviseCourse(id) {
+    openModal(`${modalHeader("Loading the current course…", "REQUEST CHANGES")}<p class="modal-copy">Checking the available parts before preparing your revision.</p>`);
+    const epoch = modalEpoch;
+    const revision = { id, bundle: null, level: state.resultLevel, index: state.resultPart || 0, text: "", all: false, busy: false, error: "", uncertain: state.revisionUncertain.has(id) };
+    state.revision = revision;
+    try {
+      revision.bundle = await fetchBundle(id);
+      if (state.revision === revision && modal.open && epoch === modalEpoch) renderRevisionDialog();
+    } catch (error) { if (state.revision === revision && modal.open && epoch === modalEpoch) modal.innerHTML = `${modalHeader("This course couldn’t be loaded")}${errorBox(error.message)}<button class="button button-secondary" data-action="close-modal">Close</button>`; }
   }
-
-  function reviseCourse(id) {
-    const course = getCourse(id);
-    if (!course) return;
-    openModal(`${modalHeader("Make room for a better explanation", "REQUEST CHANGES")}<p class="modal-copy">${escape(course.title)}<br>Choose a part and describe what you would improve.</p><form id="revision-form"><div class="field"><label for="revision-part">Course part</label><select id="revision-part">${getParts(course).map((part, index) => `<option value="${index}">${index + 1}. ${escape(part.title)}</option>`).join("")}</select></div><div class="field" style="margin-top:18px"><label for="revision-text">What would you change?</label><textarea id="revision-text" maxlength="2000" placeholder="e.g. Add a practical example and explain the key term more simply." required></textarea></div><label class="checkbox-label"><input type="checkbox">Apply this change to all difficulty levels</label><p class="modal-disclaimer">This form demonstrates how a revision request will look. It won’t modify the sample course or contact the backend.</p><div class="modal-actions"><button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button" type="submit">Preview request ${icon("arrow")}</button></div></form>`);
+  function renderRevisionDialog() {
+    const revision = state.revision;
+    if (!revision?.bundle) return;
+    const variants = variantsOf(revision.bundle);
+    if (!variants[revision.level]) revision.level = variants.intermediate ? "intermediate" : Object.keys(variants)[0];
+    const lesson = variants[revision.level]; revision.index = Math.min(revision.index, lesson.chunks.length - 1);
+    modal.innerHTML = `${modalHeader("Make room for a better explanation", "REQUEST CHANGES")}<p class="modal-copy">${escape(lesson.lesson_id)}<br>Successful processing replaces the selected part’s text and narration in this course.</p>${revision.uncertain ? errorBox("The previous revision may already have been accepted. No automatic retry is available for revisions. Check your course before preparing another request.") + `<div class="modal-actions"><button class="button button-secondary" data-action="preview-course" data-id="${escape(revision.id)}">Check current course</button><button class="button" data-action="prepare-new-revision">I checked; prepare new request</button></div>` : `<form id="revision-form"><fieldset class="plain-fieldset" ${revision.busy ? "disabled" : ""}><div class="form-grid"><div class="field"><label for="revision-level">Learning level</label><select id="revision-level">${Object.keys(variants).map(level => `<option value="${escape(level)}" ${level === revision.level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="revision-part">Course part</label><select id="revision-part">${lesson.chunks.map((chunk, index) => `<option value="${index}" ${index === revision.index ? "selected" : ""}>Part ${index + 1}</option>`).join("")}</select></div></div><div class="revision-excerpt">${escape(lesson.chunks[revision.index].text.slice(0, 450))}</div><div class="field" style="margin-top:18px"><label for="revision-text">What would you change?</label><textarea id="revision-text" maxlength="8000" placeholder="e.g. Add a practical example and explain the key term more simply." required>${escape(revision.text)}</textarea></div>${Object.keys(variants).length > 1 ? `<label class="checkbox-label"><input id="revision-all" type="checkbox" ${revision.all ? "checked" : ""}>Apply this change to the corresponding part in every available level</label>` : ""}<p class="modal-disclaimer">The revision uses the existing language and voice. It keeps the course’s part order and requires human review after completion.</p><div class="modal-actions"><button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button" type="submit">${icon(revision.busy ? "loader" : "edit", revision.busy ? "spinner" : "")}${revision.busy ? "Submitting…" : "Submit revision"}</button></div></fieldset>${revision.error ? errorBox(revision.error) : ""}</form>`}`;
+    const close = modal.querySelector('[data-action="close-modal"]'); if (close) close.disabled = revision.busy;
   }
-
-  function resetDemo() {
-    openModal(`${modalHeader("A fresh look at UPRAISE", "RESET PREVIEW")}<p class="modal-copy">Restore the original sample documents and courses. Preview uploads, course settings, and learning progress will be cleared from this tab.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Keep exploring</button><button class="button" data-action="confirm-reset">Reset demo ${icon("replay")}</button></div>`);
+  async function submitRevision() {
+    const revision = state.revision;
+    if (!revision || revision.busy || revision.uncertain) return;
+    const review = document.querySelector("#revision-text").value.trim();
+    if (!review) { document.querySelector("#revision-text").value = ""; document.querySelector("#revision-text").reportValidity(); return; }
+    revision.text = review;
+    const lesson = variantsOf(revision.bundle)[revision.level];
+    const body = { lesson_job_id: revision.id, chunk_id: lesson.chunks[revision.index].chunk_id, teacher_review: review, apply_to_all_levels: revision.all };
+    revision.busy = true; revision.error = ""; renderRevisionDialog();
+    try {
+      const accepted = await api.request("/v1/audio:regenerate", { method: "POST", json: body });
+      if (!uuidPattern.test(accepted?.job_id)) { revision.uncertain = true; throw new Error("The revision response could not be read. It may have been accepted."); }
+      const job = { job_id: accepted.job_id, targetId: revision.id, title: lesson.lesson_id, level: revision.level, partIndex: revision.index, status: "QUEUED", step: "QUEUED", progress: 0, type: "revision", trackingError: "" };
+      state.jobs.set(job.job_id, job); state.activeJobId = job.job_id; state.generatedId = null;
+      revision.busy = false; modal.close(); navigate("generate"); await refreshJob(job); schedulePoll();
+    } catch (error) {
+      revision.error = error.message; revision.uncertain = revision.uncertain || Boolean(error.uncertain);
+      if (revision.uncertain) state.revisionUncertain.add(revision.id);
+    } finally { revision.busy = false; if (modal.open && state.revision === revision) renderRevisionDialog(); }
   }
-
-  function confirmReset() {
-    clearInterval(generationTimer);
-    clearTimeout(toastTimer);
-    for (const timer of uploadTimers) clearTimeout(timer);
-    uploadTimers.clear();
-    pausePlayback();
-    clearQuestion();
-    state.materials = structuredClone(fixtures.materials);
-    state.courses = structuredClone(fixtures.courses);
-    state.selectedFile = null;
-    state.uploadName = "";
-    state.uploadLanguage = "en";
-    state.generation = null;
-    state.generatedId = null;
-    state.player = null;
-    state.search = "";
-    state.courseSearch = "";
-    state.draft.words = 200;
-    state.draft.window = 5;
-    selectMaterial("material-ai");
-    modal.close();
-    navigate("materials");
-    toast("Fresh start. The original sample workspace is back.");
+  function connectionInfo() {
+    openModal(`${modalHeader("Your UPRAISE connection", "WORKSPACE SETTINGS")}<p class="modal-copy">${state.connected ? "Connected to your backend." : "Your backend connection needs attention."}<br>${state.local ? "Local development draft preview is active." : "Production gateway authentication and signed learner sessions apply."}</p><div class="field"><label>Backend address</label><p class="preview-text">${escape(state.config?.backend_url || "Not connected")}</p></div><p class="small-copy">Connection credentials are configured on the UPRAISE server. Browser requests stay on this address; service tokens and TLS private keys are not sent to the page.</p><p class="small-copy">Course text and narration use the backend’s existing retention policy. Generated material remains a draft requiring human review.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button><button class="button" data-action="refresh-connection">Refresh connection ${icon("replay")}</button></div>`);
+  }
+  async function runAction(action, control) {
+    const id = control?.dataset.id;
+    if (action === "close-modal") { if (!state.startPending?.busy && !state.revision?.busy) modal.close(); return; }
+    if (action === "connection-info") { connectionInfo(); return; }
+    if (action === "refresh-connection") { modal.close(); await refreshWorkspace(); return; }
+    if (action === "refresh-workspace") { await refreshWorkspace(); return; }
+    if (action === "create-from-material") { selectedSource(id); state.activeJobId = null; state.generatedId = null; navigate("generate"); return; }
+    if (action === "remove-material") { removeMaterialDialog(id); return; }
+    if (action === "confirm-remove" || action === "retry-removal") { await confirmRemove(); return; }
+    if (action === "new-generation") { state.activeJobId = null; state.generatedId = null; state.generationAttempt = null; state.generationError = ""; renderGenerate(); return; }
+    if (action === "cancel-generation") { await cancelGeneration(id); return; }
+    if (action === "open-tracking") { state.activeJobId = id; state.generatedId = null; navigate("generate"); return; }
+    if (action === "retry-tracking") {
+      const job = state.jobs.get(state.activeJobId); if (job) { job.trackingError = ""; await refreshJob(job); schedulePoll(); }
+      return;
+    }
+    if (action === "open-job-result") {
+      const job = state.jobs.get(id); if (!job) return;
+      const targetId = job.type === "revision" ? job.targetId : job.job_id;
+      await fetchBundle(targetId); state.generatedId = targetId; state.activeJobId = null; renderGenerate(); return;
+    }
+    if (action === "preview-course") { await previewCourse(id); return; }
+    if (action === "start-course") { await startCourseDialog(id); return; }
+    if (action === "revise-course") { await reviseCourse(id); return; }
+    if (action === "prepare-new-revision") { state.revisionUncertain.delete(state.revision.id); state.revision.uncertain = false; state.revision.error = ""; renderRevisionDialog(); return; }
+    if (action === "load-more") { control.disabled = true; try { await loadCourses(true); renderLearn(); } finally { if (control.isConnected) control.disabled = false; } return; }
+    if (action === "leave-player") { await endLearning("STOPPED_BY_LEARNER", true); return; }
+    if (action === "retry-session-end") { await endLearning(state.player?.endPending?.reason || "ERROR", state.player?.endPending?.back); return; }
+    if (action === "finish-course") { await endLearning("COMPLETED", false); return; }
+    const player = state.player;
+    if (!player || player.closed || player.endPending || player.invalid) return;
+    if (action === "go-part") { await loadPart(Number(control.dataset.index)); return; }
+    if (action === "next-part") { await loadPart(player.index + 1); return; }
+    if (action === "previous-part") { await loadPart(player.index - 1); return; }
+    if (action === "toggle-play") {
+      if (!lectureAudio.paused) pausePlayback();
+      else if (state.questionOpen) await resumeLearning();
+      else await loadPart(player.index, { autoplay: true, offset: player.offset >= player.lesson.chunks[player.index].duration_seconds ? 0 : player.offset });
+      return;
+    }
+    if (action === "replay") { clearQuestion(); await loadPart(player.index, { autoplay: true }); return; }
+    if (action === "playback-speed") { const speeds = [1, 1.25, 1.5, 2]; player.speed = speeds[(speeds.indexOf(player.speed) + 1) % speeds.length]; lectureAudio.playbackRate = player.speed; control.textContent = `${player.speed}×`; control.setAttribute("aria-label", `Playback speed ${player.speed} times`); return; }
+    if (action === "toggle-question") { if (state.questionOpen) { clearQuestion(); updateQuestionPanel(); } else openQuestions(); return; }
+    if (action === "suggest-question" && !state.questionPending) { state.question = control.dataset.question; state.turn = null; releaseReply(); updateQuestionPanel(); document.querySelector("#question-input").focus(); return; }
+    if (action === "retry-question") { await sendQuestion(true); return; }
+    if (action === "resume-learning") { await resumeLearning(); return; }
+    if (action === "listen-answer") { if (replyAudio.paused) { try { await replyAudio.play(); } catch { toast("The answer audio could not be played in this browser."); } } else replyAudio.pause(); }
   }
 
   document.addEventListener("submit", event => {
     event.preventDefault();
     const form = event.target;
-    if (form.id === "upload-form") uploadMaterial(form);
-    if (form.id === "generation-form") startGeneration(form);
-    if (form.id === "start-form") startCourse(form.dataset.id, form.elements.level.value);
-    if (form.id === "question-form") sendQuestion(form);
-    if (form.id === "revision-form") {
-      if (!document.querySelector("#revision-text").value.trim()) { document.querySelector("#revision-text").value = ""; document.querySelector("#revision-text").reportValidity(); return; }
-      modal.close(); toast("Revision request previewed. No change was submitted or saved.");
-    }
+    const action = form.id === "upload-form" ? () => uploadMaterial(form) : form.id === "generation-form" ? () => startGeneration(form) : form.id === "start-form" ? () => startCourse(form) : form.id === "question-form" ? () => sendQuestion(Boolean(state.turn?.error)) : form.id === "revision-form" ? submitRevision : null;
+    if (action) void action().catch(error => toast(error.message));
   });
-
+  document.addEventListener("click", event => {
+    const control = event.target.closest("[data-action]");
+    if (control && !control.disabled) void runAction(control.dataset.action, control).catch(error => toast(error.message));
+  });
   document.addEventListener("input", event => {
     const target = event.target;
-    if (target.id === "material-search") { state.search = target.value; document.querySelector("#material-results").innerHTML = materialTable(); }
+    if (target.id === "material-search") { state.search = target.value; updateMaterialList(); }
     if (target.id === "course-search") { state.courseSearch = target.value; document.querySelector("#course-results").innerHTML = courseCards(); }
     if (target.id === "upload-course") state.uploadName = target.value;
+    if (target.id === "upload-activity") state.activityId = target.value;
     if (target.id === "course-title") { state.draft.title = target.value; document.querySelector("#summary-title").textContent = target.value || "Your next learning experience"; }
     if (target.id === "target-words") state.draft.words = Number(target.value);
     if (target.id === "source-window") state.draft.window = Number(target.value);
-    if (target.id === "question-input") state.question = target.value;
-    if (target.id === "playback-position" && state.player) { state.player.offset = Number(target.value); updatePlayback(); }
+    if (target.id === "max-words") state.draft.maximum = Number(target.value);
+    if (target.id === "session-jwt") state.sessionToken = target.value;
+    if (target.id === "revision-text" && state.revision) state.revision.text = target.value;
+    if (target.id === "question-input" && !state.questionPending) { state.question = target.value; state.turn = null; releaseReply(); }
+    if (target.id === "playback-position" && state.player) {
+      const player = state.player;
+      if (player.seekPlaying === undefined) player.seekPlaying = !lectureAudio.paused;
+      pausePlayback(); player.offset = Number(target.value); updatePlayback();
+    }
   });
-
   document.addEventListener("change", event => {
     const target = event.target;
-    if (target.name === "source") { selectMaterial(target.value); renderGenerate(); }
+    if (target.name === "source") { selectedSource(target.value); renderGenerate(); document.querySelector(`input[name="source"][value="${state.selectedMaterial}"]`)?.focus(); }
     if (target.id === "upload-language") state.uploadLanguage = target.value;
     if (target.id === "course-language") { state.draft.language = target.value; state.draft.voice = target.value === "it" ? "Bianca" : "Joanna"; document.querySelector("#course-voice").innerHTML = voiceOptions(target.value); }
     if (target.id === "course-voice") state.draft.voice = target.value;
-  });
-
-  document.addEventListener("click", event => {
-    const control = event.target.closest("[data-action]");
-    if (!control || control.disabled) return;
-    const action = control.dataset.action;
-    const id = control.dataset.id;
-    if (action === "close-modal") modal.close();
-    if (action === "preview-info") openModal(`${modalHeader("A first look at better learning")}<p class="modal-copy">This is the UPRAISE interface prototype. Explore uploading material, creating a course, and learning with sample content.</p><p class="preview-text">Navigation and demo controls work locally. Documents stay on your device, generation is simulated, playback has no audio, and teacher replies are examples.</p><p class="modal-disclaimer">No backend, AWS, AI provider, or database is connected. Nothing is saved after you reload this page.</p><div class="modal-actions"><button class="button" data-action="close-modal">Let’s explore ${icon("arrow")}</button></div>`);
-    if (action === "reset-demo") resetDemo();
-    if (action === "confirm-reset") confirmReset();
-    if (action === "create-from-material") { selectMaterial(id); navigate("generate"); window.scrollTo({ top: 0, behavior: "instant" }); }
-    if (action === "remove-material") removeMaterialDialog(id);
-    if (action === "confirm-remove") confirmRemove(id);
-    if (action === "cancel-generation") { clearInterval(generationTimer); state.generation = null; renderGenerate(); toast("Generation preview cancelled. Your settings are still here."); }
-    if (action === "new-generation") { state.generatedId = null; renderGenerate(); }
-    if (action === "start-course") {
-      if (state.player && !state.player.complete) { pausePlayback(); render(); }
-      startCourseDialog(id);
+    if (target.id === "result-level") { state.resultLevel = target.value; state.resultPart = 0; renderGenerate(); }
+    if (target.id === "result-part") { state.resultPart = Number(target.value); renderGenerate(); }
+    if (target.id === "revision-level") { state.revision.level = target.value; state.revision.index = 0; renderRevisionDialog(); }
+    if (target.id === "revision-part") { state.revision.index = Number(target.value); renderRevisionDialog(); }
+    if (target.id === "revision-all") state.revision.all = target.checked;
+    if (target.id === "playback-position" && state.player) {
+      const player = state.player, offset = Number(target.value), autoplay = Boolean(player.seekPlaying);
+      delete player.seekPlaying; clearQuestion(); void loadPart(player.index, { autoplay, offset });
     }
-    if (action === "preview-course") previewCourse(id);
-    if (action === "revise-course") reviseCourse(id);
-    if (action === "leave-player") { pausePlayback(); clearQuestion(); state.player = null; renderLearn(); main.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "instant" }); }
-    if (action === "go-part") goPart(Number(control.dataset.index));
-    if (action === "next-part") goPart(state.player.index + 1);
-    if (action === "previous-part") goPart(state.player.index - 1);
-    if (action === "toggle-play") { if (state.player.playing) pausePlayback(); else playPreview(); }
-    if (action === "replay") { state.player.offset = 0; playPreview(); }
-    if (action === "playback-speed") { const speeds = [1, 1.25, 1.5, 2]; state.player.speed = speeds[(speeds.indexOf(state.player.speed) + 1) % speeds.length]; control.textContent = `${state.player.speed}×`; control.setAttribute("aria-label", `Playback speed ${state.player.speed} times`); }
-    if (action === "toggle-question") { pausePlayback(); state.questionOpen = !state.questionOpen; if (!state.questionOpen) { clearTimeout(questionTimer); state.questionPending = false; } updateQuestionPanel(); if (state.questionOpen) document.querySelector("#question-input").focus(); }
-    if (action === "suggest-question" && !state.questionPending) { state.question = control.dataset.question; document.querySelector("#question-input").value = state.question; document.querySelector("#question-input").focus(); }
-    if (action === "resume-learning") { clearQuestion(); updateQuestionPanel(); playPreview(); }
-    if (action === "finish-course") { pausePlayback(); clearQuestion(); getCourse(state.player.courseId).completed = true; state.player.complete = true; renderCompletion(); window.scrollTo({ top: 0, behavior: "instant" }); }
   });
-
+  modal.addEventListener("close", () => { if (!modal.open) { ++modalEpoch; if (modalTrigger?.isConnected) modalTrigger.focus(); } });
+  modal.addEventListener("cancel", event => { if (state.startPending?.busy || state.revision?.busy || state.deletion?.busy) event.preventDefault(); });
+  modal.addEventListener("click", event => {
+    if (event.target !== modal || state.startPending?.busy || state.revision?.busy || state.deletion?.busy) return;
+    const rect = modal.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) modal.close();
+  });
+  lectureAudio.addEventListener("loadedmetadata", () => { if (state.player && lectureUrl) { try { lectureAudio.currentTime = state.player.offset; } catch { /* Browser will allow seeking after metadata arrives. */ } } });
+  lectureAudio.addEventListener("timeupdate", () => { if (state.player && lectureUrl && !state.player.busy && state.player.seekPlaying === undefined) { state.player.offset = lectureAudio.currentTime; updatePlayback(); } });
+  for (const event of ["play", "pause", "ended"]) lectureAudio.addEventListener(event, updatePlayback);
   window.addEventListener("hashchange", () => { render(); main.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "instant" }); });
-  window.addEventListener("pagehide", () => { pausePlayback(); });
+  window.addEventListener("upraise-auth-mode", event => { state.local = event.detail === "local-test"; updateConnection(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) pausePlayback(); });
+  window.addEventListener("pagehide", () => {
+    pausePlayback(); questionController?.abort();
+    const player = state.player;
+    if (player && !player.closed && player.session) void api.request(`/v1/sessions/${player.session.session_id}/end`, { method: "POST", json: { reason: player.endPending?.reason || "STOPPED_BY_LEARNER" }, headers: sessionHeaders(player), keepalive: true, timeout: 10000 }).catch(() => {});
+    // A browser may restore this document from its back/forward cache after B5.
+    // Such a document must never resume the session it already closed on exit.
+    releasePlayerMedia(); clearQuestion();
+    if (player && !player.complete) { player.closed = true; player.invalid = "This page was left and its learning session was closed. Start a fresh session to continue."; player.token = ""; player.endPending = null; }
+  });
+  window.addEventListener("pageshow", event => { if (event.persisted) render(); });
   render();
+  void refreshWorkspace();
 })();

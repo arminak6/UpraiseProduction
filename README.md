@@ -98,6 +98,12 @@ overrides for passwords that need URI encoding.
 - Runtime administration: `PUT /v1/admin/kill-switch` requires `admin:operations`;
   [C3](backend/docs/c3.md) documents shared controls, audit, B2 bypass and rollout.
 - Optional Streamlit Learning and API Testbench: http://localhost:8501
+- UPRAISE client interface: http://localhost:8502. With the backend running, use
+  `docker compose up --build -d --no-deps --wait frontend2` or
+  `python frontend2/serve.py`. Three sections connect real material ingestion,
+  course generation/revision and text/audio learning with AI questions. See
+  [frontend2/README.md](frontend2/README.md) for setup, gateway authentication,
+  draft/session behavior and verification.
 
 Streamlit is a testing tool in frontend/, separate from the final product.
 Start it with docker compose --profile tools up --build -d --wait.

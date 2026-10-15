@@ -4,6 +4,7 @@ aws_credentials.json
 /callback_tls/*
 !/callback_tls/README.md
 backend/math_runtime/node_modules/
+/frontend2/node_modules/
 .venv/
 **/.venv/
 __pycache__/

@@ -4,12 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#147d70">
-    <meta name="description" content="UPRAISE — turn your material into guided learning. Interactive interface preview.">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta name="description" content="UPRAISE — turn your material into guided learning.">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>UPRAISE · Learning, made personal</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
     <link rel="stylesheet" href="./styles.css">
-    <script src="./demo-data.js" defer></script>
+    <script src="./api.js" defer></script>
+    <script src="./ui.js" defer></script>
     <script src="./app.js" defer></script>
   </head>
   <body>
@@ -25,14 +26,14 @@
           <a href="#generate" data-nav="generate"><span class="nav-number">2</span>Generate course</a>
           <a href="#learn" data-nav="learn"><span class="nav-number">3</span>Start learning</a>
         </nav>
-        <button class="workspace-button" data-action="preview-info" aria-label="About this preview"><span class="workspace-avatar">U</span><span>Demo workspace<span class="workspace-subtitle">Your learning studio</span></span></button>
+        <button class="workspace-button" data-action="connection-info" aria-label="Connection settings"><span class="workspace-avatar">U</span><span>Your workspace<span class="workspace-subtitle">Connection settings</span></span></button>
       </div>
     </header>
-    <div class="preview-strip"><div class="page-width"><span class="preview-dot"></span><strong>Interactive preview</strong><span class="preview-divider">/</span><span>Explore with sample data. Backend connection comes after design approval.</span><button data-action="reset-demo">Reset demo <span aria-hidden="true">↺</span></button></div></div>
+    <div class="preview-strip"><div class="page-width"><span class="preview-dot" id="connection-dot"></span><strong id="connection-label">Connecting…</strong><span class="preview-divider">/</span><span id="connection-description">Opening your UPRAISE workspace.</span><button data-action="refresh-workspace">Refresh workspace <span aria-hidden="true">↻</span></button></div></div>
     <main id="main" class="page-width" tabindex="-1"></main>
-    <footer class="site-footer page-width"><span><span class="footer-mark">↑</span> UPRAISE <span class="footer-divider">/</span> A little material. A world of learning.</span><span>Interface preview <span class="footer-dot">·</span> Sample content only</span></footer>
+    <footer class="site-footer page-width"><span><span class="footer-mark">↑</span> UPRAISE <span class="footer-divider">/</span> A little material. A world of learning.</span><span>AI-generated learning <span class="footer-dot">·</span> Human review required</span></footer>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <dialog id="modal" aria-labelledby="modal-title"></dialog>
-    <noscript><p class="page-width">Enable JavaScript to explore the UPRAISE interface preview.</p></noscript>
+    <noscript><p class="page-width">Enable JavaScript to use UPRAISE.</p></noscript>
   </body>
 </html>
