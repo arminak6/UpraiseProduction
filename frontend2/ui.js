@@ -19,6 +19,7 @@
     layers: '<path d="m12 3 10 5-10 5L2 8l10-5zm-9 9 9 5 9-5m-18 5 9 5 9-5"/>',
     play: '<path d="m9 5 11 7-11 7z" fill="currentColor" stroke-width="1"/>',
     pause: '<path d="M8 5h2v14H8zm6 0h2v14h-2z" fill="currentColor" stroke-width="1"/>',
+    stop: '<rect x="5" y="5" width="14" height="14" rx="1" fill="currentColor" stroke-width="1"/>',
     replay: '<path d="M3 10a9 9 0 1 1 1 7M3 4v6h6"/>',
     chat: '<path d="M21 11a8 8 0 0 1-8 8H7l-5 3V11a9 9 0 0 1 19 0z"/><path d="M7 10h9M7 14h5"/>',
     send: '<path d="m22 2-7 20-4-9-9-4 20-7zm0 0L11 13"/>',

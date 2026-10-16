@@ -66,7 +66,11 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   selected session; A5 text, result hash and checksum-verified WAV are checked
   before explicit playback actions. B4 captures the exact browser playback
   position, displays real teacher text/audio and any bounded playback instruction,
-  and resumes the same part. B5 closes completed/stopped/expired sessions and
+  and resumes the same part. Answer audio exposes Listen/Pause/Resume, Stop and
+  Replay controls. **Ask another question** stops the previous answer, focuses an
+  empty question box and keeps the same session, part and paused position. Each
+  new question gets a new request ID; retries keep their original ID. **Continue
+  learning** releases answer audio before resuming the lesson. B5 closes completed/stopped/expired sessions and
   clears temporary question/audio data, with explicit retries after failures.
 - Upload, generation, B1 and B4 retries preserve their appropriate request
   identities in tab memory. A7 has no backend idempotency guarantee, so an

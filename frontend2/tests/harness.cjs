@@ -189,12 +189,13 @@ async function harness(configure = () => {}) {
   window.URL.createObjectURL = () => { const url = `blob:http://127.0.0.1:8502/${++urlId}`; urls.add(url); return url; };
   window.URL.revokeObjectURL = value => urls.delete(value);
   window.Audio = class extends window.EventTarget {
-    constructor() { super(); this.paused = true; this.currentTime = 0; this.playbackRate = 1; this.src = ""; audio.push(this); }
+    constructor() { super(); this.paused = true; this.ended = false; this.currentTime = 0; this.playbackRate = 1; this.src = ""; audio.push(this); }
     pause() { this.paused = true; this.dispatchEvent(new window.Event("pause")); }
-    play() { this.paused = false; this.dispatchEvent(new window.Event("play")); return Promise.resolve(); }
-    load() { if (this.src) queueMicrotask(() => this.dispatchEvent(new window.Event("loadedmetadata"))); }
+    play() { this.paused = false; this.ended = false; this.dispatchEvent(new window.Event("play")); return Promise.resolve(); }
+    load() { this.ended = false; if (this.src) queueMicrotask(() => this.dispatchEvent(new window.Event("loadedmetadata"))); }
     removeAttribute(name) { if (name === "src") this.src = ""; }
     advance(value) { this.currentTime = value; this.dispatchEvent(new window.Event("timeupdate")); }
+    finish() { this.paused = true; this.ended = true; this.dispatchEvent(new window.Event("ended")); }
   };
   window.setTimeout = (callback, delay) => { const key = ++timerId; timers.set(key, { callback, delay }); return key; };
   window.clearTimeout = key => timers.delete(key);

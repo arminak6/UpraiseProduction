@@ -39,6 +39,7 @@
   let playerEpoch = 0;
   let lectureUrl;
   let replyUrl;
+  let replyPlaybackEpoch = 0;
   let expiryTimer;
   let workspaceEpoch = 0;
 
@@ -645,14 +646,20 @@
       if (state.startPending === pending && modal.open) renderStartDialog(); else toast(error.message);
     }
   }
-  function pausePlayback() { lectureAudio.pause(); replyAudio.pause(); updatePlayback(); }
+  function pauseReply() { ++replyPlaybackEpoch; replyAudio.pause(); }
+  function pausePlayback() { lectureAudio.pause(); pauseReply(); updatePlayback(); }
   function releasePlayerMedia() {
     ++playerEpoch; pausePlayback(); clearTimeout(expiryTimer);
     lectureAudio.removeAttribute("src"); lectureAudio.load();
     if (lectureUrl) URL.revokeObjectURL(lectureUrl); lectureUrl = null;
     releaseReply();
   }
-  function releaseReply() { replyAudio.pause(); replyAudio.removeAttribute("src"); replyAudio.load(); if (replyUrl) URL.revokeObjectURL(replyUrl); replyUrl = null; }
+  function releaseReply() {
+    pauseReply();
+    try { replyAudio.currentTime = 0; } catch { /* Media may already be unloaded. */ }
+    replyAudio.removeAttribute("src"); replyAudio.load();
+    if (replyUrl) URL.revokeObjectURL(replyUrl); replyUrl = null;
+  }
   function clearQuestion() {
     questionController?.abort(); questionController = null; releaseReply();
     state.question = ""; state.questionOpen = false; state.questionPending = false; state.turn = null;
@@ -759,14 +766,52 @@
     if (button && !player.busy) { button.setAttribute("aria-label", lectureAudio.paused ? "Play narration" : "Pause narration"); button.innerHTML = icon(lectureAudio.paused ? "play" : "pause"); }
     const range = document.querySelector("#playback-position"); if (range) { range.value = player.offset; document.querySelector("#current-time").textContent = time(player.offset); }
   }
+  function answerAudioLabel() {
+    if (!replyAudio.paused && !replyAudio.ended) return "Pause answer";
+    return replyAudio.currentTime > 0 && !replyAudio.ended ? "Resume answer" : "Listen to answer";
+  }
+  function answerAudioControls() {
+    const label = answerAudioLabel();
+    return `<div class="answer-audio-controls" role="group" aria-label="Answer audio"><button class="button button-secondary button-sm" type="button" data-action="listen-answer" data-audio-label="${label}" aria-pressed="${!replyAudio.paused && !replyAudio.ended}">${icon(label === "Pause answer" ? "pause" : "headphones")}${label}</button><button class="button button-secondary button-sm" type="button" data-action="stop-answer" ${replyAudio.paused && !replyAudio.currentTime ? "disabled" : ""}>${icon("stop")}Stop answer</button><button class="button button-secondary button-sm" type="button" data-action="replay-answer">${icon("replay")}Replay answer</button></div>`;
+  }
+  function updateReplyPlayback() {
+    const button = document.querySelector('[data-action="listen-answer"]');
+    if (button) {
+      const label = answerAudioLabel();
+      button.setAttribute("aria-pressed", String(!replyAudio.paused && !replyAudio.ended));
+      if (button.dataset.audioLabel !== label) { button.dataset.audioLabel = label; button.innerHTML = `${icon(label === "Pause answer" ? "pause" : "headphones")}${label}`; }
+    }
+    const stop = document.querySelector('[data-action="stop-answer"]');
+    if (stop) stop.disabled = replyAudio.paused && !replyAudio.currentTime;
+  }
+  async function playAnswer(restart = false) {
+    const player = state.player, url = replyUrl;
+    if (!url || !state.turn?.response || !state.questionOpen || state.page !== "learn" || !player || player.closed || player.invalid) return;
+    lectureAudio.pause();
+    const epoch = ++replyPlaybackEpoch;
+    try {
+      if (restart || replyAudio.ended) { replyAudio.pause(); replyAudio.currentTime = 0; }
+      await replyAudio.play();
+    } catch {
+      if (epoch === replyPlaybackEpoch && replyUrl === url && state.player === player) toast("The answer audio could not be played in this browser.");
+    } finally { updateReplyPlayback(); }
+  }
+  function askAnotherQuestion() {
+    if (!state.player || state.questionPending) return;
+    pausePlayback(); clearQuestion();
+    // Keep questionOffset: every new request refers to the same paused moment.
+    state.questionOpen = true; updateQuestionPanel();
+    document.querySelector("#question-input")?.focus();
+  }
   function questionContent() {
     const turn = state.turn;
     const reply = turn?.response;
     return `<form class="question-form" id="question-form"><label for="question-input">What would you like to understand?</label><textarea id="question-input" maxlength="6000" placeholder="Ask a question about this part…" required ${state.questionPending ? "disabled" : ""}>${escape(state.question)}</textarea><div class="question-suggestions"><button type="button" data-action="suggest-question" data-question="Explain this more simply">Explain this more simply</button><button type="button" data-action="suggest-question" data-question="Give me an example">Give me an example</button><button type="button" data-action="suggest-question" data-question="What is the key takeaway?">What is the key takeaway?</button></div><div class="form-bottom"><span>${icon("info")}Your lesson is paused at ${time(state.questionOffset)}</span><div class="question-actions">${turn?.error ? `<button class="button button-secondary button-sm" type="button" data-action="retry-question" ${state.questionPending ? "disabled" : ""}>Retry question</button>` : ""}<button class="button button-sm" type="submit" ${state.questionPending ? "disabled" : ""}>${icon(state.questionPending ? "loader" : "send", state.questionPending ? "spinner" : "")}${state.questionPending ? "Your teacher is thinking…" : "Send question"}</button></div></div>${turn?.error ? errorBox(turn.error) : ""}</form>
-      ${reply ? `<div class="answer-bubble" role="status"><span>Your AI teacher</span>${reply.text ? textParagraphs(reply.text, "answer-text") : ""}${replyUrl ? `<button class="button button-secondary button-sm" data-action="listen-answer">${icon("headphones")}Listen to answer</button>` : ""}${reply.playback_action ? `<p class="small-copy">Playback instruction: ${escape(({ REPLAY: "Replay this part", RESUME: "Resume this part", PAUSE: "Keep the lesson paused", SET_SPEED: `Set speed to ${reply.playback_action.rate}×` })[reply.playback_action.action] || "Continue")}</p>` : ""}${reply.sources?.length ? `<p class="small-copy">${escape(sourceReferences(reply.sources))}</p>` : ""}${reply.grounded == null ? `<p class="small-copy">Source grounding has not been independently verified.</p>` : `<p class="small-copy">Source support: ${reply.grounded ? "verified" : "not verified"}.</p>`}${reply.warnings?.length ? `<p class="small-copy">${escape(reply.warnings.filter(warning => warning !== "GROUNDING_NOT_VERIFIED").map(warning => warning.replace(/_/g, " ").toLowerCase()).join(" · "))}</p>` : ""}<button class="button button-secondary button-sm" data-action="resume-learning">${icon("play")}Continue learning</button></div>` : ""}`;
+      ${reply ? `<div class="answer-bubble" role="status"><span>Your AI teacher</span>${reply.text ? textParagraphs(reply.text, "answer-text") : ""}${replyUrl ? answerAudioControls() : ""}${reply.playback_action ? `<p class="small-copy">Playback instruction: ${escape(({ REPLAY: "Replay this part", RESUME: "Resume this part", PAUSE: "Keep the lesson paused", SET_SPEED: `Set speed to ${reply.playback_action.rate}×` })[reply.playback_action.action] || "Continue")}</p>` : ""}${reply.sources?.length ? `<p class="small-copy">${escape(sourceReferences(reply.sources))}</p>` : ""}${reply.grounded == null ? `<p class="small-copy">Source grounding has not been independently verified.</p>` : `<p class="small-copy">Source support: ${reply.grounded ? "verified" : "not verified"}.</p>`}${reply.warnings?.length ? `<p class="small-copy">${escape(reply.warnings.filter(warning => warning !== "GROUNDING_NOT_VERIFIED").map(warning => warning.replace(/_/g, " ").toLowerCase()).join(" · "))}</p>` : ""}<div class="answer-actions"><button class="button button-secondary button-sm" type="button" data-action="ask-another-question">${icon("chat")}Ask another question</button><button class="button button-secondary button-sm" type="button" data-action="resume-learning">${icon("play")}Continue learning</button></div></div>` : ""}`;
   }
   function updateQuestionPanel() {
     const panel = document.querySelector("#question-content"); if (panel) { panel.hidden = !state.questionOpen; panel.innerHTML = questionContent(); }
+    updateReplyPlayback();
     const button = document.querySelector('[data-action="toggle-question"]'); if (button) { button.setAttribute("aria-expanded", String(state.questionOpen)); button.innerHTML = `${icon(state.questionOpen ? "close" : "chat")}${state.questionOpen ? "Close questions" : "Ask a question"}`; }
   }
   function openQuestions() {
@@ -945,7 +990,10 @@
     if (action === "suggest-question" && !state.questionPending) { state.question = control.dataset.question; state.turn = null; releaseReply(); updateQuestionPanel(); document.querySelector("#question-input").focus(); return; }
     if (action === "retry-question") { await sendQuestion(true); return; }
     if (action === "resume-learning") { await resumeLearning(); return; }
-    if (action === "listen-answer") { if (replyAudio.paused) { try { await replyAudio.play(); } catch { toast("The answer audio could not be played in this browser."); } } else replyAudio.pause(); }
+    if (action === "ask-another-question") { askAnotherQuestion(); return; }
+    if (action === "listen-answer") { if (replyAudio.paused || replyAudio.ended) await playAnswer(); else pauseReply(); return; }
+    if (action === "stop-answer") { pauseReply(); try { replyAudio.currentTime = 0; } catch { /* Media may already be unloaded. */ } updateReplyPlayback(); return; }
+    if (action === "replay-answer") { await playAnswer(true); return; }
   }
 
   document.addEventListener("submit", event => {
@@ -1012,6 +1060,7 @@
   lectureAudio.addEventListener("loadedmetadata", () => { if (state.player && lectureUrl) { try { lectureAudio.currentTime = state.player.offset; } catch { /* Browser will allow seeking after metadata arrives. */ } } });
   lectureAudio.addEventListener("timeupdate", () => { if (state.player && lectureUrl && !state.player.busy && state.player.seekPlaying === undefined) { state.player.offset = lectureAudio.currentTime; updatePlayback(); } });
   for (const event of ["play", "pause", "ended"]) lectureAudio.addEventListener(event, updatePlayback);
+  for (const event of ["play", "pause", "ended", "timeupdate", "loadedmetadata"]) replyAudio.addEventListener(event, updateReplyPlayback);
   window.addEventListener("hashchange", () => { render(); main.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "instant" }); });
   window.addEventListener("upraise-auth-mode", event => { state.local = event.detail === "local-test"; updateConnection(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) pausePlayback(); });

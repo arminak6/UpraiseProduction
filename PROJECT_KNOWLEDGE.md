@@ -23,6 +23,11 @@ Its Docker service runs on localhost:8502; original frontend/backend remain sepa
   fences. No browser storage/seed data/direct DB/AWS, automatic POST or A6 receipt.
   Uncertain A7 requires explicit new-request preparation. Custom levels come from
   A5; generation selects1+ configured levels, default all, retained while browsing.
+  B4 answer controls show Listen/Pause/Resume, Stop and Replay; Ask another question
+  stops/releases prior audio and focuses a blank form, preserving session/chunk/
+  paused offset. New requests get fresh UUIDs; retry UUIDs stay stable. Continue
+  learning releases answer audio before playback resumes; native media events
+  update controls without rerendering the question form.
 - frontend2 top navigation: Upload material / Generate course / Review courses /
   Start learning. Review uses GET /v1/lesson-reviews[/{job_id}] for durable PG text,
   one course per entry, ordered levels/parts, full text/sources/review evidence and
@@ -170,7 +175,7 @@ Gateway/Moodle callbacks/model access,HA/backups/erasure/orphans unverified.
 Independent post-edit review/grounding deferred. Live generation needs user
 permission(granted for Word test);tests use fake providers. Semantic findings and
 historical A7 failure diagnostics live in codex_helper reports. No auto-resubmit.
-frontend2 review rendering verified on desktop/mobile; audible playback unverified.
+frontend2 review/answer controls verified desktop/mobile; live voice audibility unverified.
 Escaped text has no rich Markdown/LaTeX typesetter. jsdom is test-only; no runtime npm.
 
 ## Recent decisions
@@ -183,6 +188,11 @@ Escaped text has no rich Markdown/LaTeX typesetter. jsdom is test-only; no runti
 ## User notes (preserve verbatim)
 
 ## Last verified
+
+2026-10-16 answer controls: frontend2 app/ui/CSS/tests/README verified; 33 DOM and
+15 bridge tests pass. Edge native WAV playback verifies pause/resume/stop/replay,
+two questions in one session at the same offset and clean lesson resumption at
+1400x1000/390x844. No live B4/model/TTS calls. Evidence codex_helper/answer-controls-*.
 
 2026-10-16 archive: config/Compose/storage/publication/delivery/revision/deletion/
 session/catalog/review paths and frontend2 expiry UI checked. 106 isolated backend

@@ -149,6 +149,82 @@ test("starts B1 at the selected level, verifies audio, and uses the exact playba
   assert.equal(h.audio[0].currentTime, 0);
 });
 
+test("answer audio has visible pause, resume, stop and replay controls and stops before the lesson resumes", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-play"]'); await h.settle(); h.audio[0].advance(12.345);
+  h.click('[data-action="toggle-question"]'); h.input("#question-input", "Explain this part."); h.submit("#question-form"); await h.settle();
+  const answer = h.audio[1];
+  assert.equal(h.find('[data-action="stop-answer"]').disabled, true);
+  h.click('[data-action="listen-answer"]'); await h.settle();
+  assert.equal(answer.paused, false); assert.equal(h.audio[0].paused, true);
+  assert.equal(h.find('[data-action="listen-answer"]').textContent, "Pause answer");
+  assert.equal(h.find('[data-action="listen-answer"]').getAttribute("aria-pressed"), "true");
+  answer.advance(4.5); h.click('[data-action="listen-answer"]'); await h.settle();
+  assert.equal(answer.paused, true); assert.equal(answer.currentTime, 4.5);
+  assert.equal(h.find('[data-action="listen-answer"]').textContent, "Resume answer");
+  h.click('[data-action="listen-answer"]'); await h.settle(); assert.equal(answer.currentTime, 4.5);
+  h.click('[data-action="stop-answer"]'); await h.settle();
+  assert.equal(answer.paused, true); assert.equal(answer.currentTime, 0);
+  assert.equal(h.find('[data-action="listen-answer"]').textContent, "Listen to answer");
+  assert.equal(h.find('[data-action="stop-answer"]').disabled, true);
+  answer.advance(6); h.click('[data-action="replay-answer"]'); await h.settle();
+  assert.equal(answer.currentTime, 0); assert.equal(answer.paused, false);
+  answer.advance(8); answer.finish();
+  assert.equal(h.find('[data-action="listen-answer"]').textContent, "Listen to answer");
+  assert.equal(h.find('[data-action="listen-answer"]').getAttribute("aria-pressed"), "false");
+  h.click('[data-action="listen-answer"]'); await h.settle();
+  assert.equal(answer.currentTime, 0); assert.equal(answer.paused, false);
+  h.click('[data-action="resume-learning"]'); await h.settle();
+  assert.equal(answer.paused, true); assert.equal(answer.src, "");
+  assert.equal(h.audio[0].paused, false); assert.equal(h.audio[0].currentTime, 12.345);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 0); assert.equal(h.urls.size, 1);
+});
+
+test("ask another question reuses the session and paused position with a fresh request and stops the previous answer", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-play"]'); await h.settle(); h.audio[0].advance(19.876);
+  h.click('[data-action="toggle-question"]'); h.input("#question-input", "Explain the first example."); h.submit("#question-form"); await h.settle();
+  h.click('[data-action="listen-answer"]'); await h.settle(); h.audio[1].advance(3);
+  h.click('[data-action="ask-another-question"]'); await h.settle();
+  assert.equal(h.audio[1].paused, true); assert.equal(h.audio[1].src, ""); assert.equal(h.urls.size, 1);
+  assert.equal(h.audio[0].paused, true); assert.equal(h.audio[0].currentTime, 19.876);
+  assert.equal(h.document.activeElement.id, "question-input"); assert.equal(h.find("#question-input").value, "");
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 0);
+  h.input("#question-input", "Can you give another example?"); h.submit("#question-form"); await h.settle();
+  const calls = h.backend.calls.filter(call => call.path.endsWith("/interrupts"));
+  assert.equal(calls.length, 2); assert.notEqual(calls[0].body.request_id, calls[1].body.request_id);
+  assert.equal(calls[0].path, calls[1].path); assert.equal(calls[0].body.chunk_id, calls[1].body.chunk_id);
+  assert.equal(calls[0].body.playback_offset_ms, 19876); assert.equal(calls[1].body.playback_offset_ms, 19876);
+  assert.equal(calls[1].body.text, "Can you give another example?");
+  assert.equal(h.backend.records("POST", "/v1/sessions").length, 1);
+  assert.equal(h.audio[0].paused, true);
+  h.click('[data-action="resume-learning"]'); await h.settle();
+  assert.equal(h.audio[0].currentTime, 19.876); assert.equal(h.audio[0].paused, false);
+});
+
+test("text-only answers still offer another question without audio controls", async t => {
+  const h = await harness(backend => {
+    backend.intercept = call => call.path.endsWith("/interrupts") ? backend.response({ request_id: call.body.request_id,
+      chunk_id: call.body.chunk_id, text: "An answer without narration.", grounded: null, sources: [], warnings: [] }) : undefined;
+  }); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]'); h.input("#question-input", "Explain this."); h.submit("#question-form"); await h.settle();
+  assert.equal(h.document.querySelectorAll(".answer-audio-controls").length, 0);
+  h.click('[data-action="ask-another-question"]'); await h.settle();
+  assert.equal(h.document.activeElement.id, "question-input"); assert.equal(h.audio[0].paused, true);
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/interrupts")).length, 1);
+});
+
+test("failed answer playback preserves readable text and another-question controls", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]'); h.input("#question-input", "Explain this."); h.submit("#question-form"); await h.settle();
+  h.audio[1].play = async () => { throw new Error("Playback rejected"); };
+  h.click('[data-action="listen-answer"]'); await h.settle();
+  assert.match(h.find("#toast").textContent, /audio could not be played/);
+  assert.equal(h.find('[data-action="listen-answer"]').textContent, "Listen to answer");
+  assert.match(h.find(".answer-bubble").textContent, /real teacher response/);
+  h.click('[data-action="ask-another-question"]'); await h.settle(); assert.equal(h.document.activeElement.id, "question-input");
+});
+
 test("audio corruption never plays unverified bytes but keeps readable text", async t => {
   const h = await harness(backend => { backend.corruptAudio = true; }); t.after(h.close);
   await h.start();

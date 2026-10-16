@@ -292,6 +292,8 @@ th:last-child, td:last-child { text-align: right; }
 .answer-bubble > span { display: block; font-size: 9px; letter-spacing: .4px; text-transform: uppercase; color: #8a9f7a; margin-bottom: 8px; }
 .answer-bubble p { margin: 0 0 15px; }
 .answer-bubble .button { font-size: 10px; }
+.answer-audio-controls, .answer-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.answer-actions { margin: 20px 0 0; }
 .complete-card { max-width: 650px; margin: 30px auto; padding: 50px; text-align: center; }
 .complete-symbol { background: #e9f3e3; color: #7a995d; width: 80px; height: 80px; display: grid; place-items: center; border: 1px solid #dbe8d1; border-radius: 50%; margin: 0 auto 24px; }
 .complete-symbol .icon { width: 35px; height: 35px; }
