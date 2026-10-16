@@ -46,7 +46,8 @@ B2 accepts lesson_id/chunk_id/cognitive_load_score and returns a synchronous
 PROCEED/HIGH_COGNITIVE_LOAD decision using the test threshold 0.5. Telemetry
 consent is required for a high-load reply; the latest score stays in RAM only.
 See [B2's contract and local curl tests](backend/docs/b2.md).
-B3/B6 remain reserved. Existing 24-hour lesson retention remains.
+B3/B6 remain reserved. Temporary delivery retains its 24-hour TTL; Compose also
+keeps completed course packages in [course_archive/](backend/docs/lesson-archive.md).
 On 2026-10-02 the user explicitly removed the A1 Ingestion Guard and job_id
 from its response body. On 2026-10-06 the user restored job_id in that body,
 matching the Word specification. A1 retains processor readability/resource limits and
@@ -73,6 +74,9 @@ aws_credentials.json is mounted read-only into the backend and workers, never ba
 images. It already contains the user-provided AWS settings. A normal AWS
 credential chain is supported by the Python adapter when no credential file
 is configured; adjust the deployment mount when using an IAM role.
+Create the ignored `course_archive/` directory before the first start and make
+it writable by container UID 10001. This is the persistent JSON/WAV bind mount;
+see [archive storage](backend/docs/lesson-archive.md).
 
 ```sh
 docker compose config --quiet
@@ -120,8 +124,8 @@ a text question box. **Send question** uses B4 in the same session and shows
 the answer's text and voice. **Back to course** resumes the interrupted chunk
 at that position. **Finish lesson** and **End lesson** close B1 through B5 and
 clear temporary replies. **End session (B5)** also offers explicit API tests.
-All lessons remain drafts requiring human review, and temporary playback expires
-after the configured A5 TTL (24 hours by default).
+All lessons remain drafts requiring human review. Temporary files expire after
+the configured A5 TTL (24 hours by default); saved course packages remain playable.
 Qdrant sources and PostgreSQL lesson text have no automatic expiry. Explicit
 A2 document deletion removes dependent lesson text across levels/languages;
 `DELETE /v1/courses/{course_id}` removes all the caller's source vectors and
@@ -155,15 +159,18 @@ The copied V3 teacher reviews the draft, edits once if needed and validates the 
 A3's beginner/intermediate/advanced explanation level guides the generator,
 reviewer and editor through their system prompts. New results report
 `learner_level_applied=true`; accuracy and source coverage remain required at every
-level. A3 output expires after 24 hours
-by default, or is removed after A6 receipt; source PDFs/vectors remain.
+level. A3 temporary files expire after 24 hours
+by default, or are removed after A6 receipt; source PDFs/vectors remain.
 Optional push delivery requires the AI's outbound mTLS identity and a fresh
 short-lived OAuth2 token. Pull-only A5 works without callback settings. Set up
 deployment secrets and the public gateway URL as described in [a3.md](backend/docs/a3.md).
 Saved lesson text/SSML remains in PostgreSQL after A6 receipt or TTL cleanup;
-temporary JSON/WAV delivery still expires and A5 returns 410. Audio is not stored
-in PostgreSQL. Existing jobs are not backfilled automatically. See a3.md for
-operator access and archive lifecycle details.
+Compose also saves JSON/WAV packages in the repository-root `course_archive/`
+directory, ignored by Git and mounted separately from temporary storage. Saved
+courses remain available to A5/A7/A8/B1 after temporary TTL cleanup. Intact existing
+packages are backfilled at startup without AI calls; already removed audio cannot
+be recovered this way. A2/B7 content deletion removes saved packages too. Audio is
+not stored in PostgreSQL. See [archive lifecycle](backend/docs/lesson-archive.md).
 
 - upraise_qdrant_data: source chunks, vectors and provenance.
 - upraise_postgres_data: upraise_jobs and upraise_audit databases.

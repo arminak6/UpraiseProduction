@@ -4,7 +4,6 @@ import hashlib
 import logging
 import os
 import shutil
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -14,7 +13,8 @@ from upraise_ai.guards.operations import require_feature
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.lessons import StoredLessonInput
 from upraise_ai.services.lesson_pipeline import LessonPipeline, write_json
-from upraise_ai.services.lesson_replacement import artifact_job, chunk_fingerprint
+from upraise_ai.services.lesson_replacement import artifact_directory, chunk_fingerprint
+from upraise_ai.storage.lesson_archive import output_expired
 
 log = logging.getLogger("upraise.revisions")
 
@@ -83,7 +83,7 @@ def _submit_revision(lessons, data, principal):
             # DONE artifacts are immutable. Hard links avoid copying unchanged
             # WAVs; atomic replacement of the edited file never changes a parent.
             for chunk in result.chunks:
-                source = lessons.staging.job_dir(artifact_job(row)) / f"{chunk.chunk_id}.wav"
+                source = artifact_directory(lessons.staging, row) / f"{chunk.chunk_id}.wav"
                 if not source.is_file():
                     raise IngestionError("LESSON_AUDIO_UNAVAILABLE", status=503)
                 with source.open("rb") as stream:
@@ -120,7 +120,7 @@ def _submit_revision(lessons, data, principal):
                 if unit is None:
                     raise IngestionError('LESSON_PLAN_UNAVAILABLE', status=503)
                 metadata['revision_request']['aligned_unit'] = unit
-            if row["expires_at"] <= datetime.now(UTC):
+            if output_expired(row):
                 raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
             lessons.jobs.accept_revision(conn, job_id, principal.client_id,
                                          metadata["revision_request"]["snapshot_sha256"], metadata,

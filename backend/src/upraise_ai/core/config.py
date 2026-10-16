@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     lesson_alignment_batch_units: int = Field(4, ge=1, le=8)
     lesson_capture_model_outputs: bool = False
     lesson_ttl_seconds: int = Field(86400, ge=60)
+    lesson_archive_dir: Path | None = None
     lesson_source_wait_seconds: int = Field(86400, ge=60)
     lesson_timeout_seconds: float = Field(43200, ge=1, allow_inf_nan=False)
     lesson_seconds_per_section: float = Field(1200, gt=0, allow_inf_nan=False)

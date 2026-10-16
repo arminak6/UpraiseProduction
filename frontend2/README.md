@@ -1,7 +1,7 @@
 # UPRAISE client interface
 
-The client-facing UPRAISE interface has three sections: **Upload material**,
-**Generate course**, and **Start learning**. It connects to the existing backend
+The client-facing UPRAISE interface has four sections: **Upload material**,
+**Generate course**, **Review courses**, and **Start learning**. It connects to the existing backend
 through a small Python HTTP bridge. The original Streamlit `frontend/` remains
 available independently.
 
@@ -50,6 +50,17 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   text, sources and automated review evidence. A7 revises a selected part/level,
   optionally across all aligned levels; its processing replaces the existing
   course. Cancellation uses A6 `CANCEL`. No A6 `RECEIVED` is sent automatically.
+- **Review:** a dedicated course collection uses `GET /v1/lesson-reviews` and
+  `GET /v1/lesson-reviews/{job_id}` to read retained teaching text independently
+  of temporary audio. One entry per course, searchable by title/reference, with
+  pagination, custom difficulty levels, full text/source evidence and part
+  navigation. Feedback stays in tab memory per course/part while browsing. A7
+  updates the selected part or its counterparts across levels, with inline
+  progress, manual status recovery, and refreshed text after success. No learner
+  session is required. Expired/received output and incomplete generations remain
+  readable. A completed course with a saved persistent package remains revisable
+  after temporary cleanup. Unsaved expired/received output and incomplete
+  generations cannot be revised through A7.
 - **Learning:** paginated A8 results group variants into one course. Available
   levels come from the actual A5 bundle, including custom names. B1 opens the
   selected session; A5 text, result hash and checksum-verified WAV are checked
@@ -62,8 +73,10 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   uncertain submission is not automatically retried. Late answers and media
   responses are discarded after navigation/session changes.
 - Backend output remains **DRAFT**. Automated reviews are supporting evidence,
-  not human approval. Audio availability follows the existing retention policy
-  (normally 24 hours); durable backend text is not an audio archive. B4 grounding
+  not human approval. Compose saves completed narration in the root
+  `course_archive/` directory; saved courses remain playable/revisable after the
+  temporary 24-hour files expire. Older missing audio cannot be restored from
+  PostgreSQL text alone. See [archive storage](../backend/docs/lesson-archive.md). B4 grounding
   warnings remain visible. No cognitive-load measurements or certificates are
   invented.
 
@@ -138,5 +151,6 @@ Markdown/LaTeX typesetter is not included in this frontend.
 
 Backend contracts: [A3 v2](../backend/docs/a3-v2.md),
 [A7](../backend/docs/a7.md), [A8](../backend/docs/a8.md),
+[Teacher review](../backend/docs/lesson-review.md),
 [B1](../backend/docs/b1.md), [B4](../backend/docs/b4.md),
 [B5](../backend/docs/b5.md).

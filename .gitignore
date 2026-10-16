@@ -11,6 +11,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 /codex_helper/
+/course_archive/
 /FUTURE_UPDATES.md
 /backend/codex_helper/*
 !/backend/codex_helper/.gitkeep

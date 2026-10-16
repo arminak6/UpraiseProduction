@@ -5,12 +5,17 @@ from pathlib import Path
 from uuid import UUID
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.storage.lesson_archive import LessonArchive
 
 
 class StagingStore:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, archive_root: Path | None = None):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        if archive_root and (archive_root.resolve().is_relative_to(self.root)
+                             or self.root.is_relative_to(archive_root.resolve())):
+            raise ValueError("lesson archive must be separate from temporary staging")
+        self.archive = LessonArchive(archive_root) if archive_root else None
 
     def job_dir(self, job_id: str) -> Path:
         return self.root / str(UUID(job_id))

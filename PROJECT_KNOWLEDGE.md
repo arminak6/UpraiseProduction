@@ -5,7 +5,8 @@
 UPRAISE WP7 implements A1-A8/A3v2,B1/B2/B4/B5/B7,C1/C2/C3/C5;B3/B6/C4 reserved.
 C3 schema tables exist; API/workers refreshed with current source on 2026-10-15.
 Streamlit is an HTTP testbench/player. PG DRAFT text/plans and Qdrant sources persist;
-A5 JSON/WAV has independent24hTTL. Moodle owns human approval. Do not stage/commit
+temporary A5 files have24hTTL; Compose saves completed packages in course_archive/.
+Moodle owns human approval. Do not stage/commit
 without request. ../Uprise/v2 is reference-only. Semantic source/math/review
 defects and historical course deletion evidence are documented under codex_helper.
 frontend2/ is the approved client UI, connected through a stdlib Python HTTP bridge.
@@ -13,46 +14,55 @@ Its Docker service runs on localhost:8502; original frontend/backend remain sepa
 
 ## Architecture and data flow
 
-- Streamlit HTTP testbench: A1/A2, v1/v2 drafts, paginated A8/job-level-chunk,
-  verified deferred audio, B1/B4/B5 and advanced A4/A6. Retry keys survive navigation;
-  auth/context clears caches. EN/IT25neural voices; Joanna/Bianca defaults.
-- frontend2: A1/A2 material, A3v2/A4/A5/A7 courses, A8/B1/B4/B5 learning. Same-origin
-  route/header-limited bridge; nonce/Host/Origin checks, verified TLS/no redirects,
-  server-side OAuth/mTLS env. Signed learner JWT stays in tab RAM. Real WAV SHA256,
-  result-hash/session/expiry checks; B4 exact offset/retry, B5 cleanup/late-response
-  fences. No seeded data/storage/AWS/direct DB; no automatic POST or A6 RECEIVED.
-  A7 uncertain submission requires explicit new-request preparation. Backend calls
-  remain authoritative; custom levels come from A5. Refresh loses local retry state.
-  Generation checkboxes select 1+ configured levels; defaults all, retained in tab.
-- A1 PDF Docling/vision/math, CSV CsvProcessor or DOCX/DOC WordProcessor -> Titan
-  -> ordered Qdrant chunks;active attempt fences revisions.document-ingestion-v1.6;
-  CSV: .csv/MIME, UTF8/BOM headers, comma/semicolon/tab, whole records/no truncation,
-  OCR or AI extraction; oversized records422. Limits100MB/100krows/256columns.
-  PDF metadata/fingerprints/A1-A6 contracts preserved; signed URL remains PDF-only.
-  A2 owner-scoped source/course deletion across all levels/languages/statuses removes
-  dependent PG/plans/artifacts/feedback, preserves minimal IDs/audit. Admission/
-  source/writer fences, durable503 recovery, RAM revocation; fresh A1 after deletion.
-  Original ingestion PDF/CSV/evidence retain independent artifact policy; A2
-  removes indexed source material and dependent lessons, not immediate file purge.
-- A3v1 ordered5page windows -> V3 roles -> checked translation -> PG text/SSML
-  before Polly. A3v2 shared canonical plan, roles per level, distinct chunk/audio
-  IDs, shared ordered units/source scope. Approved drafts kept, rejected drafts
-  edited; independent post-edit A3 review deferred. All text/plan before speech;
-  target200/max500words, max2shared refinements, no level-only splits.
-  v2.5/promptv6 bounded ID-aware recovery, ambiguous/truncated output fails closed;
-  original math/speech recovery retained.
-- A3v2 optional top-level levels: 1-8 unique configured names; omitted/null=all.
-  Snapshot only selected profiles in configuration order; plan at configured level
-  if selected, otherwise first selected. Selection is in idempotency fingerprint;
-  reordered same selection reuses job, changed selection conflicts for same key.
-  No schema migration or pipeline signature change; existing jobs/v1 unchanged.
-- CSV page_count0/pages[]/page=null; row/column counts, source_blocks/row_ranges
-  (header1, multiline cells one record). A3 row-group windows/A7/B4 preserve rows;
-  [CSV rows N-M] omitted from speech. PDF JSON shape preserved; CSV UNVERIFIED.
-- Word Docling/LibreOffice; >5%token mismatch/fragmentation selects PDF fidelity.
-  Clipped-paragraph recovery retains review/XML refs; pages[]/page_count0 and
-  source_blocks/word refs. Native picture refs never fabricate PDF pages.
-  [Word blocks N-M] omitted from speech; A3/A7/B4 share lifecycle.
+- Streamlit HTTP testbench: A1-A8/v1/v2, B1/B4/B5, verified deferred audio.
+  Retry keys survive navigation; auth/context clears caches. EN/IT25neural voices.
+- frontend2 uses real A1-A8/B1/B4/B5 APIs through a same-origin, route/header-limited
+  stdlib bridge. Nonce/Host/Origin checks, verified TLS/no redirects and server-side
+  OAuth/mTLS. Learner JWT/retries stay in tab RAM; refresh loses local state.
+  WAV SHA256/result-hash/session/expiry checks, exact B4 offsets and B5 late-response
+  fences. No browser storage/seed data/direct DB/AWS, automatic POST or A6 receipt.
+  Uncertain A7 requires explicit new-request preparation. Custom levels come from
+  A5; generation selects1+ configured levels, default all, retained while browsing.
+- frontend2 top navigation: Upload material / Generate course / Review courses /
+  Start learning. Review uses GET /v1/lesson-reviews[/{job_id}] for durable PG text,
+  one course per entry, ordered levels/parts, full text/sources/review evidence and
+  tab-only feedback per part. Inline A7 retains selected course/level/part and polls
+  safely. Expired/received output and incomplete root text remain readable, with
+  revision disabled unless a completed course has temporary or archived output.
+  Review reads enforce jobs:read/client/course/source/deletion fences, coherent
+  publication locks and content-free access audit; A7 candidates remain hidden.
+- Persistent archive: optional UPRAISE_LESSON_ARCHIVE_DIR; Compose mounts ignored
+  root course_archive/ at /data/course_archive on API/ingestion/lesson workers.
+  Verified manifest/WAV-only copies precede DB publication; result.persistent_output
+  and the existing artifact/hash pointer select immutable owner/artifact/hash paths.
+  TTL removes staging only; saved A5/A7/A8/B1 remain available with no output expiry.
+  B1 sessions stay bounded. A7/B7 replace packages and remove superseded versions;
+  whole B7/A2 removes owner archives. A6 receipt withdraws delivery but keeps archive.
+  Startup copies intact old packages (including expired-but-present files), never
+  restores missing audio or calls AI/TTS. Archive storage outages retry from caches.
+- A1 PDF uses Docling/vision/math, CSV uses CsvProcessor, Word uses WordProcessor
+  with LibreOffice fidelity fallback. Ordered Titan/Qdrant chunks; active-attempt
+  fences, document-ingestion-v1.6. CSV UTF8/BOM header-based comma/semicolon/tab,
+  complete rows only; limits100MB/100krows/256columns. Word native picture/block
+  references never fabricate PDF pages. PDF quality fingerprints/contracts remain.
+- A2 owner/source/course deletion removes dependent PG/plans/artifacts/feedback
+  across levels/languages/statuses, with admission/writer fences and durable503
+  recovery. Minimal IDs/audit remain; fresh A1 is allowed after deletion. Original
+  ingestion files retain an independent artifact policy; indexed content is erased.
+- A3v1 uses ordered5page windows and V3 roles, checked translation, then speech.
+  A3v2 shares a canonical plan/ordered content units across levels, with distinct
+  chunk/audio IDs. All text/plans precede TTS; target200/max500words and at most
+  two shared refinements. v2.5/promptv6 uses bounded ID-aware recovery and rejects
+  ambiguous/truncated output. Approved drafts skip editing; independent post-edit
+  review is deferred. Source/math quality still needs human review.
+- A3v2 optional levels: 1-8 unique configured names; omitted/null means all.
+  Snapshot selected profiles in config order; planning uses the configured plan
+  level if selected, otherwise the first selected. Selection is fingerprinted:
+  reordered equivalent selection reuses the job; changed selection conflicts.
+- CSV/Word pages[]/page_count0; source_blocks plus CSV row_ranges or Word refs.
+  CSV header is row1; multiline cells remain one record. A3/A7/B4 preserve source
+  references, and row/block citation labels are omitted from narration. PDF shape
+  stays unchanged; extraction never establishes factual accuracy.
 - A4 counts per level/total; A5 whole bundle or learner_level slice with one full
   integrity hash; A8 expands levels before pagination. A6 temporary receipt/cancel/
   TTL fences writers; retained A3 text/plans have independent lifecycle.
@@ -97,6 +107,12 @@ Its Docker service runs on localhost:8502; original frontend/backend remain sepa
   builds. Chunk uniqueness(job_id,level_key,index); legacy level_key=''.
 - frontend2/{app,api,ui}.js + index.html/styles.css; serve.py HTTP bridge,
   tests/{test_server.py,ui.test.cjs}; README.md auth/run/verification. Docker allowlist.
+- Teacher review: backend/{schemas,workflows}/lesson_review.py under src/upraise_ai,
+  storage/lessons.py list_reviewable; api/authoring/lessons.py routes;
+  backend/docs/lesson-review.md and tests/test_lesson_review_integration.py.
+- Archive: storage/lesson_archive.py, services/lesson_replacement.py artifact_directory,
+  workflows/archive_lessons.py backfill, backend/docs/lesson-archive.md;
+  tests/test_lesson_archive_integration.py. Keep mount/config on API and all workers.
 - codex_helper/: ignored helpers/evidence; FUTURE_UPDATES.md ignored backlog.
   turing-content-verification.md/level-content-assessment.md: semantic findings.
 
@@ -146,36 +162,38 @@ Missing production auth config closes ingress; no Redis/session renewal.
 
 ## Known limitations and next work
 
-Sequential workers/A3v2 variants;no archive read API/audio restoration. Word complex
+Sequential workers/A3v2 variants;already removed audio needs fresh synthesis, not
+automatic restoration. Archived packages have no TTL; unsaved expired text is read-only. Word complex
 layout/equation/order fidelity requires review. Non-UTF8/headerless CSV,CSV URLs,
 A7 idempotency/structural edits and mid-session level switching remain future.
 Gateway/Moodle callbacks/model access,HA/backups/erasure/orphans unverified.
 Independent post-edit review/grounding deferred. Live generation needs user
 permission(granted for Word test);tests use fake providers. Semantic findings and
 historical A7 failure diagnostics live in codex_helper reports. No auto-resubmit.
-frontend2 browser rendering/audible playback unverified; text is escaped without
-a rich Markdown/LaTeX typesetter. Runtime has no npm dependency; jsdom is test-only.
+frontend2 review rendering verified on desktop/mobile; audible playback unverified.
+Escaped text has no rich Markdown/LaTeX typesetter. jsdom is test-only; no runtime npm.
 
 ## Recent decisions
 
-- User approved frontend2 design and backend integration. Replaced demo fixtures
-  with real APIs through a same-origin bridge.
 - Teacher-selected difficulty levels added to frontend2 and A3v2; defaults preserve
   all-level requests. No live AI generation was submitted to validate this update.
+- Teacher review lists durable text independently of audio. User approved root
+  course_archive/ retention so saved packages stay playable/revisable beyond24h.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-15 A3v2 schemas/workflow/API/docs and frontend2 JS/CSS/tests/README:
-112 isolated backend tests (a3_v2/a7_all_levels/b7_integration), 21 DOM tests and
-14 bridge tests pass; JS syntax/diff and backend/frontend2 image builds pass.
-Backend validation uses disposable PG/Qdrant and fake model/speech providers.
-No live generation/upload/revision/session mutations; browser QA unavailable.
+2026-10-16 archive: config/Compose/storage/publication/delivery/revision/deletion/
+session/catalog/review paths and frontend2 expiry UI checked. 106 isolated backend
+lifecycle tests plus 11 final archive tests pass; 29 DOM/15 bridge tests pass.
+Ruff, JS syntax/diff, Compose config and backend/frontend2 builds pass. API, all
+workers and frontend2 refreshed healthy. Startup archived one intact existing
+course (34 JSON/WAV files); live A5/disk checksums match, expiry omitted. Six
+text courses remain listed; five missing old packages were not regenerated.
+Edge live review QA passes at1400x1000/390x844. Evidence codex_helper/archive-* and
+review-*. No live AI/TTS calls. Documentation and ignored archive directory updated.
 
-Live 2026-10-15: updated API/worker/frontend2 containers healthy, OpenAPI levels
-field and served checkboxes verified; bridge A2/A8 reads pass. Readiness DEGRADED
-only for providers without recent evidence (embedding/Polly/Transcribe UNKNOWN).
-Prior 2026-10-14 full suite: 955 backend/115 Streamlit tests and builds passed.
-Historical Word/CSV quality reports remain under codex_helper; DRAFT evidence
-does not establish current availability or human approval.
+Prior isolated validation: 2026-10-15 selected-level A3v2/A7/B7 112 tests;
+2026-10-14 full backend955/Streamlit115 tests. Historical Word/CSV/semantic reports
+under codex_helper are DRAFT evidence, not approval or current availability.

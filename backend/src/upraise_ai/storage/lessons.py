@@ -175,12 +175,13 @@ class LessonRepository(JobRepository):
     def list_ready(self, client_id, courses, course_id, limit, offset):
         # Apply ownership/course/availability filters BEFORE pagination. A8
         # exposes metadata only; A5 rechecks artifacts and audits playback.
-        filters = ["j.client_id=%s", "j.status='DONE'", "j.cleanup_requested_at IS NULL",
+        filters = ["j.client_id=%s", "j.status='DONE'",
+                   "(j.cleanup_requested_at IS NULL OR (j.cleanup_reason='TTL' AND j.result->>'persistent_output'='true'))",
                    "j.content_deletion_requested_at IS NULL",
                    "NOT EXISTS (SELECT 1 FROM lesson_content_deletions d WHERE d.job_id=j.job_id AND d.completed_at IS NULL)",
                    "j.metadata->'revision_request' IS NULL",
                    "NOT (j.result ? 'replacement_target_job_id')",
-                   "j.expires_at>clock_timestamp()",
+                   "(j.expires_at>clock_timestamp() OR j.result->>'persistent_output'='true')",
                    "jsonb_array_length(j.metadata->'document_ids')>0"]
         values = [client_id]
         if courses is not None:
@@ -207,6 +208,43 @@ class LessonRepository(JobRepository):
                 + " ORDER BY j.created_at DESC,j.job_id DESC,levels.position LIMIT %s OFFSET %s",
                 [*values, limit, offset],
             ).fetchall()
+
+    def list_reviewable(self, client_id, courses, course_id, limit, offset):
+        # One row per stable lesson, including retained text after output cleanup.
+        # Filter ownership, source/deletion fences and empty text before pagination.
+        filters = ["j.client_id=%s", "j.content_deletion_requested_at IS NULL",
+                   "j.metadata->'revision_request' IS NULL",
+                   "NOT coalesce(j.result ? 'replacement_target_job_id',false)",
+                   "chunks.review_counts IS NOT NULL",
+                   "jsonb_array_length(j.metadata->'document_ids')>0",
+                   "NOT EXISTS (SELECT 1 FROM lesson_content_deletions d WHERE d.job_id=j.job_id AND d.completed_at IS NULL)"]
+        values = [client_id]
+        if courses is not None:
+            filters.append("j.metadata->>'course_id'=ANY(%s)")
+            values.append(list(courses))
+        if course_id is not None:
+            filters.append("j.metadata->>'course_id'=%s")
+            values.append(course_id)
+        filters.append("""NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(j.metadata->'document_ids') AS requested(document_id)
+            LEFT JOIN ingestion_jobs AS source ON source.document_id=requested.document_id::uuid
+            WHERE source.document_id IS NULL OR source.client_id<>j.client_id
+                OR source.deletion_requested_at IS NOT NULL OR source.status<>'DONE'
+                OR source.active_attempt IS NULL
+                OR source.metadata->>'course_id' IS DISTINCT FROM j.metadata->>'course_id'
+        )""")
+        with self.connect() as conn:
+            return conn.execute("""SELECT j.*,chunks.review_counts FROM lesson_jobs AS j
+                CROSS JOIN LATERAL (
+                    SELECT jsonb_object_agg(parts.level,parts.n ORDER BY parts.level) AS review_counts FROM (
+                        SELECT coalesce(nullif(p.level_key,''),j.metadata->'options'->>'learner_level','intermediate') AS level,
+                            count(*) AS n FROM prepared_lesson_chunks p WHERE p.job_id=j.job_id
+                            AND NOT (coalesce(nullif(p.level_key,''),j.metadata->'options'->>'learner_level','intermediate')=ANY(j.deleted_levels))
+                        GROUP BY 1
+                    ) parts
+                ) chunks WHERE """ + " AND ".join(filters)
+                + " ORDER BY j.created_at DESC,j.job_id DESC LIMIT %s OFFSET %s",
+                [*values, limit, offset]).fetchall()
 
     def save_prepared_text(self, conn, job_id, chunks, versions, *, partial=False):
         """Caller holds the job lease and source locks; commit before any TTS call."""

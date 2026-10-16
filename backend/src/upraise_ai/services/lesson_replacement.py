@@ -15,6 +15,7 @@ from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.lessons import LessonResult
 from upraise_ai.services.lesson_models import merge_reviews
 from upraise_ai.services.lesson_pipeline import write_json
+from upraise_ai.storage.lesson_archive import output_available, persistent_output
 
 
 def artifact_job(row):
@@ -24,6 +25,14 @@ def artifact_job(row):
 def chunk_fingerprint(chunk):
     return hashlib.sha256(json.dumps(chunk.model_dump(mode="json", exclude={"audio_url"}),
                                      sort_keys=True).encode()).hexdigest()
+
+
+def artifact_directory(staging, row):
+    if persistent_output(row):
+        if staging.archive is None:
+            raise IngestionError("LESSON_ARCHIVE_NOT_CONFIGURED", status=503)
+        return staging.archive.version(row["job_id"], artifact_job(row), row["result"]["result_sha256"])
+    return staging.job_dir(artifact_job(row))
 
 
 def load_current(staging, row):
@@ -53,8 +62,7 @@ def publish_replacement(jobs, staging, conn, job, revised, ttl, *, legacy=False)
     target = conn.execute("SELECT * FROM lesson_jobs WHERE job_id=%s FOR UPDATE", (target_id,)).fetchone()
     if (not target or target["client_id"] != job["client_id"]
             or target["metadata"]["course_id"] != job["metadata"]["course_id"]
-            or target["content_deletion_requested_at"] or target["cleanup_requested_at"]
-            or target["status"] != "DONE" or target["expires_at"] <= datetime.now(UTC)):
+            or not output_available(target)):
         raise IngestionError("REVISION_TARGET_UNAVAILABLE", status=409)
     levels = (set(request.get("target_chunk_sha256_by_level", {})) if request.get("apply_to_all_levels")
               else {job["metadata"]["options"]["learner_level"]})
@@ -117,7 +125,7 @@ def publish_replacement(jobs, staging, conn, job, revised, ttl, *, legacy=False)
     current.reviewer_report.issues = list({json.dumps(issue.model_dump(), sort_keys=True): issue
                                          for issue in current.reviewer_report.issues}.values())
     folder = staging.job_dir(str(job["job_id"]))
-    previous_folder = staging.job_dir(artifact_job(target))
+    previous_folder = artifact_directory(staging, target)
     # A complete new artifact directory includes the other levels and the latest
     # unrelated edits, not the older copies in the request's temporary snapshot.
     for chunk in current.chunks:
@@ -144,6 +152,8 @@ def publish_replacement(jobs, staging, conn, job, revised, ttl, *, legacy=False)
     # Use a separate manifest: retries still need the completed staging result.
     write_json(folder / "current-result.json", current.model_dump(mode="json"))
     digest = hashlib.sha256((folder / "current-result.json").read_bytes()).hexdigest()
+    if staging.archive:
+        staging.archive.save(target_id, str(job["job_id"]), folder, "current-result.json", digest, current.chunks)
     previous = target["result"]
     cleanup = list(dict.fromkeys([*previous.get("replacement_cleanup_jobs", []), artifact_job(target)]))
     summary = {**previous, "result_sha256": digest, "artifact_job_id": str(job["job_id"]),
@@ -152,7 +162,10 @@ def publish_replacement(jobs, staging, conn, job, revised, ttl, *, legacy=False)
                "review_approved": current.reviewer_report.approved,
                "review_issue_count": len(current.reviewer_report.issues), "requires_review": True}
     summary.pop("revision", None)
+    if staging.archive:
+        summary["persistent_output"] = True
     conn.execute("""UPDATE lesson_jobs SET result=%s,expires_at=%s,updated_at=clock_timestamp(),
+        cleanup_reason=NULL,cleanup_requested_at=NULL,cleanup_completed_at=NULL,
         callback_status='NONE',callback_token=NULL,callback_until=NULL WHERE job_id=%s""",
         (Jsonb(summary), expires, target_id))
     # A7's durable job is progress/audit only; its prepared copies are temporary.
@@ -170,7 +183,7 @@ def publish_replacement(jobs, staging, conn, job, revised, ttl, *, legacy=False)
 
 
 def current_manifest(staging, row):
-    folder = staging.job_dir(artifact_job(row))
+    folder = artifact_directory(staging, row)
     return folder / ("current-result.json" if row["result"].get("artifact_job_id") else "result.json")
 
 
@@ -186,18 +199,23 @@ def cleanup_replacements(jobs, staging, target_id):
                 continue
             with (nullcontext() if obsolete == target_id else staging.artifact_lock(obsolete)):
                 staging.remove(obsolete)
+                if staging.archive:
+                    staging.archive.remove(target_id, obsolete)
         if pending:
             # Keep only files serving the current lesson; remove request feedback,
             # old snapshot text, generated checkpoints and diagnostic responses.
             with staging.artifact_lock(current_id):
                 current = load_current(staging, row)
                 keep = {"current-result.json", *{f"{chunk.chunk_id}.wav" for chunk in current.chunks}}
-                for path in staging.job_dir(current_id).iterdir():
+                temporary = staging.job_dir(current_id)
+                for path in temporary.iterdir() if temporary.exists() else []:
                     if path.name not in keep:
                         if path.is_dir():
                             shutil.rmtree(path)
                         else:
                             path.unlink(missing_ok=True)
+                if staging.archive and persistent_output(row):
+                    staging.archive.remove(target_id, current_id, keep_digest=row["result"]["result_sha256"])
             conn.execute("""UPDATE lesson_jobs SET result=result-'replacement_cleanup_jobs'
                 WHERE job_id=%s""", (target_id,))
 

@@ -26,6 +26,8 @@ ROUTES = [
     ("POST", r"/v1/documents", set()),
     ("DELETE", rf"/v1/documents/{UUID}", set()),
     ("GET", r"/v1/lesson-jobs", {"course_id", "limit", "offset"}),
+    ("GET", r"/v1/lesson-reviews", {"course_id", "limit", "offset"}),
+    ("GET", rf"/v1/lesson-reviews/{UUID}", set()),
     ("POST", r"/v2/lesson-jobs", set()),
     ("GET", rf"/v1/jobs/{UUID}", set()),
     ("DELETE", rf"/v1/jobs/{UUID}", {"reason"}),

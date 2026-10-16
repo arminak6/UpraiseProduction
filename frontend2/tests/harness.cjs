@@ -55,6 +55,19 @@ class Backend {
       created_at: new Date().toISOString(), requires_review: true,
     })));
   }
+  reviewText(value) {
+    const variants = Object.fromEntries(Object.entries(value.variants).map(([level, lesson]) => [level, {
+      learner_level: level,
+      chunks: lesson.chunks.map(({ chunk_id, index, text, sources, reviewer_report }) => ({ chunk_id, index, text, sources, reviewer_report })),
+    }]));
+    const first = Object.values(value.variants)[0];
+    const available = !first.expires_at || Date.parse(first.expires_at) > Date.now();
+    return { job_id: value.job_id, lesson_id: first.lesson_id, course_id: first.course_id, activity_id: first.activity_id,
+      language: first.language, voice: first.voice, status: "DRAFT", job_status: "DONE", levels: Object.keys(variants),
+      chunk_counts: Object.fromEntries(Object.entries(variants).map(([level, lesson]) => [level, lesson.chunks.length])),
+      created_at: new Date().toISOString(), audio_expires_at: first.expires_at,
+      revision_available: available, revision_unavailable_reason: available ? null : "LESSON_OUTPUT_EXPIRED", variants };
+  }
   async fetch(url, options = {}) {
     const parsed = new URL(url, "http://127.0.0.1:8502");
     const route = parsed.pathname.replace(/^\/api/, "");
@@ -81,6 +94,17 @@ class Backend {
     if (call.method === "GET" && route === "/v1/lesson-jobs") {
       const offset = Number(parsed.searchParams.get("offset") || 0), limit = Number(parsed.searchParams.get("limit") || 100);
       return this.response(this.catalog().slice(offset, offset + limit));
+    }
+    if (call.method === "GET" && route === "/v1/lesson-reviews") {
+      const offset = Number(parsed.searchParams.get("offset") || 0), limit = Number(parsed.searchParams.get("limit") || 100);
+      return this.response([...this.bundles.values()].map(value => {
+        const { variants, ...summary } = this.reviewText(value); return summary;
+      }).slice(offset, offset + limit));
+    }
+    const reviewMatch = route.match(/^\/v1\/lesson-reviews\/([^/]+)$/);
+    if (call.method === "GET" && reviewMatch) {
+      const value = this.bundles.get(reviewMatch[1]);
+      return value ? this.response(this.reviewText(value)) : this.response({ detail: "JOB_NOT_FOUND" }, 404);
     }
     if (call.method === "POST" && route === "/v2/lesson-jobs") {
       const jobId = id(20);
@@ -117,8 +141,9 @@ class Backend {
             this.bundles.set(jobId, value); this.hashes.set(jobId, "c".repeat(64));
           } else {
             const value = this.bundles.get(job.input.lesson_job_id);
+            const selected = Object.values(value.variants).flatMap(lesson => lesson.chunks).find(chunk => chunk.chunk_id === job.input.chunk_id);
             for (const lesson of Object.values(value.variants)) for (const chunk of lesson.chunks) {
-              if (job.input.apply_to_all_levels && chunk.index === 0 || chunk.chunk_id === job.input.chunk_id) chunk.text = "Updated explanation after revision.";
+              if (job.input.apply_to_all_levels && chunk.index === selected.index || chunk.chunk_id === job.input.chunk_id) chunk.text = "Updated explanation after revision.";
             }
             this.hashes.set(job.input.lesson_job_id, "b".repeat(64));
           }
@@ -211,4 +236,4 @@ async function harness(configure = () => {}) {
   return { backend, window, document, errors, audio, urls, timers, find, click, input, submit, navigate, settle, waitFor, runTimers, chooseFile, start, close: () => dom.window.close() };
 }
 
-module.exports = { harness, id, wavHash, bundle };
+module.exports = { harness, id, wavHash, bundle, Backend };

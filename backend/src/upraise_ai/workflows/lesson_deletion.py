@@ -4,7 +4,6 @@ import hashlib
 import os
 import shutil
 from contextlib import nullcontext
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from psycopg.types.json import Jsonb
@@ -13,7 +12,8 @@ from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.services.lesson_models import merge_reviews
 from upraise_ai.services.lesson_pipeline import write_json
-from upraise_ai.services.lesson_replacement import artifact_job, load_current
+from upraise_ai.services.lesson_replacement import artifact_directory, artifact_job, load_current
+from upraise_ai.storage.lesson_archive import output_available, persistent_output
 
 DELETION_VERSION = "generated-content-deletion-v1"
 DELETION_REASON = "GENERATED_LESSON_DELETED"
@@ -105,7 +105,7 @@ def revoke_revisions(lessons, job_id):
 def copy_remaining(lessons, row, operation, current):
     folder = lessons.staging.job_dir(str(operation["deletion_id"]))
     folder.mkdir(mode=0o700, exist_ok=True)
-    previous = lessons.staging.job_dir(artifact_job(row))
+    previous = artifact_directory(lessons.staging, row)
     for chunk in current.chunks:
         source, target = previous / f"{chunk.chunk_id}.wav", folder / f"{chunk.chunk_id}.wav"
         if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != chunk.audio_sha256:
@@ -118,7 +118,11 @@ def copy_remaining(lessons, row, operation, current):
             with target.open("r+b") as stream:
                 os.fsync(stream.fileno())
     write_json(folder / "current-result.json", current.model_dump(mode="json"))
-    return hashlib.sha256((folder / "current-result.json").read_bytes()).hexdigest()
+    digest = hashlib.sha256((folder / "current-result.json").read_bytes()).hexdigest()
+    if lessons.staging.archive:
+        lessons.staging.archive.save(str(row["job_id"]), str(operation["deletion_id"]), folder,
+                                     "current-result.json", digest, current.chunks)
+    return digest
 
 
 def publish_deletion(lessons, job_id, deletion_id):
@@ -135,8 +139,7 @@ def publish_deletion(lessons, job_id, deletion_id):
         else:
             level = operation["level_key"]
             summary = dict(row.get("result") or {})
-            active = (row["status"] == "DONE" and not row["cleanup_requested_at"]
-                      and row["expires_at"] and row["expires_at"] > datetime.now(UTC))
+            active = output_available(row)
             if active:
                 current = load_current(lessons.staging, row)
                 if not isinstance(current, AlignedLessonResult) or level not in current.variants:
@@ -149,6 +152,8 @@ def publish_deletion(lessons, job_id, deletion_id):
                     chunk_counts={name: len(variant.chunks) for name, variant in current.variants.items()},
                     review_approved=current.reviewer_report.approved,
                     review_issue_count=len(current.reviewer_report.issues), requires_review=True)
+                if lessons.staging.archive:
+                    summary["persistent_output"] = True
             else:
                 remaining = [name for name in summary.get("levels", known_levels(row)) if name != level]
                 if summary:
@@ -172,8 +177,7 @@ def finish_deletion(lessons, job_id, deletion_id):
                                  (deletion_id,)).fetchone()
         if operation["completed_at"]:
             return
-        active = (row.get("result") and not row["content_deletion_requested_at"] and not row["cleanup_requested_at"]
-                  and row["expires_at"] and row["expires_at"] > datetime.now(UTC))
+        active = row.get("result") and output_available(row)
         keep = artifact_job(row) if active else None
         removed = []
         for identifier in map(str, operation["artifact_ids"]):
@@ -181,6 +185,8 @@ def finish_deletion(lessons, job_id, deletion_id):
                 continue
             with nullcontext() if identifier == job_id else lessons.staging.artifact_lock(identifier):
                 lessons.staging.remove(identifier)
+                if lessons.staging.archive:
+                    lessons.staging.archive.remove(job_id, identifier)
             removed.append(identifier)
         if row.get("result"):
             remaining = [value for value in row["result"].get("replacement_cleanup_jobs", []) if value not in removed]
@@ -192,12 +198,18 @@ def finish_deletion(lessons, job_id, deletion_id):
             conn.execute("UPDATE lesson_jobs SET result=%s WHERE job_id=%s", (Jsonb(summary), job_id))
         lessons.audit.generated_content_deleted(row, operation)
         if row["content_deletion_requested_at"]:
+            if lessons.staging.archive:
+                lessons.staging.archive.remove(job_id)
             lessons.audit.lesson(row, "CONTENT_DELETED", {"course_id": row["metadata"]["course_id"],
                                                           "reason": row["content_deletion_reason"]})
             conn.execute("""UPDATE lesson_jobs SET content_deleted_at=clock_timestamp(),
                 cleanup_completed_at=clock_timestamp() WHERE job_id=%s""", (job_id,))
         conn.execute("UPDATE lesson_content_deletions SET completed_at=clock_timestamp() WHERE deletion_id=%s",
                      (deletion_id,))
+        if active and persistent_output(row) and lessons.staging.archive:
+            lessons.staging.archive.remove(job_id, keep, keep_digest=row["result"]["result_sha256"])
+            with lessons.staging.artifact_lock(keep):
+                lessons.staging.remove(keep)
 
 
 def complete_generated_deletions(lessons, job_id):

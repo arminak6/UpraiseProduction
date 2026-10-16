@@ -113,7 +113,7 @@ class LessonWorker:
         self.documents = documents or JobRepository(settings.jobs_dsn.get_secret_value())
         self.audit = audit or AuditRepository(settings.audit_dsn.get_secret_value(), settings=settings)
         self.vectors = vectors or VectorStore(settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension)
-        self.staging = StagingStore(settings.data_dir)
+        self.staging = StagingStore(settings.data_dir, settings.lesson_archive_dir)
         self.models, self.speech = models, speech
         self.notify = notify
         self.stop = threading.Event()
@@ -256,6 +256,10 @@ class LessonWorker:
                             self.audit.lesson(job, "CHUNK_REPLACED", {key: summary[key] for key in (
                                 "replacement_target_job_id", "chunk_id", "revised_levels", "result_sha256")
                                 if key in summary}, attempt=True)
+                        elif self.staging.archive:
+                            self.staging.archive.save(job_id, job_id, self.staging.job_dir(job_id),
+                                                      "result.json", summary["result_sha256"], result.chunks)
+                            summary["persistent_output"] = True
                         self.jobs.done(conn, job_id, token, summary, self.settings.lesson_ttl_seconds)
                 except LeaseLost:
                     pass

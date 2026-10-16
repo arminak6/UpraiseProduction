@@ -349,6 +349,29 @@ dialog::backdrop { background: #17323965; backdrop-filter: blur(3px); }
 .preview-part { padding-block: 17px; border-bottom: 1px solid var(--line); }
 .preview-part h3 { font-size: 14px; font-weight: 600; }
 .preview-part p { font-size: 12px; line-height: 1.8; color: var(--muted); margin-bottom: 0; }
+.review-course-list { display: grid; gap: 16px; }
+.review-course-row { padding: 25px 28px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.review-course-row > div { min-width: 0; }
+.review-course-row h3 { font-size: 21px; margin: 15px 0 7px; overflow-wrap: anywhere; }
+.review-course-row .small-copy { margin: 9px 0 0; }
+.review-course-row > .button { flex-shrink: 0; }
+.review-course-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 8px 0 24px; }
+.review-course-heading h2 { font-size: 26px; overflow-wrap: anywhere; }
+.review-selectors { margin: 24px 0; }
+.review-workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 24px; align-items: start; }
+.review-reading, .review-feedback { min-width: 0; }
+.review-full-text { overflow-wrap: anywhere; }
+.review-reading .lesson-navigation { margin-top: 26px; }
+.review-feedback { position: sticky; top: 20px; }
+.review-feedback > .small-copy { margin: 12px 0 23px; }
+.review-feedback textarea { min-height: 230px; }
+.review-feedback .preview-note { margin-top: 22px; }
+.review-feedback > .text-button { margin-top: 15px; }
+.review-progress { margin-bottom: 24px; }
+.review-progress .progress-card { text-align: left; padding: 22px 26px; }
+.review-progress .progress-symbol, .review-progress .progress-card > h2, .review-progress .progress-card > .sample-label { display: none; }
+.review-progress .progress-card > .small-copy { margin-top: 0; }
+.review-progress .progress-card .progress-track { margin-top: 12px; }
 .skip-link { position: fixed; left: 20px; top: -60px; z-index: 50; background: var(--teal); color: #fff; padding: 12px; border-radius: 8px; }
 .skip-link:focus { top: 12px; }
 
@@ -375,6 +398,8 @@ dialog::backdrop { background: #17323965; backdrop-filter: blur(3px); }
   .brand { font-size: 21px; }
   .brand-symbol { width: 32px; height: 32px; }
   .main-nav { order: 3; width: 100%; justify-content: space-between; gap: 10px; }
+  .review-workspace { grid-template-columns: minmax(0, 1fr); }
+  .review-feedback { position: static; }
   .main-nav a { padding: 0 0 15px; }
   .workspace-button { margin-left: auto; }
   .preview-strip { font-size: 10px; }
@@ -403,7 +428,11 @@ dialog::backdrop { background: #17323965; backdrop-filter: blur(3px); }
   .page-width, .header-inner { width: calc(100% - 36px); }
   .header-inner { padding-top: 15px; gap: 19px; }
   .brand { font-size: 20px; }
-  .main-nav a { font-size: 10px; gap: 6px; }
+  .main-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+  .main-nav a { font-size: 12px; gap: 8px; padding-bottom: 12px; }
+  .review-course-row, .review-course-heading { flex-direction: column; align-items: flex-start; }
+  .review-course-row { padding: 22px; }
+  .review-course-row > .button { width: 100%; }
   .nav-number { width: 18px; height: 18px; font-size: 9px; }
   .preview-strip .page-width { min-height: 39px; gap: 7px; flex-wrap: wrap; padding: 7px 0; }
   .preview-strip .page-width > span:nth-last-child(2) { display: none; }

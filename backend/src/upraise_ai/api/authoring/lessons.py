@@ -8,8 +8,10 @@ from starlette.background import BackgroundTask
 from upraise_ai.guards.ingress import Principal, ingress
 from upraise_ai.schemas.aligned_lessons import AlignedLessonInput, AlignedLessonResult
 from upraise_ai.schemas.lesson_catalog import ReadyLesson
+from upraise_ai.schemas.lesson_review import ReviewLessonSummary, ReviewLessonText
 from upraise_ai.schemas.lessons import AcceptedLesson, LessonInput, LessonResult
 from upraise_ai.schemas.revisions import ChunkRevisionInput
+from upraise_ai.workflows.lesson_review import list_reviews, review_text
 from upraise_ai.workflows.revisions import submit_revision
 
 router = APIRouter()
@@ -31,6 +33,26 @@ def ready_lessons(request: Request, response: Response,
     principal.require_scope("jobs:read")
     response.headers["Cache-Control"] = "no-store"
     return service(request).list_ready(principal, course_id=course_id, limit=limit, offset=offset)
+
+
+@router.get("/v1/lesson-reviews", response_model=list[ReviewLessonSummary], response_model_exclude_none=True,
+            summary="List courses with retained teaching text for teacher review")
+def review_lessons(request: Request, response: Response,
+                   course_id: str | None = Query(None, min_length=1, max_length=120),
+                   limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
+                   principal: Principal = Depends(ingress)):
+    principal.require_scope("jobs:read")
+    response.headers["Cache-Control"] = "no-store"
+    return list_reviews(service(request), principal, course_id=course_id, limit=limit, offset=offset)
+
+
+@router.get("/v1/lesson-reviews/{job_id}", response_model=ReviewLessonText, response_model_exclude_none=True,
+            summary="Read retained teaching text independently of audio expiry")
+def retained_lesson_text(job_id: UUID, request: Request, response: Response,
+                         principal: Principal = Depends(ingress)):
+    principal.require_scope("jobs:read")
+    response.headers["Cache-Control"] = "no-store"
+    return review_text(service(request), job_id, principal)
 
 
 @router.post("/v1/lesson-jobs", response_model=AcceptedLesson, status_code=202,

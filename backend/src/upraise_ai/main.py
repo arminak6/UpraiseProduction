@@ -46,7 +46,7 @@ async def lifespan(app):
     vectors = None
     if settings.jobs_dsn.get_secret_value():
         jobs = JobRepository(settings.jobs_dsn.get_secret_value())
-        staging = StagingStore(settings.data_dir)
+        staging = StagingStore(settings.data_dir, settings.lesson_archive_dir)
         app.state.submission = SubmissionService(settings, jobs, staging)
         if settings.audit_dsn.get_secret_value():
             vectors = VectorStore(settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension)
@@ -60,6 +60,8 @@ async def lifespan(app):
             app.state.interrupts = InterruptService(settings, app.state.lessons, app.state.sessions, vectors)
             from upraise_ai.services.lesson_replacement import consolidate_legacy_revisions
             await asyncio.to_thread(consolidate_legacy_revisions, app.state.lessons)
+            from upraise_ai.workflows.archive_lessons import archive_available_outputs
+            await asyncio.to_thread(archive_available_outputs, app.state.lessons)
     async def sweep_sessions():
         while True:
             await asyncio.sleep(settings.session_sweep_seconds)

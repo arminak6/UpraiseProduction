@@ -12,7 +12,8 @@ from upraise_ai.guards.session_jwt import validate_session_jwt
 from upraise_ai.schemas.aligned_lessons import AlignedLessonResult
 from upraise_ai.schemas.chunk_end import ChunkEndResponse
 from upraise_ai.schemas.sessions import StartedSession
-from upraise_ai.services.lesson_replacement import artifact_job
+from upraise_ai.services.lesson_replacement import artifact_directory
+from upraise_ai.storage.lesson_archive import output_available, persistent_output
 from upraise_ai.storage.sessions import RuntimeSession, SessionBinding
 
 AI_NOTICES = {
@@ -92,7 +93,7 @@ class SessionService:
 
         row = self.lessons.authorized(data.lesson_job_id, principal)
         with self.lessons.staging.artifact_lock(str(data.lesson_job_id), shared=True):
-            if row["status"] == "DONE" and row["expires_at"] is None:
+            if row["status"] == "DONE" and row["expires_at"] is None and not persistent_output(row):
                 raise IngestionError("LESSON_OUTPUT_UNAVAILABLE", status=503)
             result = self.lessons.result(row)
             level_required = isinstance(result, AlignedLessonResult) or result.generation_version == 'a3-v2'
@@ -131,11 +132,12 @@ class SessionService:
                     or [chunk.index for chunk in result.chunks] != list(range(len(chunk_ids)))):
                 raise IngestionError("LESSON_OUTPUT_UNAVAILABLE", status=503)
             for chunk_id in chunk_ids:
-                if not self.lessons.staging.job_dir(artifact_job(row)).joinpath(f"{chunk_id}.wav").is_file():
+                if not artifact_directory(self.lessons.staging, row).joinpath(f"{chunk_id}.wav").is_file():
                     raise IngestionError("LESSON_AUDIO_UNAVAILABLE", status=503)
             now = datetime.now(UTC)
-            expires = min(now + timedelta(seconds=self.settings.session_ttl_seconds),
-                          datetime.fromisoformat(result.expires_at))
+            expires = now + timedelta(seconds=self.settings.session_ttl_seconds)
+            if result.expires_at:
+                expires = min(expires, datetime.fromisoformat(result.expires_at))
             if claims and claims.exp < expires.timestamp():
                 # Convert only a nearer token deadline, avoiding datetime
                 # overflow from an otherwise valid distant NumericDate.
@@ -172,7 +174,7 @@ class SessionService:
             # Fence a B1 start that raced deletion: publish RAM state only while
             # the exact job and all its sources are still available.
             with self.lessons.jobs.job_transaction(str(data.lesson_job_id)) as (conn, current):
-                if not current or current["cleanup_requested_at"] or current.get("content_deletion_requested_at"):
+                if not output_available(current):
                     raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
                 from upraise_ai.services.lesson_pipeline import LessonPipeline
                 LessonPipeline(self.settings, self.lessons.documents, None, self.lessons.staging, None, None).check_sources(

@@ -244,6 +244,143 @@ test("an uncertain revision is never automatically resubmitted", async t => {
   assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 1);
 });
 
+test("teacher review opens an existing course and preserves per-part feedback through navigation", async t => {
+  const h = await harness(); t.after(h.close);
+  assert.equal(h.document.querySelectorAll("[data-nav]").length, 4);
+  await h.navigate("review");
+  assert.equal(h.document.querySelectorAll(".review-course-row").length, 1);
+  h.click(`[data-action="review-course"][data-id="${id(10)}"]`); await h.settle();
+  assert.match(h.find(".review-full-text").textContent, /beginner part 1/);
+  h.input("#review-feedback", "Clarify the first example.");
+  h.click('[data-action="review-next"]'); await h.settle();
+  assert.match(h.find(".review-full-text").textContent, /beginner part 2/);
+  assert.equal(h.find("#review-feedback").value, "");
+  h.input("#review-feedback", "Explain the second example.");
+  h.input("#review-level", "advanced", "change"); await h.settle();
+  assert.equal(h.find("#review-feedback").value, "");
+  h.input("#review-level", "beginner", "change"); await h.settle();
+  assert.equal(h.find("#review-feedback").value, "Clarify the first example.");
+  h.click('[data-action="review-next"]'); await h.settle();
+  assert.equal(h.find("#review-feedback").value, "Explain the second example.");
+  await h.navigate("materials"); await h.navigate("review");
+  assert.equal(h.find("#review-feedback").value, "Explain the second example.");
+  assert.equal(h.backend.records("POST", "/v2/lesson-jobs").length, 0);
+  assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 0);
+  assert.equal(h.backend.records("POST", "/v1/sessions").length, 0);
+});
+
+test("inline review revises the chosen second part across levels and reloads the same selection", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  h.input("#review-level", "advanced", "change"); h.input("#review-part", "1", "change");
+  assert.equal(h.find("#review-all").checked, false);
+  const chunk = h.backend.bundles.get(id(10)).variants.advanced.chunks[1];
+  h.input("#review-feedback", "Add a source-based example to part two.");
+  h.find("#review-all").checked = true; h.find("#review-all").dispatchEvent(new h.window.Event("change", { bubbles: true }));
+  h.submit("#review-form"); h.submit("#review-form"); await h.settle();
+  assert.equal(h.find('#review-form button[type="submit"]').matches(":disabled"), true);
+  assert.match(h.find(".review-progress").textContent, /35.00%/);
+  await h.runTimers(5000);
+  const [call] = h.backend.records("POST", "/v1/audio:regenerate");
+  assert.deepEqual(call.body, { lesson_job_id: id(10), chunk_id: chunk.chunk_id,
+    teacher_review: "Add a source-based example to part two.", apply_to_all_levels: true });
+  assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 1);
+  assert.equal(h.window.location.hash, "#review");
+  assert.equal(h.find("#review-level").value, "advanced"); assert.equal(h.find("#review-part").value, "1");
+  assert.match(h.find(".review-full-text").textContent, /Updated explanation/);
+  assert.equal(h.find("#review-feedback").value, "");
+  h.click('[data-action="review-previous"]'); await h.settle();
+  assert.match(h.find(".review-full-text").textContent, /advanced part 1/);
+  h.click('[data-action="review-back"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".review-course-row").length, 1);
+});
+
+test("expired audio never hides retained teaching text or permits an A7 submission", async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) lesson.expires_at = new Date(Date.now() - 1000).toISOString();
+  }); t.after(h.close);
+  await h.navigate("learn"); assert.equal(h.document.querySelectorAll(".course-card").length, 0);
+  await h.navigate("review"); assert.equal(h.document.querySelectorAll(".review-course-row").length, 1);
+  h.click('[data-action="review-course"]'); await h.settle();
+  assert.match(h.find(".review-full-text").textContent, /source material/);
+  assert.match(h.find("main").textContent, /Generate the course again/);
+  assert.equal(h.find("#review-form fieldset").disabled, true);
+  h.input("#review-feedback", "This must not submit."); h.submit("#review-form"); await h.settle();
+  assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 0);
+  assert.equal(h.backend.records("GET", `/v1/jobs/${id(10)}/result`).length, 0);
+});
+
+test("archived courses without an output deadline stay reviewable and playable", async t => {
+  const h = await harness(backend => {
+    const value = backend.bundles.get(id(10)); value.expires_at = null;
+    for (const lesson of Object.values(value.variants)) lesson.expires_at = null;
+  }); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  assert.equal(h.find("#review-feedback").matches(":disabled"), false);
+  h.input("#review-feedback", "Clarify this saved explanation."); h.submit("#review-form"); await h.settle(); await h.runTimers(5000);
+  assert.match(h.find(".review-full-text").textContent, /Updated explanation/);
+  await h.navigate("learn"); assert.equal(h.document.querySelectorAll(".course-card").length, 1);
+  h.click('[data-action="preview-course"]'); await h.settle();
+  assert.match(h.find("#modal").textContent, /Text and narration are saved/);
+  assert.doesNotMatch(h.find("#modal").textContent, /1970|Invalid Date/);
+  h.click('[data-action="close-modal"]'); await h.settle();
+  await h.start(); h.click('[data-action="toggle-play"]'); await h.settle(); assert.equal(h.audio[0].paused, false);
+});
+
+test("uncertain inline revisions require explicit preparation and never auto-resubmit", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  h.input("#review-feedback", "Make this clearer.");
+  h.backend.failNext("POST", "/v1/audio:regenerate"); h.submit("#review-form"); await h.settle();
+  assert.match(h.find(".review-feedback").textContent, /may already have been accepted/);
+  assert.equal(h.document.querySelectorAll("#review-form").length, 0);
+  h.click('[data-action="reload-review"]'); await h.settle();
+  await h.navigate("learn"); await h.navigate("review"); await h.runTimers(5000);
+  assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 1);
+  h.click('[data-action="prepare-new-review"]'); await h.settle();
+  assert.equal(h.find("#review-feedback").value, "Make this clearer.");
+  assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 1);
+});
+
+test("inline revision tracking pauses on failure and resumes only after manual refresh", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  h.input("#review-feedback", "Improve this explanation.");
+  h.backend.failNext("GET", `/v1/jobs/${id(30)}`); h.submit("#review-form"); await h.settle();
+  assert.match(h.find(".review-progress").textContent, /Status updates paused/);
+  await h.runTimers(5000); assert.equal(h.backend.records("GET", `/v1/jobs/${id(30)}`).length, 1);
+  h.click('[data-action="retry-tracking"]'); await h.settle(); await h.runTimers(5000);
+  assert.match(h.find(".review-full-text").textContent, /Updated explanation/);
+  assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 1);
+});
+
+test("review search and failed text loads keep retry controls and escape backend text", async t => {
+  const h = await harness(backend => { backend.bundles.get(id(10)).variants.beginner.chunks[0].text = '<img src=x onerror="alert(1)"> A full explanation.'; }); t.after(h.close);
+  await h.navigate("review"); h.input("#review-search", "nonexistent");
+  assert.equal(h.document.querySelectorAll(".review-course-row").length, 0);
+  h.input("#review-search", "real generated");
+  h.backend.failNext("GET", `/v1/lesson-reviews/${id(10)}`, 404, "JOB_NOT_FOUND");
+  h.click('[data-action="review-course"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".review-full-text").length, 0);
+  h.click('[data-action="reload-review"]'); await h.settle();
+  assert.match(h.find(".review-full-text").textContent, /<img/);
+  assert.equal(h.find(".review-full-text").querySelectorAll("img").length, 0);
+});
+
+test("a late review response cannot replace a newly selected course", async t => {
+  let resolveFirst;
+  const h = await harness(backend => {
+    backend.bundles.set(id(11), bundle(id(11), "Another course"));
+    backend.intercept = call => call.path === `/v1/lesson-reviews/${id(10)}`
+      ? new Promise(resolve => { resolveFirst = () => resolve(backend.response(backend.reviewText(backend.bundles.get(id(10))))); }) : undefined;
+  }); t.after(h.close);
+  await h.navigate("review"); h.click(`[data-action="review-course"][data-id="${id(10)}"]`); await h.settle();
+  h.click('[data-action="review-back"]'); await h.settle();
+  h.click(`[data-action="review-course"][data-id="${id(11)}"]`); await h.settle();
+  resolveFirst(); await h.settle();
+  assert.equal(h.find(".review-course-heading h2").textContent, "Another course");
+});
+
 test("material removal warns about every dependent course and retries the pinned target", async t => {
   const h = await harness(); t.after(h.close);
   h.click('[data-action="remove-material"]');

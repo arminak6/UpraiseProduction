@@ -27,6 +27,8 @@
     question: "", questionOpen: false, questionPending: false, questionOffset: 0, turn: null,
     startAttempt: null, startPending: null, sessionToken: "", questionsConsent: true,
     deletion: null, revision: null, revisionUncertain: new Set(),
+    reviewCourses: [], reviewError: "", reviewMore: false, reviewSearch: "", reviewEditor: null,
+    reviewDrafts: new Map(),
   };
   let toastTimer;
   let pollTimer;
@@ -107,7 +109,7 @@
   }
   function render() {
     const page = location.hash.slice(1);
-    state.page = ["materials", "generate", "learn"].includes(page) ? page : "materials";
+    state.page = ["materials", "generate", "review", "learn"].includes(page) ? page : "materials";
     if (state.page !== "learn") pausePlayback();
     for (const link of document.querySelectorAll("[data-nav]")) {
       const active = link.dataset.nav === state.page;
@@ -117,8 +119,9 @@
     if (state.loading) { main.innerHTML = `<div class="card empty-state">${icon("loader", "spinner")}<h3>Opening your learning studio…</h3><p>Loading material and available courses.</p></div>`; return; }
     if (state.page === "materials") renderMaterials();
     if (state.page === "generate") renderGenerate();
+    if (state.page === "review") renderReview();
     if (state.page === "learn") renderLearn();
-    document.title = `UPRAISE · ${{ materials: "Your material", generate: "Generate course", learn: "Start learning" }[state.page]}`;
+    document.title = `UPRAISE · ${{ materials: "Your material", generate: "Generate course", review: "Review courses", learn: "Start learning" }[state.page]}`;
   }
 
   async function loadMaterials() {
@@ -159,10 +162,14 @@
     const epoch = ++workspaceEpoch;
     try {
       if (!state.config) { state.config = await api.initialize(); state.activityId = state.config.activity_id; }
-      const results = await Promise.allSettled([loadMaterials(), loadCourses()]);
+      const results = await Promise.allSettled([loadMaterials(), loadCourses(), loadReviews()]);
       if (epoch !== workspaceEpoch) return;
       state.connected = results.every(result => result.status === "fulfilled" && result.value);
-    } catch (error) { state.materialError = error.message; state.catalogError = error.message; state.connected = false; }
+      if (state.page === "review" && state.reviewEditor && !state.reviewEditor.busy) {
+        const editor = state.reviewEditor;
+        await openReview(editor.id, editor.level, editor.index);
+      }
+    } catch (error) { state.materialError = error.message; state.catalogError = error.message; state.reviewError = error.message; state.connected = false; }
     finally {
       if (epoch === workspaceEpoch) {
         state.loading = false; state.refreshing = false; updateConnection();
@@ -282,7 +289,8 @@
       if (state.player?.lesson.chunks.some(chunk => chunk.sources.some(source => source.document_id === target.id))) await endLearning("ERROR", true);
       for (const [id, job] of state.jobs) if (job.materialId === target.id) { state.jobs.delete(id); if (state.activeJobId === id) state.activeJobId = null; }
       state.bundles.clear(); state.generatedId = null; state.deletion = null;
-      modal.close(); await Promise.allSettled([loadMaterials(), loadCourses()]); render(); toast("The material and its dependent courses were removed.");
+      state.reviewEditor = null; state.reviewDrafts.clear();
+      modal.close(); await Promise.allSettled([loadMaterials(), loadCourses(), loadReviews()]); render(); toast("The material and its dependent courses were removed.");
     } catch (error) {
       target.error = error.message;
       const message = document.querySelector("#deletion-error"); if (message) message.innerHTML = errorBox(error.message);
@@ -414,10 +422,25 @@
       Object.assign(job, status, { trackingError: "" });
       if (job.status === "DONE" && !job.resultLoaded) {
         const targetId = job.type === "revision" ? job.targetId : job.job_id;
-        await fetchBundle(targetId); job.resultLoaded = true;
-        await loadCourses();
+        await fetchBundle(targetId);
+        await Promise.allSettled([loadCourses(), loadReviews()]);
+        if (job.type === "revision" && state.reviewEditor?.id === targetId) {
+          const editor = state.reviewEditor;
+          const updated = validateReview(await api.request(`/v1/lesson-reviews/${encodeURIComponent(targetId)}`), targetId);
+          if (state.reviewEditor === editor) {
+            rememberReviewDraft(editor);
+            if (job.reviewDraftKey && state.reviewDrafts.get(job.reviewDraftKey)?.text === job.reviewText) state.reviewDrafts.delete(job.reviewDraftKey);
+            editor.bundle = updated;
+            editor.level = updated.levels.includes(editor.level) ? editor.level : updated.levels[0];
+            editor.index = Math.min(editor.index, updated.variants[editor.level].chunks.length - 1);
+            const draft = state.reviewDrafts.get(reviewDraftKey(editor));
+            editor.text = draft?.text || ""; editor.all = draft?.all || false;
+          }
+        }
         if (job.type === "revision" && state.player?.lesson.job_id === targetId) await invalidatePlayer("This course was revised. Start a fresh session to use the updated content.");
+        if (job.reviewDraftKey && state.reviewDrafts.get(job.reviewDraftKey)?.text === job.reviewText) state.reviewDrafts.delete(job.reviewDraftKey);
         if (state.activeJobId === job.job_id) { state.generatedId = targetId; state.activeJobId = null; state.resultLevel = job.level || ""; state.resultPart = job.partIndex || 0; }
+        job.resultLoaded = true;
         toast(job.type === "revision" ? "The course revision is ready for review." : "Your generated course is ready for review.");
       }
     } catch (error) { job.trackingError = error.message; }
@@ -425,14 +448,15 @@
       if (state.activeJobId === job.job_id || state.generatedId && job.resultLoaded) renderGenerate();
       else { const list = document.querySelector("#recent-jobs"); if (list) list.innerHTML = recentJobs(); }
     }
+    if (state.page === "review" && state.reviewEditor?.id === job.targetId) renderReview();
   }
   async function cancelGeneration(id) {
     const job = state.jobs.get(id);
     if (!job || terminal.has(job.status) || job.cancelling) return;
-    job.cancelling = true; renderGenerate();
+    job.cancelling = true; render();
     try { await api.request(`/v1/jobs/${job.job_id}?reason=CANCEL`, { method: "DELETE" }); await refreshJob(job); }
     catch (error) { job.trackingError = error.message; toast(`${error.message} Refresh status before retrying cancellation.`); }
-    finally { job.cancelling = false; if (state.page === "generate") renderGenerate(); schedulePoll(); }
+    finally { job.cancelling = false; if (["generate", "review"].includes(state.page)) render(); schedulePoll(); }
   }
   function generatedView(course) {
     const variants = variantsOf(state.bundles.get(course.id));
@@ -440,11 +464,103 @@
     const lesson = variants[state.resultLevel];
     state.resultPart = Math.min(state.resultPart, lesson.chunks.length - 1);
     const chunk = lesson.chunks[state.resultPart];
-    return `<div class="card-title-row"><h2>Ready for a first look</h2>${badge("AI-generated draft", "badge-amber")}</div><h3 class="result-course-title">${escape(course.title)}</h3><p class="small-copy">Choose a level and part to review the generated text and source references.</p><div class="form-grid"><div class="field"><label for="result-level">Learning level</label><select id="result-level">${Object.keys(variants).map(level => `<option value="${escape(level)}" ${state.resultLevel === level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="result-part">Course part</label><select id="result-part">${lesson.chunks.map((part, index) => `<option value="${index}" ${index === state.resultPart ? "selected" : ""}>Part ${index + 1}</option>`).join("")}</select></div></div><div class="result-text">${textParagraphs(chunk.text, "preview-text")}</div><p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report)}<div class="summary-meta"><span>${icon("clock")}${time(chunk.duration_seconds)}</span><span>${icon("globe")}${escape(languageLabel(lesson.language))}</span><span>${icon("headphones")}${escape(lesson.voice)}</span></div><p class="small-copy">Human review is required. Audio is available in the learning player while this course’s temporary output is retained.</p><button class="button button-wide" data-action="start-course" data-id="${escape(course.id)}">${icon("play")}Start learning</button><div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 0"><button class="button button-secondary" data-action="preview-course" data-id="${escape(course.id)}">${icon("eye")}Preview course</button><button class="button button-secondary" data-action="revise-course" data-id="${escape(course.id)}">${icon("edit")}Request changes</button></div><button class="text-button" data-action="new-generation" style="margin-top:25px">${icon("plus")}Create another course</button>`;
+    return `<div class="card-title-row"><h2>Ready for a first look</h2>${badge("AI-generated draft", "badge-amber")}</div><h3 class="result-course-title">${escape(course.title)}</h3><p class="small-copy">Choose a level and part to review the generated text and source references.</p><div class="form-grid"><div class="field"><label for="result-level">Learning level</label><select id="result-level">${Object.keys(variants).map(level => `<option value="${escape(level)}" ${state.resultLevel === level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="result-part">Course part</label><select id="result-part">${lesson.chunks.map((part, index) => `<option value="${index}" ${index === state.resultPart ? "selected" : ""}>Part ${index + 1}</option>`).join("")}</select></div></div><div class="result-text">${textParagraphs(chunk.text, "preview-text")}</div><p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report)}<div class="summary-meta"><span>${icon("clock")}${time(chunk.duration_seconds)}</span><span>${icon("globe")}${escape(languageLabel(lesson.language))}</span><span>${icon("headphones")}${escape(lesson.voice)}</span></div><p class="small-copy">Human review is required. Audio is available in the learning player while this course’s temporary output is retained.</p><button class="button button-wide" data-action="start-course" data-id="${escape(course.id)}">${icon("play")}Start learning</button><div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 0"><button class="button button-secondary" data-action="review-course" data-id="${escape(course.id)}" data-level="${escape(state.resultLevel)}" data-part="${state.resultPart}">${icon("eye")}Review course</button><button class="button button-secondary" data-action="revise-course" data-id="${escape(course.id)}">${icon("edit")}Request changes</button></div><button class="text-button" data-action="new-generation" style="margin-top:25px">${icon("plus")}Create another course</button>`;
   }
+  async function loadReviews(more = false) {
+    const offset = more ? state.reviewCourses.length : 0;
+    try {
+      const data = await api.request(`/v1/lesson-reviews?limit=100&offset=${offset}`, { timeout: 45000 });
+      if (!Array.isArray(data) || data.some(course => !uuidPattern.test(course.job_id) || !Array.isArray(course.levels))) throw new Error("The review collection could not be read.");
+      state.reviewCourses = [...new Map((more ? [...state.reviewCourses, ...data] : data).map(course => [course.job_id, course])).values()];
+      state.reviewMore = data.length === 100; state.reviewError = "";
+      return true;
+    } catch (error) { state.reviewError = error.message; return false; }
+  }
+  function validateReview(bundle, id) {
+    if (!bundle || bundle.job_id !== id || !uuidPattern.test(id) || !Array.isArray(bundle.levels) || !bundle.levels.length
+      || typeof bundle.revision_available !== "boolean") throw new Error("This course’s teaching text could not be verified.");
+    const ids = new Set();
+    for (const level of bundle.levels) {
+      const variant = bundle.variants?.[level];
+      if (!variant || !Array.isArray(variant.chunks) || !variant.chunks.length) throw new Error("This course has no teaching text for that level.");
+      for (const [index, chunk] of variant.chunks.entries()) {
+        if (chunk.index !== index || !uuidPattern.test(chunk.chunk_id) || ids.has(chunk.chunk_id)
+          || typeof chunk.text !== "string" || !chunk.text.trim() || !Array.isArray(chunk.sources)) throw new Error("This course’s teaching text could not be verified.");
+        ids.add(chunk.chunk_id);
+      }
+    }
+    return bundle;
+  }
+  function reviewDraftKey(editor) {
+    const chunk = editor.bundle?.variants[editor.level]?.chunks[editor.index];
+    return chunk ? `${editor.id}:${chunk.chunk_id}` : "";
+  }
+  function rememberReviewDraft(editor) {
+    const key = reviewDraftKey(editor);
+    if (key) state.reviewDrafts.set(key, { text: editor.text, all: editor.all });
+  }
+  function selectReviewPart(editor, level, index) {
+    rememberReviewDraft(editor);
+    editor.level = level; editor.index = index;
+    const draft = state.reviewDrafts.get(reviewDraftKey(editor));
+    editor.text = draft?.text || ""; editor.all = draft?.all || false; editor.error = "";
+  }
+  async function openReview(id, level = "", index = 0) {
+    if (state.reviewEditor?.busy) return;
+    const previous = state.reviewEditor;
+    if (previous?.bundle) rememberReviewDraft(previous);
+    const editor = { id, bundle: null, level, index, text: "", all: false, busy: false, loading: true, error: "", uncertain: state.revisionUncertain.has(id), origin: "review" };
+    state.reviewEditor = editor;
+    navigate("review");
+    try {
+      const bundle = validateReview(await api.request(`/v1/lesson-reviews/${encodeURIComponent(id)}`), id);
+      if (state.reviewEditor !== editor) return;
+      editor.bundle = bundle;
+      editor.level = bundle.levels.includes(level) ? level : bundle.levels[0];
+      editor.index = Math.max(0, Math.min(index, bundle.variants[editor.level].chunks.length - 1));
+      const draft = state.reviewDrafts.get(reviewDraftKey(editor));
+      editor.text = draft?.text || ""; editor.all = draft?.all || false;
+    } catch (error) { if (state.reviewEditor === editor) editor.error = error.message; }
+    finally { editor.loading = false; if (state.page === "review" && state.reviewEditor === editor) renderReview(); }
+  }
+  function reviewJobs(id) { return [...state.jobs.values()].filter(job => job.type === "revision" && job.targetId === id); }
+  function reviewUnavailable(bundle) {
+    return bundle.revision_unavailable_reason === "LESSON_RESULT_NOT_READY"
+      ? "Teaching text is available, but generation has not completed. Revisions become available when the course and narration are ready."
+      : "Temporary narration is no longer available. You can read the retained teaching text here. Generate the course again before requesting text and narration changes.";
+  }
+  function reviewCards() {
+    const courses = state.reviewCourses.filter(course => `${course.lesson_id} ${course.course_id} ${course.activity_id}`.toLowerCase().includes(state.reviewSearch.toLowerCase()));
+    const alert = state.reviewError ? errorBox(state.reviewError, "refresh-reviews", "Refresh courses") : "";
+    if (!courses.length) return `${alert}<div class="card empty-state">${icon("book")}<h3>${state.reviewSearch ? "No matching courses" : "Your teaching text will appear here"}</h3><p>${state.reviewSearch ? "Try another course title or reference." : "Generate a course to begin reviewing its explanations, one part at a time."}</p>${!state.reviewSearch ? '<a class="button button-secondary" href="#generate">Generate course</a>' : ""}</div>`;
+    return `${alert}<div class="review-course-list">${courses.map(course => `<article class="card review-course-row"><div><div class="summary-meta">${badge("AI-generated draft", "badge-amber")}${badge(course.revision_available && !expired(course.audio_expires_at) ? "Ready to revise" : "Text available")}</div><h3>${escape(course.lesson_id)}</h3><p class="small-copy">${escape(course.course_id)} · ${escape(course.activity_id)} · ${escape(languageLabel(course.language))}</p>${levelChips(course.levels)}<p class="small-copy">${course.levels.map(level => `${escape(levelLabel(level))}: ${Number(course.chunk_counts[level])} parts`).join(" · ")}</p></div><button class="button button-secondary" data-action="review-course" data-id="${escape(course.job_id)}">${icon("eye")}Review course ${icon("arrow")}</button></article>`).join("")}</div>`;
+  }
+  function renderReview() {
+    const editor = state.reviewEditor;
+    const heading = intro("03", "A TEACHER’S PERSPECTIVE", "Good explanations grow<br>with <em>your feedback.</em>", "Read your courses, check each part, and guide the next revision.");
+    if (!editor) {
+      main.innerHTML = `${heading}<section aria-labelledby="review-courses-title"><div class="section-heading"><div><h2 id="review-courses-title">Courses to review <span class="count-pill">${state.reviewCourses.length}</span></h2><p>All retained teaching text, including courses whose temporary narration has expired.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses to review</span><input id="review-search" type="search" placeholder="Find a course…" value="${escape(state.reviewSearch)}"></label></div><div id="review-results">${reviewCards()}</div>${state.reviewMore ? '<button class="button button-secondary load-more" data-action="load-more-reviews">Load more courses</button>' : ""}</section>`;
+      return;
+    }
+    const back = '<button class="back-button" data-action="review-back">← Back to courses to review</button>';
+    if (editor.loading) { main.innerHTML = `${heading}${back}<div class="card empty-state" role="status">${icon("loader", "spinner")}<h3>Loading teaching text…</h3></div>`; return; }
+    if (!editor.bundle) { main.innerHTML = `${heading}${back}${errorBox(editor.error, "reload-review", "Reload course text")}`; return; }
+    const bundle = editor.bundle, lesson = bundle.variants[editor.level], chunk = lesson.chunks[editor.index];
+    const jobs = reviewJobs(editor.id), job = jobs.at(-1);
+    const pending = jobs.some(item => !terminal.has(item.status));
+    const available = bundle.revision_available && !expired(bundle.audio_expires_at);
+    const disabled = editor.busy || pending || !available;
+    main.innerHTML = `${heading}${back}<div class="review-course-heading"><div><h2>${escape(bundle.lesson_id)}</h2><p class="small-copy">${escape(bundle.course_id)} · ${escape(languageLabel(bundle.language))} · ${escape(bundle.voice)}</p></div>${badge("AI-generated draft · Human review required", "badge-amber")}</div>
+      ${job ? `<div class="review-progress" aria-live="polite">${generationView(job)}</div>` : ""}
+      ${!available ? `<div class="learning-note">${icon("info")}<div><strong>Teaching text remains available</strong><p>${escape(reviewUnavailable(bundle))}</p><a class="text-button" href="#generate">Go to Generate course ${icon("arrow")}</a></div></div>` : ""}
+      <div class="form-grid review-selectors"><div class="field"><label for="review-level">Learning level</label><select id="review-level" ${editor.busy ? "disabled" : ""}>${bundle.levels.map(level => `<option value="${escape(level)}" ${editor.level === level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="review-part">Course part</label><select id="review-part" ${editor.busy ? "disabled" : ""}>${lesson.chunks.map((part, index) => `<option value="${index}" ${editor.index === index ? "selected" : ""}>Part ${index + 1} — ${escape(partTitle(part))}</option>`).join("")}</select></div></div>
+      <div class="review-workspace"><section class="card card-padding review-reading" aria-labelledby="review-part-title"><div class="card-title-row"><h2 id="review-part-title">Part ${editor.index + 1} of ${lesson.chunks.length}</h2>${badge(levelLabel(editor.level))}</div><div class="review-full-text">${textParagraphs(chunk.text, "lesson-paragraph")}</div><p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report)}<div class="lesson-navigation"><button class="button button-secondary" data-action="review-previous" ${editor.index === 0 || editor.busy ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button button-secondary" data-action="review-next" ${editor.index === lesson.chunks.length - 1 || editor.busy ? "disabled" : ""}>Next part ${icon("arrow")}</button></div></section>
+      <aside class="card card-padding review-feedback" aria-labelledby="feedback-title"><h2 id="feedback-title">Your feedback</h2><p class="small-copy">Describe how this part should change. Updating replaces its text and narration in the same course.</p>${editor.uncertain || state.revisionUncertain.has(editor.id) ? `${errorBox("The previous revision may already have been accepted. Refresh the course and check its text before preparing another request. No revision is retried automatically.")}<button class="button button-secondary" data-action="reload-review">Refresh course text</button><button class="text-button" data-action="prepare-new-review">I checked; prepare new request</button>` : `<form id="review-form"><fieldset class="plain-fieldset" ${disabled ? "disabled" : ""}><div class="field"><label for="review-feedback">What would you change in part ${editor.index + 1}?</label><textarea id="review-feedback" maxlength="8000" required placeholder="e.g. Add a practical example and explain the key term more simply.">${escape(editor.text)}</textarea><small>Your comments stay in this tab while you move between parts.</small></div>${bundle.levels.length > 1 ? `<label class="checkbox-label"><input id="review-all" type="checkbox" ${editor.all ? "checked" : ""}>Apply this change to the corresponding part in every available level</label>` : ""}<button class="button button-wide" type="submit">${icon(editor.busy || pending ? "loader" : "edit", editor.busy || pending ? "spinner" : "")}${editor.busy ? "Submitting…" : pending ? "Revision in progress…" : "Update this part"}</button></fieldset>${editor.error ? errorBox(editor.error) : ""}</form>`}<p class="preview-note">${icon("info")}The updated explanation remains a draft for human review.</p></aside></div>`;
+  }
+
   function renderLearn() {
     if (state.player) { if (state.player.complete) renderCompletion(); else renderPlayer(); return; }
-    main.innerHTML = `${intro("03", "A LITTLE CURIOSITY GOES A LONG WAY", "Make room for<br><em>your next ‘I get it.’</em>", "Pick a course. Find your level. Learn at your own pace.")}<section aria-labelledby="courses-title"><div class="section-heading"><div><h2 id="courses-title">Your learning collection <span class="count-pill">${state.courses.length}</span></h2><p>Generated courses with available text and narration, ready for draft preview.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses</span><input id="course-search" type="search" placeholder="Find a course…" value="${escape(state.courseSearch)}"></label></div><div id="course-results">${courseCards()}</div>${state.more ? `<button class="button button-secondary load-more" data-action="load-more">Load more courses ${icon("plus")}</button>` : ""}</section><aside class="learning-note">${icon("lightbulb")}<div><strong>Same knowledge. Your way of understanding.</strong><p>Choose an available level before starting. Generated courses are drafts; temporary audio normally expires after 24 hours.</p></div></aside>`;
+    main.innerHTML = `${intro("04", "A LITTLE CURIOSITY GOES A LONG WAY", "Make room for<br><em>your next ‘I get it.’</em>", "Pick a course. Find your level. Learn at your own pace.")}<section aria-labelledby="courses-title"><div class="section-heading"><div><h2 id="courses-title">Your learning collection <span class="count-pill">${state.courses.length}</span></h2><p>Generated courses with available text and narration, ready for draft preview.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses</span><input id="course-search" type="search" placeholder="Find a course…" value="${escape(state.courseSearch)}"></label></div><div id="course-results">${courseCards()}</div>${state.more ? `<button class="button button-secondary load-more" data-action="load-more">Load more courses ${icon("plus")}</button>` : ""}</section><aside class="learning-note">${icon("lightbulb")}<div><strong>Same knowledge. Your way of understanding.</strong><p>Choose an available level before starting. Generated courses are drafts. Saved courses retain their narration; learning sessions have their own time limit.</p></div></aside>`;
   }
   function courseCards() {
     const courses = state.courses.filter(course => course.title.toLowerCase().includes(state.courseSearch.toLowerCase()));
@@ -459,7 +575,7 @@
       const bundle = await fetchBundle(id);
       if (!modal.open || epoch !== modalEpoch) return;
       const lesson = Object.values(variantsOf(bundle))[0];
-      modal.innerHTML = `${modalHeader(lesson.lesson_id, "A FIRST LOOK")}<p class="modal-copy">${lesson.chunks.length} parts · ${Object.keys(variantsOf(bundle)).length} levels · ${escape(languageLabel(lesson.language))}</p>${lesson.chunks.map(chunk => `<section class="preview-part"><h3>${chunk.index + 1}. ${escape(partTitle(chunk))}</h3><p>${escape(chunk.text.slice(0, 350))}${chunk.text.length > 350 ? "…" : ""}</p></section>`).join("")}<p class="modal-disclaimer">AI-generated draft · Human review required.<br>Text and audio are available until ${escape(new Date(lesson.expires_at).toLocaleString())}.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close preview</button><button class="button" data-action="start-course" data-id="${escape(id)}">Start learning ${icon("arrow")}</button></div>`;
+      modal.innerHTML = `${modalHeader(lesson.lesson_id, "A FIRST LOOK")}<p class="modal-copy">${lesson.chunks.length} parts · ${Object.keys(variantsOf(bundle)).length} levels · ${escape(languageLabel(lesson.language))}</p>${lesson.chunks.map(chunk => `<section class="preview-part"><h3>${chunk.index + 1}. ${escape(partTitle(chunk))}</h3><p>${escape(chunk.text.slice(0, 350))}${chunk.text.length > 350 ? "…" : ""}</p></section>`).join("")}<p class="modal-disclaimer">AI-generated draft · Human review required.<br>${lesson.expires_at ? `Text and audio are available until ${escape(new Date(lesson.expires_at).toLocaleString())}.` : "Text and narration are saved with this course."}</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close preview</button><button class="button" data-action="start-course" data-id="${escape(id)}">Start learning ${icon("arrow")}</button></div>`;
     } catch (error) { if (modal.open && epoch === modalEpoch) modal.innerHTML = `${modalHeader("This course couldn’t be opened")}${errorBox(error.message)}<div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button></div>`; }
   }
 
@@ -722,25 +838,36 @@
     modal.innerHTML = `${modalHeader("Make room for a better explanation", "REQUEST CHANGES")}<p class="modal-copy">${escape(lesson.lesson_id)}<br>Successful processing replaces the selected part’s text and narration in this course.</p>${revision.uncertain ? errorBox("The previous revision may already have been accepted. No automatic retry is available for revisions. Check your course before preparing another request.") + `<div class="modal-actions"><button class="button button-secondary" data-action="preview-course" data-id="${escape(revision.id)}">Check current course</button><button class="button" data-action="prepare-new-revision">I checked; prepare new request</button></div>` : `<form id="revision-form"><fieldset class="plain-fieldset" ${revision.busy ? "disabled" : ""}><div class="form-grid"><div class="field"><label for="revision-level">Learning level</label><select id="revision-level">${Object.keys(variants).map(level => `<option value="${escape(level)}" ${level === revision.level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="revision-part">Course part</label><select id="revision-part">${lesson.chunks.map((chunk, index) => `<option value="${index}" ${index === revision.index ? "selected" : ""}>Part ${index + 1}</option>`).join("")}</select></div></div><div class="revision-excerpt">${escape(lesson.chunks[revision.index].text.slice(0, 450))}</div><div class="field" style="margin-top:18px"><label for="revision-text">What would you change?</label><textarea id="revision-text" maxlength="8000" placeholder="e.g. Add a practical example and explain the key term more simply." required>${escape(revision.text)}</textarea></div>${Object.keys(variants).length > 1 ? `<label class="checkbox-label"><input id="revision-all" type="checkbox" ${revision.all ? "checked" : ""}>Apply this change to the corresponding part in every available level</label>` : ""}<p class="modal-disclaimer">The revision uses the existing language and voice. It keeps the course’s part order and requires human review after completion.</p><div class="modal-actions"><button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button" type="submit">${icon(revision.busy ? "loader" : "edit", revision.busy ? "spinner" : "")}${revision.busy ? "Submitting…" : "Submit revision"}</button></div></fieldset>${revision.error ? errorBox(revision.error) : ""}</form>`}`;
     const close = modal.querySelector('[data-action="close-modal"]'); if (close) close.disabled = revision.busy;
   }
-  async function submitRevision() {
-    const revision = state.revision;
+  async function submitRevision(revision = state.revision) {
     if (!revision || revision.busy || revision.uncertain) return;
-    const review = document.querySelector("#revision-text").value.trim();
-    if (!review) { document.querySelector("#revision-text").value = ""; document.querySelector("#revision-text").reportValidity(); return; }
+    const inline = revision.origin === "review";
+    if (inline && (!revision.bundle.revision_available || expired(revision.bundle.audio_expires_at)
+      || reviewJobs(revision.id).some(job => !terminal.has(job.status)) || state.revisionUncertain.has(revision.id))) { renderReview(); return; }
+    const input = document.querySelector(inline ? "#review-feedback" : "#revision-text");
+    const review = input.value.trim();
+    if (!review) { input.value = ""; input.reportValidity(); return; }
     revision.text = review;
     const lesson = variantsOf(revision.bundle)[revision.level];
     const body = { lesson_job_id: revision.id, chunk_id: lesson.chunks[revision.index].chunk_id, teacher_review: review, apply_to_all_levels: revision.all };
-    revision.busy = true; revision.error = ""; renderRevisionDialog();
+    const draftKey = inline ? reviewDraftKey(revision) : "";
+    revision.busy = true; revision.error = "";
+    if (inline) { rememberReviewDraft(revision); renderReview(); } else renderRevisionDialog();
     try {
       const accepted = await api.request("/v1/audio:regenerate", { method: "POST", json: body });
       if (!uuidPattern.test(accepted?.job_id)) { revision.uncertain = true; throw new Error("The revision response could not be read. It may have been accepted."); }
-      const job = { job_id: accepted.job_id, targetId: revision.id, title: lesson.lesson_id, level: revision.level, partIndex: revision.index, status: "QUEUED", step: "QUEUED", progress: 0, type: "revision", trackingError: "" };
-      state.jobs.set(job.job_id, job); state.activeJobId = job.job_id; state.generatedId = null;
-      revision.busy = false; modal.close(); navigate("generate"); await refreshJob(job); schedulePoll();
+      const job = { job_id: accepted.job_id, targetId: revision.id, title: inline ? revision.bundle.lesson_id : lesson.lesson_id, level: revision.level, partIndex: revision.index, status: "QUEUED", step: "QUEUED", progress: 0, type: "revision", trackingError: "", reviewDraftKey: draftKey, reviewText: inline ? review : "" };
+      state.jobs.set(job.job_id, job);
+      revision.busy = false;
+      if (!inline) { state.activeJobId = job.job_id; state.generatedId = null; modal.close(); navigate("generate"); }
+      await refreshJob(job); schedulePoll();
     } catch (error) {
       revision.error = error.message; revision.uncertain = revision.uncertain || Boolean(error.uncertain);
       if (revision.uncertain) state.revisionUncertain.add(revision.id);
-    } finally { revision.busy = false; if (modal.open && state.revision === revision) renderRevisionDialog(); }
+    } finally {
+      revision.busy = false;
+      if (inline && state.page === "review" && state.reviewEditor === revision) renderReview();
+      else if (!inline && modal.open && state.revision === revision) renderRevisionDialog();
+    }
   }
   function connectionInfo() {
     openModal(`${modalHeader("Your UPRAISE connection", "WORKSPACE SETTINGS")}<p class="modal-copy">${state.connected ? "Connected to your backend." : "Your backend connection needs attention."}<br>${state.local ? "Local development draft preview is active." : "Production gateway authentication and signed learner sessions apply."}</p><div class="field"><label>Backend address</label><p class="preview-text">${escape(state.config?.backend_url || "Not connected")}</p></div><p class="small-copy">Connection credentials are configured on the UPRAISE server. Browser requests stay on this address; service tokens and TLS private keys are not sent to the page.</p><p class="small-copy">Course text and narration use the backend’s existing retention policy. Generated material remains a draft requiring human review.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button><button class="button" data-action="refresh-connection">Refresh connection ${icon("replay")}</button></div>`);
@@ -751,19 +878,46 @@
     if (action === "connection-info") { connectionInfo(); return; }
     if (action === "refresh-connection") { modal.close(); await refreshWorkspace(); return; }
     if (action === "refresh-workspace") { await refreshWorkspace(); return; }
+    if (action === "review-course") { await openReview(id, control.dataset.level || "", Number(control.dataset.part || 0)); return; }
+    if (action === "review-back") {
+      if (state.reviewEditor?.busy) return;
+      if (state.reviewEditor?.bundle) rememberReviewDraft(state.reviewEditor);
+      state.reviewEditor = null; renderReview(); return;
+    }
+    if (action === "reload-review") { const editor = state.reviewEditor; if (editor) await openReview(editor.id, editor.level, editor.index); return; }
+    if (action === "refresh-reviews" || action === "load-more-reviews") {
+      control.disabled = true;
+      await loadReviews(action === "load-more-reviews");
+      if (state.page === "review") renderReview();
+      return;
+    }
+    if (action === "prepare-new-review") {
+      const editor = state.reviewEditor;
+      if (editor) { state.revisionUncertain.delete(editor.id); editor.uncertain = false; editor.error = ""; renderReview(); }
+      return;
+    }
+    if (action === "review-previous" || action === "review-next") {
+      const editor = state.reviewEditor;
+      if (!editor?.bundle || editor.busy) return;
+      const index = editor.index + (action === "review-next" ? 1 : -1);
+      if (index >= 0 && index < editor.bundle.variants[editor.level].chunks.length) { selectReviewPart(editor, editor.level, index); renderReview(); }
+      return;
+    }
     if (action === "create-from-material") { selectedSource(id); state.activeJobId = null; state.generatedId = null; navigate("generate"); return; }
     if (action === "remove-material") { removeMaterialDialog(id); return; }
     if (action === "confirm-remove" || action === "retry-removal") { await confirmRemove(); return; }
-    if (action === "new-generation") { state.activeJobId = null; state.generatedId = null; state.generationAttempt = null; state.generationError = ""; renderGenerate(); return; }
+    if (action === "new-generation") { state.activeJobId = null; state.generatedId = null; state.generationAttempt = null; state.generationError = ""; navigate("generate"); return; }
     if (action === "cancel-generation") { await cancelGeneration(id); return; }
     if (action === "open-tracking") { state.activeJobId = id; state.generatedId = null; navigate("generate"); return; }
     if (action === "retry-tracking") {
-      const job = state.jobs.get(state.activeJobId); if (job) { job.trackingError = ""; await refreshJob(job); schedulePoll(); }
+      const job = state.page === "review" ? reviewJobs(state.reviewEditor?.id).at(-1) : state.jobs.get(state.activeJobId);
+      if (job) { job.trackingError = ""; await refreshJob(job); schedulePoll(); }
       return;
     }
     if (action === "open-job-result") {
       const job = state.jobs.get(id); if (!job) return;
       const targetId = job.type === "revision" ? job.targetId : job.job_id;
+      if (state.page === "review") { await openReview(targetId, job.level, job.partIndex); return; }
       await fetchBundle(targetId); state.generatedId = targetId; state.activeJobId = null; renderGenerate(); return;
     }
     if (action === "preview-course") { await previewCourse(id); return; }
@@ -797,7 +951,7 @@
   document.addEventListener("submit", event => {
     event.preventDefault();
     const form = event.target;
-    const action = form.id === "upload-form" ? () => uploadMaterial(form) : form.id === "generation-form" ? () => startGeneration(form) : form.id === "start-form" ? () => startCourse(form) : form.id === "question-form" ? () => sendQuestion(Boolean(state.turn?.error)) : form.id === "revision-form" ? submitRevision : null;
+    const action = form.id === "upload-form" ? () => uploadMaterial(form) : form.id === "generation-form" ? () => startGeneration(form) : form.id === "start-form" ? () => startCourse(form) : form.id === "question-form" ? () => sendQuestion(Boolean(state.turn?.error)) : form.id === "revision-form" ? submitRevision : form.id === "review-form" ? () => submitRevision(state.reviewEditor) : null;
     if (action) void action().catch(error => toast(error.message));
   });
   document.addEventListener("click", event => {
@@ -808,6 +962,8 @@
     const target = event.target;
     if (target.id === "material-search") { state.search = target.value; updateMaterialList(); }
     if (target.id === "course-search") { state.courseSearch = target.value; document.querySelector("#course-results").innerHTML = courseCards(); }
+    if (target.id === "review-search") { state.reviewSearch = target.value; document.querySelector("#review-results").innerHTML = reviewCards(); }
+    if (target.id === "review-feedback" && state.reviewEditor) { state.reviewEditor.text = target.value; rememberReviewDraft(state.reviewEditor); }
     if (target.id === "upload-course") state.uploadName = target.value;
     if (target.id === "upload-activity") state.activityId = target.value;
     if (target.id === "course-title") { state.draft.title = target.value; document.querySelector("#summary-title").textContent = target.value || "Your next learning experience"; }
@@ -839,6 +995,9 @@
     if (target.id === "revision-level") { state.revision.level = target.value; state.revision.index = 0; renderRevisionDialog(); }
     if (target.id === "revision-part") { state.revision.index = Number(target.value); renderRevisionDialog(); }
     if (target.id === "revision-all") state.revision.all = target.checked;
+    if (target.id === "review-level" && state.reviewEditor && !state.reviewEditor.busy) { selectReviewPart(state.reviewEditor, target.value, 0); renderReview(); }
+    if (target.id === "review-part" && state.reviewEditor && !state.reviewEditor.busy) { selectReviewPart(state.reviewEditor, state.reviewEditor.level, Number(target.value)); renderReview(); }
+    if (target.id === "review-all" && state.reviewEditor) { state.reviewEditor.all = target.checked; rememberReviewDraft(state.reviewEditor); }
     if (target.id === "playback-position" && state.player) {
       const player = state.player, offset = Number(target.value), autoplay = Boolean(player.seekPlaying);
       delete player.seekPlaying; clearQuestion(); void loadPart(player.index, { autoplay, offset });

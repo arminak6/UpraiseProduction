@@ -31,6 +31,7 @@ x-ingestion-environment: &ingestion-environment
   UPRAISE_LESSON_LEVEL_PROFILES: '${UPRAISE_LESSON_LEVEL_PROFILES:-{"beginner":"Use plain language, define unfamiliar terms, and explain prerequisites and reasoning step by step. Retain substantive formulas and facts.","intermediate":"Assume basic familiarity; balance intuition with technical detail and explain key reasoning steps and new notation.","advanced":"Assume a strong foundation; use precise terminology and formal notation, explaining source-supported derivations, assumptions and limitations."}}'
   UPRAISE_LESSON_VISUAL_MODEL_ID: ${UPRAISE_LESSON_VISUAL_MODEL_ID:-eu.amazon.nova-pro-v1:0}
   UPRAISE_LESSON_TTL_SECONDS: ${UPRAISE_LESSON_TTL_SECONDS:-86400}
+  UPRAISE_LESSON_ARCHIVE_DIR: /data/course_archive
   UPRAISE_LESSON_SOURCE_WAIT_SECONDS: ${UPRAISE_LESSON_SOURCE_WAIT_SECONDS:-86400}
   UPRAISE_LESSON_TIMEOUT_SECONDS: ${UPRAISE_LESSON_TIMEOUT_SECONDS:-43200}
   UPRAISE_LESSON_SECONDS_PER_SECTION: ${UPRAISE_LESSON_SECONDS_PER_SECTION:-1200}
@@ -82,6 +83,11 @@ services:
       UPRAISE_INTERRUPT_PROVIDER_TIMEOUT_SECONDS: ${UPRAISE_INTERRUPT_PROVIDER_TIMEOUT_SECONDS:-45}
     volumes:
       - ingestion_data:/data/ingestion
+      - type: bind
+        source: ./course_archive
+        target: /data/course_archive
+        bind:
+          create_host_path: false
       - type: bind
         source: ./aws_credentials.json
         target: /run/secrets/aws_credentials.json
@@ -148,6 +154,11 @@ services:
       UPRAISE_WORKER_TERMINATE_GRACE_SECONDS: ${UPRAISE_WORKER_TERMINATE_GRACE_SECONDS:-5}
     volumes:
       - ingestion_data:/data/ingestion
+      - type: bind
+        source: ./course_archive
+        target: /data/course_archive
+        bind:
+          create_host_path: false
       - model_cache:/cache
       - type: bind
         source: ./aws_credentials.json
@@ -178,6 +189,11 @@ services:
       <<: *ingestion-environment
     volumes:
       - ingestion_data:/data/ingestion
+      - type: bind
+        source: ./course_archive
+        target: /data/course_archive
+        bind:
+          create_host_path: false
       - type: bind
         source: ./aws_credentials.json
         target: /run/secrets/aws_credentials.json

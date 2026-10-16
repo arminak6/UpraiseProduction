@@ -61,7 +61,7 @@ class IngestionWorker:
             settings.qdrant_url, settings.qdrant_collection, settings.embedding_dimension
         )
         self.processor = processor
-        self.staging = StagingStore(settings.data_dir)
+        self.staging = StagingStore(settings.data_dir, settings.lesson_archive_dir)
         self.stop = threading.Event()
         self.notify = notify
         self.supervisor = JobSupervisor(settings)

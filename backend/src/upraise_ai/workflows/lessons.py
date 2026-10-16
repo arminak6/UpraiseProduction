@@ -14,7 +14,13 @@ from upraise_ai.schemas.lesson_catalog import ReadyLesson
 from upraise_ai.schemas.lessons import LessonResult
 from upraise_ai.services.lesson_callback import validate_callback_config
 from upraise_ai.services.lesson_pipeline import LessonPipeline
-from upraise_ai.services.lesson_replacement import artifact_job, cleanup_replacements, current_manifest
+from upraise_ai.services.lesson_replacement import (
+    artifact_directory,
+    artifact_job,
+    cleanup_replacements,
+    current_manifest,
+)
+from upraise_ai.storage.lesson_archive import output_expired, persistent_output
 
 
 class LessonService:
@@ -78,7 +84,7 @@ class LessonService:
             learner_level=row.get('catalog_level') or row["metadata"].get("options", {}).get("learner_level", "intermediate"),
             chunk_count=row["result"]["chunk_count"], requires_review=True,
             review_issue_count=row["result"].get("review_issue_count", 0),
-            created_at=row["created_at"], expires_at=row["expires_at"],
+            created_at=row["created_at"], expires_at=None if persistent_output(row) else row["expires_at"],
             revision=row["result"].get("revision"),
             generation_version=row['metadata'].get('generation_version'),
             chunk_plan_id=row['result'].get('chunk_plan_id'),
@@ -103,7 +109,7 @@ class LessonService:
             raise IngestionError("LESSON_LEVEL_NOT_FOUND", status=404)
         if self.jobs.pending_content_deletion(row["job_id"]):
             raise IngestionError("LESSON_DELETION_PENDING", status=503, retryable=True)
-        if row["cleanup_requested_at"] or (row["expires_at"] and row["expires_at"] <= datetime.now(UTC)):
+        if output_expired(row):
             raise IngestionError("LESSON_OUTPUT_EXPIRED", status=410)
         if row["status"] != "DONE":
             raise IngestionError("LESSON_RESULT_NOT_READY", status=409)
@@ -129,7 +135,7 @@ class LessonService:
                   else LessonResult.model_validate(payload))
         if result.source_attempts:
             checker.check_sources(row, result.source_attempts)
-        result.expires_at = row["expires_at"].isoformat()
+        result.expires_at = None if persistent_output(row) else row["expires_at"].isoformat()
         base = self.settings.lesson_public_base_url.rstrip("/")
         for chunk in result.chunks:
             chunk.audio_url = base + f"/v1/jobs/{row['job_id']}/audio/{chunk.chunk_id}"
@@ -187,17 +193,26 @@ class LessonService:
                 AND content_deletion_requested_at IS NULL LIMIT 1""", (str(job_id),)).fetchone()
             if not reference:
                 self.staging.remove(job_id)
+            if (self.staging.archive and not persistent_output(row)
+                    and not row["metadata"].get("revision_request")):
+                # Failed/unpublished candidates are not durable course output.
+                self.staging.archive.remove(job_id)
             active = artifact_job(row) if row.get("result") else str(job_id)
             if active != str(job_id):
                 with self.staging.artifact_lock(active):
                     self.staging.remove(active)
             if row["metadata"].get("revision_request"):
+                if self.staging.archive:
+                    parent_id = row["metadata"]["revision_request"]["parent_job_id"]
+                    self.staging.archive.remove(parent_id, job_id)
                 # Unpublished A7 text is a temporary candidate, not retained
                 # teaching content. Cancel/receipt/expiry disposes it as well.
                 conn.execute("DELETE FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,))
                 conn.execute("DELETE FROM lesson_chunk_plans WHERE job_id=%s", (job_id,))
                 conn.execute("UPDATE lesson_jobs SET metadata=metadata-'revision_request',result=NULL WHERE job_id=%s", (job_id,))
             if row.get("content_deletion_requested_at"):
+                if self.staging.archive:
+                    self.staging.archive.remove(job_id)
                 # B7 artifact directories have durable deletion-operation IDs,
                 # rather than processing-job rows. A2 must remove them too.
                 for operation in conn.execute("SELECT deletion_id FROM lesson_content_deletions WHERE job_id=%s", (job_id,)):
@@ -224,7 +239,7 @@ class LessonService:
         row = self.jobs.get(str(row["job_id"]))
         if row["result"].get("replacement_target_job_id"):
             row = self.jobs.get(row["result"]["replacement_target_job_id"])
-        path = self.staging.job_dir(artifact_job(row)) / f"{chunk_id}.wav"
+        path = artifact_directory(self.staging, row) / f"{chunk_id}.wav"
         if not path.is_file():
             raise IngestionError("LESSON_AUDIO_UNAVAILABLE", status=503)
         with path.open("rb") as stream:

@@ -114,6 +114,16 @@ class BridgeTests(unittest.TestCase):
         for key in ("cookie", "x-ssl-client-verify", "x-upraise-ui", "x-request-id"):
             self.assertNotIn(key, lower)
 
+    def test_review_routes_forward_only_authorized_reads(self):
+        for path in ("/v1/lesson-reviews?limit=20&offset=40&course_id=course-1", f"/v1/lesson-reviews/{JOB}"):
+            self.assertEqual(self.request("/api" + path)[0], 200)
+            self.assertEqual(self.backend.calls[-1][:2], ("GET", path))
+        count = len(self.backend.calls)
+        for path in (f"/v1/lesson-reviews/{JOB}?learner_level=advanced", "/v1/lesson-reviews?include_deleted=true"):
+            self.assertEqual(self.request("/api" + path)[0], 404)
+        self.assertEqual(self.request("/api/v1/lesson-reviews", method="POST", body=b"{}")[0], 404)
+        self.assertEqual(len(self.backend.calls), count)
+
     def test_json_and_session_assertion_forwarding(self):
         body = json.dumps({"lesson_job_id": JOB}).encode()
         self.request("/api/v1/sessions", method="POST", body=body, headers={
