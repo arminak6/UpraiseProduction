@@ -44,7 +44,7 @@ def generate_lesson(data: LessonInput, request: Request, response: Response,
 
 
 @router.post('/v2/lesson-jobs', response_model=AcceptedLesson, status_code=202,
-             summary='A3 v2 - Generate all levels using one shared chunk plan')
+             summary='A3 v2 - Generate selected levels using one shared chunk plan')
 def generate_aligned_lesson(data: AlignedLessonInput, request: Request, response: Response,
                             principal: Principal = Depends(ingress)):
     principal.require_scope('lessons:write')

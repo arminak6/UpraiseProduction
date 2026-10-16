@@ -41,7 +41,11 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   `course_id`; the expandable activity reference defaults to `upraise-learning`.
   Production callers must enter identifiers allowed by their gateway.
 - **Generation:** selected source supplies course/activity/document identifiers;
-  title, language, voice and word/window settings map to A3 v2. A4 reports actual
+  title, language, voice and word/window settings map to A3 v2. Difficulty
+  checkboxes default to all configured levels and require at least one; only the
+  selected levels are requested as `levels` and receive text/audio. Choices
+  survive section navigation and unchanged retries reuse the request key.
+  A4 reports actual
   progress every five seconds, pausing on errors. A5 displays real generated
   text, sources and automated review evidence. A7 revises a selected part/level,
   optionally across all aligned levels; its processing replaces the existing
@@ -84,7 +88,7 @@ Production uses the existing OAuth/mTLS gateway. Set credentials on the server:
 | `FRONTEND2_KEY_PASSWORD` | Optional private-key password |
 | `FRONTEND2_CA_CERT` | Optional private CA PEM file path |
 | `FRONTEND2_ACTIVITY_ID` | Default authoring activity reference |
-| `UPRAISE_LESSON_LEVEL_PROFILES` | Same optional profile configuration as API/workers; used for generation labels |
+| `UPRAISE_LESSON_LEVEL_PROFILES` | Same optional profile configuration as API/workers; supplies selectable generation levels |
 
 TLS verification is always enabled; credentials never follow redirects. In Docker,
 mount gateway certificate/key files read-only through a local Compose override and

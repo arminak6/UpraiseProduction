@@ -42,9 +42,17 @@ class LessonService:
         aligned = isinstance(data, AlignedLessonInput)
         signature = self.settings.lesson_v2_signature if aligned else self.settings.lesson_signature
         if aligned:
-            metadata.update(generation_version='a3-v2', level_profiles=self.settings.lesson_level_profiles,
-                            plan_level=self.settings.lesson_plan_level, levels=list(self.settings.lesson_level_profiles))
-            metadata['options']['learner_level'] = self.settings.lesson_plan_level
+            configured = self.settings.lesson_level_profiles
+            selected = set(data.levels) if data.levels is not None else set(configured)
+            if not selected.issubset(configured):
+                raise IngestionError('LESSON_LEVEL_NOT_CONFIGURED', status=422)
+            # Keep deployment order stable, and never plan at an unselected level.
+            profiles = {level: profile for level, profile in configured.items() if level in selected}
+            plan_level = (self.settings.lesson_plan_level if self.settings.lesson_plan_level in profiles
+                          else next(iter(profiles)))
+            metadata.update(generation_version='a3-v2', level_profiles=profiles,
+                            plan_level=plan_level, levels=list(profiles))
+            metadata['options']['learner_level'] = plan_level
         fingerprint = hashlib.sha256(json.dumps({"request": metadata,
                                                  "pipeline": signature}, sort_keys=True).encode()).hexdigest()
         row = self.jobs.accept(principal.client_id, key, fingerprint, metadata, signature)

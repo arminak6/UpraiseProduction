@@ -112,6 +112,7 @@ class Backend {
           job.published = true;
           if (job.type === "generation") {
             const value = bundle(jobId, job.input.lesson_id, job.input.document_ids[0]);
+            value.variants = Object.fromEntries(Object.entries(value.variants).filter(([level]) => !job.input.levels || job.input.levels.includes(level)));
             for (const lesson of Object.values(value.variants)) Object.assign(lesson, { language: job.input.language, voice: job.input.voice });
             this.bundles.set(jobId, value); this.hashes.set(jobId, "c".repeat(64));
           } else {

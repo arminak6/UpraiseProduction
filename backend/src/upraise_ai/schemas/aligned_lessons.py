@@ -1,9 +1,9 @@
 """A3 v2: one job, one teaching plan, aligned difficulty variants."""
 
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from upraise_ai.schemas.lessons import LessonInput, LessonResult, LessonSource, ReviewReport
 
@@ -23,6 +23,15 @@ class AlignedOptions(BaseModel):
 
 class AlignedLessonInput(LessonInput):
     options: AlignedOptions = Field(default_factory=AlignedOptions)
+    levels: list[Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9_]{0,39}$")]] | None = Field(
+        default=None, min_length=1, max_length=8)
+
+    @field_validator("levels")
+    @classmethod
+    def unique_levels(cls, value):
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("levels must be unique")
+        return value
 
 
 class ContentUnit(BaseModel):

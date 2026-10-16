@@ -170,6 +170,9 @@ th:last-child, td:last-child { text-align: right; }
 .level-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .level-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border: 1px solid #dfe9de; border-radius: 7px; background: #f9fbf7; font-size: 10px; color: #637b60; }
 .level-chip .icon { width: 12px; height: 12px; }
+.generation-level-options { display: grid; gap: 8px; }
+.generation-level-options .level-option:focus-within { outline: 2px solid var(--teal); outline-offset: 2px; }
+.generation-level-options input { flex-shrink: 0; }
 .small-copy { color: var(--muted); font-size: 11px; line-height: 1.7; }
 .advanced { margin-top: 22px; padding-top: 17px; border-top: 1px solid #edf0eb; font-size: 11px; color: #7c8e80; }
 .advanced summary { cursor: pointer; padding: 3px 0; }

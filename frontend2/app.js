@@ -20,7 +20,7 @@
     materials: [], materialError: "", catalogItems: [], courses: [], catalogError: "", more: false,
     selectedFile: null, selectedMaterial: null, uploadName: "", uploadLanguage: "en", activityId: "",
     uploadBusy: false, uploadError: "", uploadAttempt: null, uploadJobs: new Map(),
-    draft: { title: "", language: "en", voice: "Joanna", words: 200, window: 5, maximum: 500 },
+    draft: { title: "", language: "en", voice: "Joanna", words: 200, window: 5, maximum: 500, levels: null },
     generationBusy: false, generationError: "", generationAttempt: null, activeJobId: null,
     jobs: new Map(), bundles: new Map(), generatedId: null, resultLevel: "", resultPart: 0,
     search: "", courseSearch: "", page: "materials", player: null, playerBusy: false,
@@ -51,6 +51,7 @@
   function levelsFor(course) { return Object.keys(course?.variants || {}); }
   function variantsOf(bundle) { return bundle?.variants || (bundle?.learner_level ? { [bundle.learner_level]: bundle } : {}); }
   function configuredLevels() { return state.config?.levels || []; }
+  function selectedGenerationLevels() { return state.draft.levels ?? configuredLevels(); }
   function levelChips(levels = configuredLevels()) { return `<div class="level-chips">${levels.map(level => `<span class="level-chip">${icon("check")}${escape(levelLabel(level))}</span>`).join("")}</div>`; }
   function languageOptions(selected) {
     const choices = { ...languages };
@@ -349,9 +350,9 @@
   function generationForm(ready) {
     return `<form id="generation-form"><fieldset class="plain-fieldset" ${state.generationBusy ? "disabled" : ""}><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.filename)}</strong><small>${escape(item.course_id)} · ${escape(languageLabel(item.language))}</small></span><input type="radio" name="source" value="${escape(item.document_id)}" ${item.document_id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>
       <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div><div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
-      <div class="form-section"><div class="step-label"><span>3</span>One course. Different ways to understand.</div>${levelChips()}<p class="small-copy" style="margin:12px 0 0">All configured difficulty levels are generated together. Learners choose an available level before starting.</p></div>
+      <div class="form-section"><fieldset class="plain-fieldset" aria-describedby="generation-level-help"><legend class="step-label"><span>3</span>Choose difficulty levels</legend><div class="generation-level-options">${configuredLevels().map(level => `<label class="level-option"><input type="checkbox" name="levels" value="${escape(level)}" ${selectedGenerationLevels().includes(level) ? "checked" : ""}><span><strong>${escape(levelLabel(level))}</strong>${levelDescriptions[level] ? `<small>${escape(levelDescriptions[level])}</small>` : ""}</span></label>`).join("")}</div><p class="small-copy" id="generation-level-help">Choose one or more levels. We’ll create text and narration only for your selection.</p><p class="inline-error" id="generation-level-error" ${selectedGenerationLevels().length ? "hidden" : ""}>Select at least one difficulty level.</p></fieldset></div>
       <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
-      <button class="button button-wide generate-submit" type="submit">${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
+      <button class="button button-wide generate-submit" type="submit" ${selectedGenerationLevels().length ? "" : "disabled"}>${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
   }
   function voiceOptions(language) {
     const voices = language.split("-")[0] === "it" ? [["Bianca", "Bianca · Italian"], ["Adriano", "Adriano · Italian"]] : [["Joanna", "Joanna · US English"], ["Matthew", "Matthew · US English"], ["Amy", "Amy · British English"], ["Brian", "Brian · British English"]];
@@ -370,10 +371,12 @@
     const material = getMaterial(form.elements.source.value);
     const title = form.elements.title.value.trim();
     const words = Number(form.elements.words.value), maximum = Number(form.elements.maximum.value), windowSize = Number(form.elements.window.value);
+    const levels = [...form.querySelectorAll('input[name="levels"]:checked')].map(input => input.value);
     if (!material || material.status !== "DONE" || !title) { state.generationError = "Choose ready material and enter a course title."; renderGenerate(); return; }
+    if (!levels.length) { state.generationError = "Select at least one difficulty level."; renderGenerate(); return; }
     if (words > maximum) { state.generationError = "Target words must be at or below the maximum words per part."; renderGenerate(); return; }
-    state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize };
-    const body = { lesson_id: title, course_id: material.course_id, activity_id: material.activity_id, document_ids: [material.document_id], language: state.draft.language, voice: state.draft.voice, options: { source_window_pages: windowSize, target_chunk_words: words, max_chunk_words: maximum } };
+    state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize, levels };
+    const body = { lesson_id: title, course_id: material.course_id, activity_id: material.activity_id, document_ids: [material.document_id], language: state.draft.language, voice: state.draft.voice, levels, options: { source_window_pages: windowSize, target_chunk_words: words, max_chunk_words: maximum } };
     const signature = JSON.stringify(body);
     if (state.generationAttempt?.signature !== signature) state.generationAttempt = { signature, key: crypto.randomUUID() };
     state.generationBusy = true; state.generationError = ""; renderGenerate();
@@ -826,6 +829,11 @@
     if (target.id === "upload-language") state.uploadLanguage = target.value;
     if (target.id === "course-language") { state.draft.language = target.value; state.draft.voice = target.value === "it" ? "Bianca" : "Joanna"; document.querySelector("#course-voice").innerHTML = voiceOptions(target.value); }
     if (target.id === "course-voice") state.draft.voice = target.value;
+    if (target.name === "levels" && target.closest("#generation-form")) {
+      state.draft.levels = [...target.form.querySelectorAll('input[name="levels"]:checked')].map(input => input.value);
+      document.querySelector("#generation-level-error").hidden = Boolean(state.draft.levels.length);
+      target.form.querySelector('[type="submit"]').disabled = !state.draft.levels.length;
+    }
     if (target.id === "result-level") { state.resultLevel = target.value; state.resultPart = 0; renderGenerate(); }
     if (target.id === "result-part") { state.resultPart = Number(target.value); renderGenerate(); }
     if (target.id === "revision-level") { state.revision.level = target.value; state.revision.index = 0; renderRevisionDialog(); }

@@ -38,6 +38,7 @@ test("generation sends inherited source IDs and safely retries the same explicit
   const h = await harness(); t.after(h.close);
   h.click('[data-action="create-from-material"]'); await h.navigate("generate");
   h.input("#course-title", "Client course"); h.input("#course-language", "it", "change");
+  h.click('input[name="levels"][value="advanced"]');
   assert.equal(h.find("#course-voice").value, "Bianca");
   h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form");
   await h.waitFor(() => h.find("#generation-error").textContent.includes("Retry unchanged"));
@@ -50,9 +51,55 @@ test("generation sends inherited source IDs and safely retries the same explicit
   assert.equal(calls[1].body.activity_id, "client-activity");
   assert.equal(calls[1].body.language, "it");
   assert.equal(calls[1].body.voice, "Bianca");
+  assert.deepEqual(calls[0].body.levels, ["beginner", "intermediate"]);
+  assert.deepEqual(calls[1].body.levels, ["beginner", "intermediate"]);
   await h.runTimers(5000);
   assert.match(h.find(".success-banner").textContent, /ready for review/);
   assert.match(h.find(".result-text").textContent, /source material/);
+  assert.equal(h.find("#result-level").options.length, 2);
+});
+
+test("generation defaults to all levels, requires one, and retains an empty selection through navigation", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("generate");
+  assert.equal(h.document.querySelectorAll('input[name="levels"]:checked').length, 3);
+  for (const level of ["beginner", "intermediate", "advanced"]) h.click(`input[name="levels"][value="${level}"]`);
+  assert.equal(h.find("#generation-level-error").hidden, false);
+  assert.equal(h.find(".generate-submit").disabled, true);
+  await h.navigate("learn"); await h.navigate("generate");
+  assert.equal(h.document.querySelectorAll('input[name="levels"]:checked').length, 0);
+  h.submit("#generation-form"); await h.settle();
+  assert.equal(h.backend.records("POST", "/v2/lesson-jobs").length, 0);
+  h.click('input[name="levels"][value="advanced"]');
+  assert.equal(h.find(".generate-submit").disabled, false);
+  h.submit("#generation-form"); await h.settle(); await h.runTimers(5000);
+  assert.deepEqual(h.backend.records("POST", "/v2/lesson-jobs")[0].body.levels, ["advanced"]);
+  assert.equal(h.find("#result-level").options.length, 1);
+  assert.equal(h.find("#result-level").value, "advanced");
+});
+
+test("changing selected generation levels after an uncertain request uses a new idempotency key", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("generate");
+  h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form");
+  await h.waitFor(() => h.find("#generation-error").textContent.includes("Retry unchanged"));
+  h.click('input[name="levels"][value="advanced"]');
+  h.submit("#generation-form"); await h.settle();
+  const calls = h.backend.records("POST", "/v2/lesson-jobs");
+  assert.deepEqual(calls[0].body.levels, ["beginner", "intermediate", "advanced"]);
+  assert.deepEqual(calls[1].body.levels, ["beginner", "intermediate"]);
+  assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
+});
+
+test("generation offers configured custom levels without adding default levels", async t => {
+  const h = await harness(backend => {
+    backend.intercept = call => call.path === "/config" ? backend.response({ ui_nonce: "test-ui-nonce", activity_id: "client-activity", levels: ["foundation", "expert"] }) : undefined;
+  }); t.after(h.close);
+  await h.navigate("generate");
+  assert.equal(h.document.querySelectorAll('input[name="levels"]').length, 2);
+  h.click('input[name="levels"][value="foundation"]');
+  h.submit("#generation-form"); await h.settle();
+  assert.deepEqual(h.backend.records("POST", "/v2/lesson-jobs")[0].body.levels, ["expert"]);
 });
 
 test("job status errors pause tracking and explicit cancellation uses A6 CANCEL only", async t => {

@@ -50,6 +50,7 @@ def invoke(replies, item):
 
 def test_v2_request_generates_configured_levels_not_one_level():
     data = AlignedLessonInput.model_validate(request_data())
+    assert data.levels is None
     assert data.options.max_chunk_words == 500
     for options in ({'learner_level': 'beginner'}, {'target_chunk_words': 201, 'max_chunk_words': 200}):
         with pytest.raises(ValidationError):
@@ -59,6 +60,18 @@ def test_v2_request_generates_configured_levels_not_one_level():
     assert settings.lesson_v2_signature != Settings().lesson_v2_signature
     with pytest.raises(ValidationError):
         Settings(lesson_level_profiles={'expert': 'Explain formally.'})
+
+
+@pytest.mark.parametrize('levels', [[], ['beginner', 'beginner'], [''], ['Advanced'], [12],
+                                   ['level_' + str(index) for index in range(9)], 'beginner'])
+def test_v2_rejects_invalid_level_selections(levels):
+    with pytest.raises(ValidationError):
+        AlignedLessonInput.model_validate(request_data(levels=levels))
+
+
+def test_v2_accepts_single_subset_and_custom_level_selections():
+    for levels in (['beginner'], ['beginner', 'intermediate'], ['foundation', 'expert']):
+        assert AlignedLessonInput.model_validate(request_data(levels=levels)).levels == levels
 
 
 def test_original_flow_retains_approved_draft_without_editor_or_fourth_review():

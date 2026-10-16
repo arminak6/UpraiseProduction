@@ -22,7 +22,8 @@ from upraise_ai.services.lesson_models import LessonModels
 pytest_plugins = ['test_a1_integration', 'test_a3_integration', 'test_b1']
 
 
-def accept_bundle(integration, lesson, monkeypatch, *, oversized=False, profiles=None, fail_level=None, language='en'):
+def accept_bundle(integration, lesson, monkeypatch, *, oversized=False, profiles=None, fail_level=None, language='en',
+                  levels=None):
     doc = submit(integration)
     integration[4].process(integration[1].claim(integration[0].lease_seconds))
     original = lesson[5].generate_section
@@ -53,7 +54,7 @@ def accept_bundle(integration, lesson, monkeypatch, *, oversized=False, profiles
     if profiles:
         settings = lesson[0].model_copy(update={'lesson_level_profiles': profiles, 'lesson_plan_level': next(iter(profiles))})
         lesson[2].settings = lesson[3].settings = settings
-    data = AlignedLessonInput.model_validate(request_data(document_ids=[doc['document_id']], language=language,
+    data = AlignedLessonInput.model_validate(request_data(document_ids=[doc['document_id']], language=language, levels=levels,
         voice='Bianca' if language == 'it' else 'Joanna',
         options={'target_chunk_words': 30, 'max_chunk_words': 50}))
     with api(integration, lesson) as client:
@@ -63,7 +64,7 @@ def accept_bundle(integration, lesson, monkeypatch, *, oversized=False, profiles
     synthesize = lesson[2].speech.synthesize
     def checked_synthesize(parts, voice, code):
         saved = lesson[1].prepared_chunks(response.json()['job_id'])
-        levels = lesson[3].settings.lesson_level_profiles
+        levels = lesson[1].get(response.json()['job_id'])['metadata']['levels']
         assert {chunk['level_key'] for chunk in saved} == set(levels)
         assert lesson[1].get_plan(response.json()['job_id'])
         assert any(chunk['ssml_parts'] == parts for chunk in saved)
@@ -158,6 +159,54 @@ def test_future_level_profiles_are_snapshot_configuration(integration, lesson, m
     row, _, _ = accept_bundle(integration, lesson, monkeypatch,
                              profiles={'foundation': 'Plain steps.', 'expert': 'Formal reasoning.'})
     assert list(lesson[3].result(row).variants) == ['foundation', 'expert']
+
+
+@pytest.mark.parametrize('levels,profiles,expected', [
+    (['beginner', 'intermediate'], None, ['beginner', 'intermediate']),
+    (['advanced'], None, ['advanced']),
+    (['advanced', 'beginner'], None, ['beginner', 'advanced']),
+    (['expert'], {'foundation': 'Plain steps.', 'expert': 'Formal reasoning.'}, ['expert']),
+])
+def test_selected_levels_generate_only_requested_text_and_audio(integration, lesson, monkeypatch,
+                                                                levels, profiles, expected):
+    row, data, adapted = accept_bundle(integration, lesson, monkeypatch, levels=levels, profiles=profiles)
+    bundle = lesson[3].result(row)
+    assert list(bundle.variants) == expected
+    assert row['metadata']['levels'] == expected
+    assert set(row['metadata']['level_profiles']) == set(expected)
+    assert row['result']['levels'] == expected
+    assert set(level for level, _ in adapted) == set(expected)
+    assert {chunk['level_key'] for chunk in lesson[1].prepared_chunks(row['job_id'])} == set(expected)
+    assert len(bundle.chunks) == bundle.chunk_count * len(expected)
+    # One audio request and one viseme request per chunk; no excluded-level speech.
+    assert len(lesson[2].speech.client.calls) == len(bundle.chunks) * 2
+    plan_level = 'intermediate' if 'intermediate' in expected else expected[0]
+    assert row['metadata']['plan_level'] == plan_level
+    assert set(lesson[5].levels) == {plan_level}
+    with api(integration, lesson) as client:
+        assert {item['learner_level'] for item in client.get('/v1/lesson-jobs').json()} == set(expected)
+        for level in set(lesson[3].settings.lesson_level_profiles) - set(expected):
+            assert client.get(f"/v1/jobs/{row['job_id']}/result", params={'learner_level': level}).status_code == 404
+        payload = data.model_dump(mode='json')
+        payload['levels'] = list(reversed(levels))
+        retry = client.post('/v2/lesson-jobs', json=payload, headers={'Idempotency-Key': 'bundle-one'})
+        assert retry.status_code == 202 and retry.json()['job_id'] == str(row['job_id'])
+        other = next((level for level in lesson[3].settings.lesson_level_profiles if level not in expected), None)
+        if other:
+            payload['levels'] = [other]
+            assert client.post('/v2/lesson-jobs', json=payload,
+                               headers={'Idempotency-Key': 'bundle-one'}).status_code == 409
+
+
+def test_api_rejects_unconfigured_empty_and_duplicate_levels_before_acceptance(integration, lesson):
+    doc = submit(integration)
+    payload = request_data(document_ids=[doc['document_id']])
+    with api(integration, lesson) as client:
+        for levels in (['expert'], [], ['beginner', 'beginner'], ['Advanced']):
+            response = client.post('/v2/lesson-jobs', json={**payload, 'levels': levels})
+            assert response.status_code == 422, response.text
+        with lesson[1].connect() as conn:
+            assert conn.execute('SELECT count(*) AS n FROM lesson_jobs').fetchone()['n'] == 0
 
 
 def test_translation_preserves_units_and_target_language_audio(integration, lesson, monkeypatch):
