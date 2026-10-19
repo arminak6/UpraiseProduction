@@ -192,6 +192,7 @@ class LessonPipeline:
         progress.set_workload("lesson", len(sections))
         self.speech.validate_voice(data.voice, data.language)
         version_refs = VersionCatalog(self.settings).references()
+        version_refs.update(getattr(self.models, "teaching_versions", {}))
         signature = hashlib.sha256(json.dumps({"sections": sections, "request": job["metadata"],
                                                "pipeline": job["pipeline_version"], "versions": version_refs},
                                               sort_keys=True).encode()).hexdigest()
@@ -253,6 +254,7 @@ class LessonPipeline:
                     "translation_applied": str(any(needs_translation(s["source_language"], data.language)
                                                    for s in sections)).lower(),
                     "source_languages": ",".join(dict.fromkeys(s["source_language"] for s in sections))}
+        versions.update(getattr(self.models, "teaching_versions", {}))
         save_text(all_chunks, versions)
         return self.publish(job, data, all_chunks, versions, signature, progress, save_speech)
 
@@ -311,6 +313,7 @@ class LessonPipeline:
                                         "visual_review_model": "not-used-v3",
                                         "visual_review_prompt": VISUAL_PROMPT,
                                         "math_speech_prompt": MATH_PROMPT, "math_runtime": "MathJax-4.1.3-v3",
-                                        "polly_engine": ",".join(sorted(engines)), "aws_region": self.settings.aws_region})
+                                        "polly_engine": ",".join(sorted(engines)), "aws_region": self.settings.aws_region,
+                                        **getattr(self.models, "teaching_versions", {})})
         write_json(folder / "result.json", result.model_dump(mode="json"))
         return result

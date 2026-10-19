@@ -45,6 +45,9 @@ class LessonService:
                 if row["status"] in {"FAILED", "CANCELLED"}:
                     raise IngestionError("DOCUMENT_INGESTION_FAILED", status=409)
         metadata = data.model_dump(mode="json")
+        # Preserve existing V1 request fingerprints; V2 is an explicit opt-in.
+        if data.teaching_version == "v1":
+            metadata.pop("teaching_version", None)
         aligned = isinstance(data, AlignedLessonInput)
         signature = self.settings.lesson_v2_signature if aligned else self.settings.lesson_signature
         if aligned:
@@ -210,6 +213,9 @@ class LessonService:
                 conn.execute("DELETE FROM prepared_lesson_chunks WHERE job_id=%s", (job_id,))
                 conn.execute("DELETE FROM lesson_chunk_plans WHERE job_id=%s", (job_id,))
                 conn.execute("UPDATE lesson_jobs SET metadata=metadata-'revision_request',result=NULL WHERE job_id=%s", (job_id,))
+            if (row.get("result") or {}).get("teaching_failure"):
+                conn.execute("UPDATE lesson_jobs SET result=NULLIF(result-'teaching_failure','{}'::jsonb) WHERE job_id=%s",
+                             (job_id,))
             if row.get("content_deletion_requested_at"):
                 if self.staging.archive:
                     self.staging.archive.remove(job_id)

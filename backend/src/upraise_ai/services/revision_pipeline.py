@@ -119,6 +119,8 @@ class RevisionPipeline(LessonPipeline):
         if revision.aligned_unit:
             section.update(alignment_unit=revision.aligned_unit, level_profiles=data.level_profiles)
         version_refs = VersionCatalog(self.settings).references("revision_")
+        version_refs.update({"revision_" + key: value
+                             for key, value in getattr(self.models, "teaching_versions", {}).items()})
         signature = hashlib.sha256(json.dumps({"request": job["metadata"], "pipeline": job["pipeline_version"], "versions": version_refs,
             "prompt": REVISION_PROMPT_VERSION}, sort_keys=True).encode()).hexdigest()
         progress.set_workload("lesson", 1 + 2 * MAX_ALIGNMENT_CORRECTIONS if revision.aligned_unit else 1)
@@ -159,6 +161,12 @@ class RevisionPipeline(LessonPipeline):
             text, correction_rounds = validate_aligned_revision(self.models, section, data, selected, neighbours,
                 saved, checkpoint_path, progress, reviewed)
             edits = saved["edits"]
+        final_check = getattr(self.models, "check_written", None)
+        if final_check:
+            warnings = final_check(section, [text], data.language, data.options.learner_level,
+                        [revision.aligned_unit["material_text"] if revision.aligned_unit else selected.text])
+            if warnings:
+                report = self.models.retain_warnings(report, warnings)
         selected.text, selected.reviewer_report, selected.revisions = display_citations(text, source), display_review(report, source), edits
         if not revision.aligned_unit:
             if blocks:
@@ -174,6 +182,8 @@ class RevisionPipeline(LessonPipeline):
                                revision_translation_applied=str(needs_translation(section["source_language"], data.language)).lower(),
                                revision_generator_model=self.settings.lesson_generation_model_id,
                                revision_review_model=self.settings.lesson_review_model_id)
+        result.versions.update({"revision_" + key: value
+                                for key, value in getattr(self.models, "teaching_versions", {}).items()})
         if revision.aligned_unit:
             result.versions["revision_correction_rounds"] = str(correction_rounds)
         all_chunks = [(chunk.chunk_id, chunk.text, chunk.sources[0], chunk.reviewer_report,

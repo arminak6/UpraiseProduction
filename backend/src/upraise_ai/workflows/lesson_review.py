@@ -1,6 +1,8 @@
 """Read retained text without reopening expired audio or unpublished A7 candidates."""
 
 
+import xml.etree.ElementTree as ET
+
 import psycopg
 from fastapi import HTTPException
 
@@ -25,6 +27,7 @@ def review_summary(row, counts):
         job_id=str(row["job_id"]), lesson_id=metadata["lesson_id"],
         course_id=metadata["course_id"], activity_id=metadata["activity_id"],
         language=metadata["language"], voice=metadata["voice"], job_status=row["status"],
+        teaching_version=metadata.get("teaching_version", "v1"),
         levels=levels, chunk_counts=counts, created_at=row["created_at"],
         audio_expires_at=None if persistent_output(row) else row["expires_at"], revision_available=reason is None,
         revision_unavailable_reason=reason,
@@ -58,7 +61,7 @@ def review_text(lessons, job_id, principal):
             raise HTTPException(404, "LESSON_TEXT_NOT_FOUND")
         checker = LessonPipeline(lessons.settings, lessons.documents, None, lessons.staging, None, None)
         checker.check_sources(row, conn=conn)
-        chunks = conn.execute("""SELECT chunk_id,chunk_index,text,sources,reviewer_report,level_key
+        chunks = conn.execute("""SELECT chunk_id,chunk_index,text,ssml,sources,reviewer_report,level_key
             FROM prepared_lesson_chunks WHERE job_id=%s ORDER BY level_key,chunk_index""", (job_id,)).fetchall()
         variants = {}
         for chunk in chunks:
@@ -66,8 +69,15 @@ def review_text(lessons, job_id, principal):
             if level in row["deleted_levels"]:
                 continue
             variant = variants.setdefault(level, {"learner_level": level, "chunks": []})
+            narration = None
+            if row["metadata"].get("teaching_version") == "v2" and chunk["ssml"]:
+                try:
+                    narration = "".join(ET.fromstring(chunk["ssml"]).itertext())
+                except ET.ParseError:
+                    raise IngestionError("LESSON_PREPARED_TEXT_CONFLICT", status=503) from None
             variant["chunks"].append({
                 "chunk_id": str(chunk["chunk_id"]), "index": chunk["chunk_index"], "text": chunk["text"],
+                "narration_text": narration,
                 "sources": chunk["sources"], "reviewer_report": chunk["reviewer_report"],
             })
         if not variants:

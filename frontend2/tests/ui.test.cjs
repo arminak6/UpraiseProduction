@@ -102,6 +102,61 @@ test("generation offers configured custom levels without adding default levels",
   assert.deepEqual(h.backend.records("POST", "/v2/lesson-jobs")[0].body.levels, ["expert"]);
 });
 
+test("teaching V2 is opt-in, survives navigation and can switch back to V1 with a new request identity", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("generate"); assert.equal(h.find("#teaching-version").value, "v1");
+  h.input("#teaching-version", "v2", "change");
+  await h.navigate("materials"); await h.navigate("generate");
+  assert.equal(h.find("#teaching-version").value, "v2");
+  h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form"); await h.settle();
+  assert.equal(h.backend.records("POST", "/v2/lesson-jobs")[0].body.teaching_version, "v2");
+  h.input("#teaching-version", "v1", "change"); h.submit("#generation-form"); await h.settle();
+  const calls = h.backend.records("POST", "/v2/lesson-jobs");
+  assert.equal(calls[1].body.teaching_version, undefined);
+  assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
+  assert.match(h.backend.bundles.get(id(10)).variants.intermediate.chunks[0].text, /source material/);
+});
+
+test("V2 review displays an escaped spoken script and verified audio controls that stop on part changes", async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v2" };
+      for (const chunk of lesson.chunks) chunk.narration_text = 'Multiply n choose two by p. <img src=x onerror="alert(1)">';
+    }
+  }); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  assert.match(h.find(".review-course-heading").textContent, /Teaching V2/);
+  assert.match(h.find(".review-narration-text").textContent, /Multiply n choose two/);
+  assert.equal(h.document.querySelectorAll(".review-narration img").length, 0);
+  const audio = h.find("#review-audio"); let stopped = false, played = false;
+  audio.play = async () => { played = true; }; audio.pause = () => { stopped = true; }; audio.load = () => {};
+  h.click('[data-action="review-listen"]'); await h.settle();
+  assert.equal(played, true); assert.equal(h.urls.size, 1);
+  assert.ok(h.backend.calls.some(call => call.path.includes("/audio/")));
+  h.click('[data-action="review-stop"]'); await h.settle();
+  assert.equal(h.urls.size, 0); assert.equal(audio.getAttribute("src"), null);
+  assert.equal(h.find('[data-action="review-stop"]').disabled, true);
+  h.click('[data-action="review-listen"]'); await h.settle();
+  h.click('[data-action="review-next"]'); await h.settle();
+  assert.equal(stopped, true); assert.equal(audio.getAttribute("src"), null); assert.equal(h.urls.size, 0);
+  assert.equal(h.backend.records("POST", "/v1/sessions").length, 0);
+});
+
+test("late V2 review audio cannot appear after switching course parts", async t => {
+  let release;
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v2" };
+      for (const chunk of lesson.chunks) chunk.narration_text = "A natural spoken explanation.";
+    }
+    backend.intercept = call => call.path.includes("/audio/") ? new Promise(resolve => { release = () => resolve(backend.response(Buffer.from("unused"), 200, "audio/wav")); }) : undefined;
+  }); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  h.click('[data-action="review-listen"]'); await h.settle();
+  h.click('[data-action="review-next"]'); await h.settle();
+  release(); await h.settle(); assert.equal(h.urls.size, 0); assert.equal(h.find("#review-audio").getAttribute("src"), null);
+});
+
 test("job status errors pause tracking and explicit cancellation uses A6 CANCEL only", async t => {
   const h = await harness(); t.after(h.close);
   await h.navigate("generate");
@@ -140,6 +195,8 @@ test("starts B1 at the selected level, verifies audio, and uses the exact playba
   const calls = h.backend.records("POST", `/v1/sessions/${sessionId}/interrupts`);
   assert.deepEqual(calls[0].body, calls[1].body);
   assert.equal(calls[0].body.playback_offset_ms, 12345);
+  assert.equal(h.document.querySelectorAll(".question-bubble").length, 1);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 1);
   assert.match(h.find(".answer-bubble").textContent, /not been independently verified/);
   h.click('[data-action="resume-learning"]'); await h.settle();
   assert.equal(h.audio[0].currentTime, 12.345);
@@ -189,17 +246,80 @@ test("ask another question reuses the session and paused position with a fresh r
   assert.equal(h.audio[1].paused, true); assert.equal(h.audio[1].src, ""); assert.equal(h.urls.size, 1);
   assert.equal(h.audio[0].paused, true); assert.equal(h.audio[0].currentTime, 19.876);
   assert.equal(h.document.activeElement.id, "question-input"); assert.equal(h.find("#question-input").value, "");
-  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 0);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 1);
+  assert.match(h.find(".question-history").textContent, /Explain the first example/);
   h.input("#question-input", "Can you give another example?"); h.submit("#question-form"); await h.settle();
   const calls = h.backend.calls.filter(call => call.path.endsWith("/interrupts"));
   assert.equal(calls.length, 2); assert.notEqual(calls[0].body.request_id, calls[1].body.request_id);
   assert.equal(calls[0].path, calls[1].path); assert.equal(calls[0].body.chunk_id, calls[1].body.chunk_id);
   assert.equal(calls[0].body.playback_offset_ms, 19876); assert.equal(calls[1].body.playback_offset_ms, 19876);
   assert.equal(calls[1].body.text, "Can you give another example?");
+  assert.equal(h.document.querySelectorAll(".question-bubble").length, 2);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 2);
+  assert.equal(h.document.querySelectorAll(".answer-audio-controls").length, 1);
   assert.equal(h.backend.records("POST", "/v1/sessions").length, 1);
   assert.equal(h.audio[0].paused, true);
   h.click('[data-action="resume-learning"]'); await h.settle();
   assert.equal(h.audio[0].currentTime, 19.876); assert.equal(h.audio[0].paused, false);
+});
+
+test("all exchanges stay visible in one interruption; Continue and End start an empty visible chat", async t => {
+  const h = await harness(backend => {
+    backend.intercept = call => call.path.endsWith("/interrupts") ? backend.response({ request_id: call.body.request_id,
+      chunk_id: call.body.chunk_id, text: `Answer to ${call.body.text}`, grounded: null, sources: [], warnings: [] }) : undefined;
+  }); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  const questions = ['<img src=x onerror="alert(1)"> What does this mean?', "Can you explain more?", "Another example?"];
+  for (const [index, question] of questions.entries()) {
+    h.input("#question-input", question); h.submit("#question-form"); await h.settle();
+    assert.equal(h.document.querySelectorAll(".question-bubble").length, index + 1);
+    assert.equal(h.document.querySelectorAll(".answer-bubble").length, index + 1);
+    assert.equal(h.find("#question-input").value, "");
+  }
+  const messages = [...h.find(".question-history").children].map(element => element.textContent);
+  for (const [index, question] of questions.entries()) {
+    assert.ok(messages[index * 2].includes(question)); assert.ok(messages[index * 2 + 1].includes(`Answer to ${question}`));
+  }
+  assert.equal(h.document.querySelectorAll(".question-history img").length, 0);
+  h.click('[data-action="resume-learning"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".question-bubble, .answer-bubble").length, 0);
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/end")).length, 0);
+  h.audio[0].advance(21); h.click('[data-action="toggle-question"]');
+  assert.equal(h.find(".question-history").textContent, "");
+  h.input("#question-input", "A fresh interruption."); h.submit("#question-form"); await h.settle();
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 1);
+  const calls = h.backend.calls.filter(call => call.path.endsWith("/interrupts"));
+  assert.equal(new Set(calls.map(call => call.path)).size, 1);
+  assert.equal(calls.at(-1).body.playback_offset_ms, 21000);
+  assert.ok(calls.every(call => !Object.hasOwn(call.body, "history")));
+  h.click('[data-action="leave-player"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".question-bubble, .answer-bubble").length, 0);
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/end")).length, 1);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  assert.equal(h.find(".question-history").textContent, "");
+  assert.equal(h.backend.records("POST", "/v1/sessions").length, 2);
+});
+
+test("pending questions and retries preserve completed exchanges without duplicating messages", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  h.input("#question-input", "First question"); h.submit("#question-form"); await h.settle();
+  h.backend.holdQuestion = true;
+  h.input("#question-input", "Second question"); h.submit("#question-form"); await h.settle();
+  assert.equal(h.document.querySelectorAll(".question-bubble").length, 2);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 1);
+  assert.equal(h.find('[data-action="ask-another-question"]').disabled, true);
+  h.backend.pendingQuestion(); await h.settle(); h.backend.holdQuestion = false;
+  const sessionId = h.backend.records("POST", "/v1/sessions")[0].body.session_id;
+  h.backend.failNext("POST", `/v1/sessions/${sessionId}/interrupts`);
+  h.input("#question-input", "Third question"); h.submit("#question-form"); await h.settle();
+  assert.equal(h.document.querySelectorAll(".question-bubble").length, 3);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 2);
+  h.click('[data-action="retry-question"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".question-bubble").length, 3);
+  assert.equal(h.document.querySelectorAll(".answer-bubble").length, 3);
+  const calls = h.backend.calls.filter(call => call.path.endsWith("/interrupts"));
+  assert.deepEqual(calls.at(-2).body, calls.at(-1).body);
 });
 
 test("text-only answers still offer another question without audio controls", async t => {

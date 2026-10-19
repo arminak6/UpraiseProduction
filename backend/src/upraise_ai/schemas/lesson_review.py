@@ -15,6 +15,7 @@ class ReviewLessonSummary(BaseModel):
     activity_id: str
     language: str
     voice: str
+    teaching_version: Literal["v1", "v2"] = "v1"
     status: Literal["DRAFT"] = "DRAFT"
     job_status: str
     levels: list[str]
@@ -29,6 +30,7 @@ class ReviewLessonChunk(BaseModel):
     chunk_id: str
     index: int = Field(ge=0)
     text: str
+    narration_text: str | None = None
     sources: list[LessonSource]
     reviewer_report: ReviewReport
 

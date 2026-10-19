@@ -342,9 +342,9 @@ class SessionStore:
                 if old_session:
                     old_session.interrupt_results.pop(old_id, None)
             if response.text and "INPUT_BLOCKED" not in response.warnings:
-                session.chat_cache.extend([{"role": "student", "text": message[:2000]},
-                                           {"role": "teacher", "text": response.text[:2000]}])
-                session.chat_cache[:] = session.chat_cache[-12:]
+                # Keep full text until B5/expiry; model context is bounded separately.
+                session.chat_cache.extend([{"role": "student", "text": message},
+                                           {"role": "teacher", "text": response.text}])
             session.current_chunk_index = session.chunk_ids.index(str(response.chunk_id))
             session.prompt_guard_counters["prompts"] += 1
             if "INPUT_BLOCKED" in response.warnings:

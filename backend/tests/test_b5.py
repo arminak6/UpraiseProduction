@@ -128,7 +128,9 @@ def test_b5_wipes_actual_b4_audio_cache_and_preserves_other_learner(b4_runtime):
     r = b4_runtime
     audits = []
     r.store.end_audit = audits.append
-    value = run(r)
+    for index in range(8):
+        value = run(r, r.data.model_copy(update={"request_id": uuid4(), "text": f"Question {index}"}))
+    assert len(r.session.chat_cache) == 16
     assert value.audio and r.store._interrupt_cache_bytes > 0
     second = make_runtime(datetime.now(UTC), client_id="client")
     second.deadline = r.session.deadline

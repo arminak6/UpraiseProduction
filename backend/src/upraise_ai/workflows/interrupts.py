@@ -170,7 +170,8 @@ class InterruptService:
 
     def _run_graph(self, session, data, audio, context, chunk, versions, documents):
         teacher = self.teacher_factory(self.settings, session.binding)
-        history = [{"role": item["role"], "text": item["text"][:2000]} for item in session.chat_cache[-12:]]
+        # Four previous completed Q&A pairs, across all interruptions in this lesson.
+        history = [{"role": item["role"], "text": item["text"][:2000]} for item in session.chat_cache[-8:]]
         messages = MESSAGES.get(session.binding.language.split("-")[0], MESSAGES["en"])
 
         def transcribe(state):

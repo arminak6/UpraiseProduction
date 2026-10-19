@@ -53,6 +53,7 @@ class AlignedLessonPipeline(LessonPipeline):
             raise IngestionError('LESSON_SOURCE_EMPTY')
         self.speech.validate_voice(data.voice, data.language)
         refs = VersionCatalog(self.settings).references()
+        refs.update(getattr(self.models, "teaching_versions", {}))
         signature = hashlib.sha256(json.dumps({'sections': sections, 'request': job['metadata'],
             'pipeline': job['pipeline_version'], 'versions': refs}, sort_keys=True).encode()).hexdigest()
         expected = {str(row['document_id']): str(row['active_attempt']) for row, _ in documents}
@@ -91,6 +92,7 @@ class AlignedLessonPipeline(LessonPipeline):
                     'source_languages': ','.join(dict.fromkeys(section['source_language'] for section in sections)),
                     'translation_applied': str(any(needs_translation(section['source_language'], data.language)
                                                   for section in sections)).lower()}
+        versions.update(getattr(self.models, "teaching_versions", {}))
         tuples, by_level = [], {}
         for level in profiles:
             values = prepared[level]
@@ -201,12 +203,19 @@ class AlignedLessonPipeline(LessonPipeline):
                         values = cached['values']
                     else:
                         position = 0.20 + 0.40 * completed / total
-                        texts, reports = self.models.adapt_units(section, units, section['source_language'],
-                            learner_level=level, profiles=data.level_profiles,
-                            target_words=data.options.target_chunk_words, max_words=data.options.max_chunk_words,
-                            notify=lambda step: progress(step, position))
+                        reuse = getattr(self.models, 'reuse_canonical_units', None)
+                        retained_canonical = bool(reuse and level == data.plan_level and
+                            all(unit.canonical_review is not None and len(unit.material_text.split()) <= data.options.max_chunk_words for unit in units))
+                        if retained_canonical:
+                            texts, reports = reuse(units)
+                        else:
+                            texts, reports = self.models.adapt_units(section, units, section['source_language'],
+                                learner_level=level, profiles=data.level_profiles,
+                                target_words=data.options.target_chunk_words, max_words=data.options.max_chunk_words,
+                                notify=lambda step: progress(step, position))
                         validate_ids(texts.units, units)
                         if needs_translation(section['source_language'], data.language):
+                            retained_canonical = False
                             progress('TRANSLATE', position)
                             draft = SectionDraft(paragraphs=[DraftParagraph(text=item.text, pages=unit.source.citation_numbers)
                                 for item, unit in zip(texts.units, units, strict=True)])
@@ -217,6 +226,7 @@ class AlignedLessonPipeline(LessonPipeline):
                             for item, paragraph in zip(texts.units, translated.paragraphs, strict=True):
                                 item.text = paragraph.text
                         if any(len(item.text.split()) > data.options.max_chunk_words for item in texts.units):
+                            retained_canonical = False
                             texts, reports = self.models.adapt_units(section, units, data.language,
                                 learner_level=level, profiles=data.level_profiles,
                                 target_words=data.options.target_chunk_words, max_words=data.options.max_chunk_words,
@@ -224,7 +234,9 @@ class AlignedLessonPipeline(LessonPipeline):
                             validate_ids(texts.units, units)
                         values = []
                         for item, unit in zip(texts.units, units, strict=True):
-                            item.text = validate_material_format(unit, item.text)
+                            if not retained_canonical and not (reuse and unit.canonical_review is not None
+                                                              and item.text == unit.material_text):
+                                item.text = validate_material_format(unit, item.text)
                             if len(item.text.split()) > data.options.max_chunk_words:
                                 raise UnitSizeError(unit.content_unit_id)
                             report = reports[str(unit.content_unit_id)]

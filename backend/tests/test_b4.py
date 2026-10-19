@@ -260,6 +260,42 @@ def test_b4_successful_retry_is_stable_and_conflicting_body_is_rejected(runtime)
         run(r, r.data.model_copy(update={"text": "Another message"}))
 
 
+@pytest.mark.parametrize("operation", ["respond", "clarify"])
+def test_b4_retains_full_lesson_history_but_models_receive_only_four_previous_pairs(runtime, operation):
+    r = runtime
+    r.teacher.intent.operation = operation
+    original_respond, original_clarify = r.teacher.respond, r.teacher.clarify
+    received = []
+
+    def respond(message, goal, context, history, chunks):
+        received.append(history)
+        return original_respond(message, goal, context, history, chunks)
+
+    def clarify(message, context, history):
+        received.append(history)
+        return original_clarify(message, context, history)
+
+    r.teacher.respond, r.teacher.clarify = respond, clarify
+    full_history = []
+    for index in range(8):
+        # Distinct paused moments still share one lesson's backend conversation.
+        data = r.data.model_copy(update={"request_id": uuid4(), "text": f"Question {index}: " + "q" * 2200,
+                                         "playback_offset_ms": index * 1000})
+        r.teacher.answer = f"Answer {index}: " + "a" * 2200
+        expected = [{"role": item["role"], "text": item["text"][:2000]} for item in full_history[-8:]]
+        value = run(r, data)
+        assert r.teacher.history == expected and received[-1] == expected
+        assert len(r.teacher.history) == 2 * min(index, 4)
+        full_history.extend([{"role": "student", "text": data.text}, {"role": "teacher", "text": value.text}])
+        assert r.session.chat_cache == full_history
+    assert len(r.session.chat_cache) == 16 and len(r.session.chat_cache[0]["text"]) > 2000
+    assert len(r.session.interrupt_results) == 2  # Retry/audio eviction never trims the transcript.
+    calls = list(r.teacher.calls)
+    assert run(r, data) == value
+    assert r.teacher.calls == calls and r.session.chat_cache == full_history
+    assert "audio" not in json.dumps(r.session.chat_cache)
+
+
 def test_b4_evicted_retry_does_not_regenerate_and_cache_is_pruned(runtime):
     r = runtime
     for _ in range(3):

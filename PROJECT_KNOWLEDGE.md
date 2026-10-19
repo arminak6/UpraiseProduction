@@ -1,141 +1,124 @@
-﻿# Project Knowledge
+# Project Knowledge
 
 ## Purpose and current state
 
 UPRAISE WP7 implements A1-A8/A3v2,B1/B2/B4/B5/B7,C1/C2/C3/C5;B3/B6/C4 reserved.
-C3 schema tables exist; API/workers refreshed with current source on 2026-10-15.
-Streamlit is an HTTP testbench/player. PG DRAFT text/plans and Qdrant sources persist;
-temporary A5 files have24hTTL; Compose saves completed packages in course_archive/.
-Moodle owns human approval. Do not stage/commit
-without request. ../Uprise/v2 is reference-only. Semantic source/math/review
-defects and historical course deletion evidence are documented under codex_helper.
-frontend2/ is the approved client UI, connected through a stdlib Python HTTP bridge.
-Its Docker service runs on localhost:8502; original frontend/backend remain separate.
+PG DRAFT text/plans and Qdrant sources persist; A5 staging TTL24h, completed packages
+saved in course_archive/. Moodle owns approval. No stage/commit without request.
+../Uprise/v2 reference-only; semantic findings/evidence in codex_helper/.
+frontend2/ is the client UI on localhost:8502 via stdlib HTTP bridge; frontend/
+remains a separate Streamlit testbench/player. C3 schema exists.
 
 ## Architecture and data flow
 
-- Streamlit HTTP testbench: A1-A8/v1/v2, B1/B4/B5, verified deferred audio.
-  Retry keys survive navigation; auth/context clears caches. EN/IT25neural voices.
-- frontend2 uses real A1-A8/B1/B4/B5 APIs through a same-origin, route/header-limited
-  stdlib bridge. Nonce/Host/Origin checks, verified TLS/no redirects and server-side
-  OAuth/mTLS. Learner JWT/retries stay in tab RAM; refresh loses local state.
-  WAV SHA256/result-hash/session/expiry checks, exact B4 offsets and B5 late-response
-  fences. No browser storage/seed data/direct DB/AWS, automatic POST or A6 receipt.
-  Uncertain A7 requires explicit new-request preparation. Custom levels come from
-  A5; generation selects1+ configured levels, default all, retained while browsing.
-  B4 answer controls show Listen/Pause/Resume, Stop and Replay; Ask another question
-  stops/releases prior audio and focuses a blank form, preserving session/chunk/
-  paused offset. New requests get fresh UUIDs; retry UUIDs stay stable. Continue
-  learning releases answer audio before playback resumes; native media events
-  update controls without rerendering the question form.
-- frontend2 top navigation: Upload material / Generate course / Review courses /
-  Start learning. Review uses GET /v1/lesson-reviews[/{job_id}] for durable PG text,
-  one course per entry, ordered levels/parts, full text/sources/review evidence and
-  tab-only feedback per part. Inline A7 retains selected course/level/part and polls
-  safely. Expired/received output and incomplete root text remain readable, with
-  revision disabled unless a completed course has temporary or archived output.
-  Review reads enforce jobs:read/client/course/source/deletion fences, coherent
-  publication locks and content-free access audit; A7 candidates remain hidden.
-- Persistent archive: optional UPRAISE_LESSON_ARCHIVE_DIR; Compose mounts ignored
-  root course_archive/ at /data/course_archive on API/ingestion/lesson workers.
-  Verified manifest/WAV-only copies precede DB publication; result.persistent_output
-  and the existing artifact/hash pointer select immutable owner/artifact/hash paths.
-  TTL removes staging only; saved A5/A7/A8/B1 remain available with no output expiry.
-  B1 sessions stay bounded. A7/B7 replace packages and remove superseded versions;
-  whole B7/A2 removes owner archives. A6 receipt withdraws delivery but keeps archive.
-  Startup copies intact old packages (including expired-but-present files), never
-  restores missing audio or calls AI/TTS. Archive storage outages retry from caches.
-- A1 PDF uses Docling/vision/math, CSV uses CsvProcessor, Word uses WordProcessor
-  with LibreOffice fidelity fallback. Ordered Titan/Qdrant chunks; active-attempt
-  fences, document-ingestion-v1.6. CSV UTF8/BOM header-based comma/semicolon/tab,
-  complete rows only; limits100MB/100krows/256columns. Word native picture/block
-  references never fabricate PDF pages. PDF quality fingerprints/contracts remain.
-- A2 owner/source/course deletion removes dependent PG/plans/artifacts/feedback
-  across levels/languages/statuses, with admission/writer fences and durable503
-  recovery. Minimal IDs/audit remain; fresh A1 is allowed after deletion. Original
-  ingestion files retain an independent artifact policy; indexed content is erased.
-- A3v1 uses ordered5page windows and V3 roles, checked translation, then speech.
-  A3v2 shares a canonical plan/ordered content units across levels, with distinct
-  chunk/audio IDs. All text/plans precede TTS; target200/max500words and at most
-  two shared refinements. v2.5/promptv6 uses bounded ID-aware recovery and rejects
-  ambiguous/truncated output. Approved drafts skip editing; independent post-edit
-  review is deferred. Source/math quality still needs human review.
-- A3v2 optional levels: 1-8 unique configured names; omitted/null means all.
-  Snapshot selected profiles in config order; planning uses the configured plan
-  level if selected, otherwise the first selected. Selection is fingerprinted:
-  reordered equivalent selection reuses the job; changed selection conflicts.
-- CSV/Word pages[]/page_count0; source_blocks plus CSV row_ranges or Word refs.
-  CSV header is row1; multiline cells remain one record. A3/A7/B4 preserve source
-  references, and row/block citation labels are omitted from narration. PDF shape
-  stays unchanged; extraction never establishes factual accuracy.
-- A4 counts per level/total; A5 whole bundle or learner_level slice with one full
-  integrity hash; A8 expands levels before pagination. A6 temporary receipt/cancel/
-  TTL fences writers; retained A3 text/plans have independent lifecycle.
-- A7 source/PG-pinned roles/translation/TTS; selected chunk or optional shared
-  content_unit_id across remaining levels. Strict revision_models final checks and
-  revision_validation alignment: max2corrections each; accepted cache survives TTS
-  outage. Exhaustion terminal,outages retryable;new POST for old failures. Approved
-  drafts skip editing; corrected drafts unapproved. docs/a7.md.
-- A7 atomic PG/manifest/hash/WAV replacement preserves IDs; failure/cancel preserves
-  current. Stale target409,unrelated edits merge. artifact_job_id/current-result.json;
-  replacement_cleanup_jobs recovers obsolete/candidate artifacts. Success refreshes
-  TTL;A8 hides processing IDs;A5 aliases current level. ChildA6 protects current;
-  rootA6/A2 removes output. Startup consolidation never revives expired audio.
-- A7 UI checkbox defaults off,polls5s,pauses on errors/stops terminal;success reloads
-  same lesson/level/part. No auto POST. Safe failure details are temporary,excluded
-  from logs/audit and removed by A6/TTL/A2 or successful replacement.
-- B1 binds playback job/context/hash/level. Local DRAFT preview or OAuth/mTLS signed
-  approval/consent;RAM30min capped by token/lesson,cleared on restart/hash change.
+- frontend2 bridge: bounded routes/headers,TLS/Nonce/Host/Origin,OAuth/mTLS;
+  JWT/retries tab RAM, no browser storage/direct AWS/autoPOST/A6. WAV/hash/session/
+  offset and B5 late fences. Uncertain A7 needs new request. Levels1+,default all.
+  B4 keeps visible Q&A per interruption, Listen/Pause/Resume/Stop/Replay/Ask again.
+  Continue clears UI/audio; next interruption blank. Full backend chat RAM lasts
+  until B5/end/expiry/revocation/restart; distinct last2retry/audio cache. Models
+  get last4complete pairs,2000chars/message, no blocked/player-only messages;
+  question UUID/stable retry identity prevents duplicate pairs.
+- Teaching V2 is distinct from frontend2/A3v2. teaching_version=v2 opts in;
+  absent/v1 preserves original models/prompts/converter/fingerprint. UI defaults V1.
+  Isolated services/teaching_v2/; docs/teaching-v2.md and reverse-checked
+  codex_helper/teaching-v2-runtime.patch preserve earlier chat changes.
+  V2.8 concept author/exact selector checks coverage/quotes, restores original
+  math/tables and excludes incidental fragments. After2bad quote attempts retain
+  original primary chunk, exclude invalid optional context; no guessed repairs.
+  Same-doc/version/attempt context6refs/12000chars clarifies terms, not scope;
+  bind after model creation, cache/job. Empty primary never becomes another topic.
+  Typed factual/omission/language/citation findings and local exact reference/
+  unit checks; absent-source claims use -1/empty quote. Broad review2quote attempts
+  then indexed original spans. Independent verification can downgrade source/
+  presentation-only accusations. Host-bound entailment checks EVERY paragraph
+  against its allowed material; no model-retyped quotes/indices. Numeric question
+  givens bounded; ambiguous labels attributed as printed. No document hardcoding.
+  Max2factual corrections, final edit by reviewer. User approved failed NEW sections
+  copying exact primary excerpts with teacher-editing DRAFT flag; failed adaptation
+  can retain reviewed canonical text flagged for level edit. Preserve IDs/language/
+  references/size; refine common plan, never truncate. Invalid evidence/provider/
+  language still fail closed. A7 remains strict, no fallback discarding teacher edits.
+  Same-level canonical reuse avoids rewrite/V1 markup repair; translations adapt.
+  Policy/recovery metadata invalidate checkpoints. Source/style gaps are warnings.
+  Separate strict spoken meaning/language/naturalness gate before Polly, script
+  cache/published SSML. AI gates remain fallible: real scripts still invent wrong
+  interpretations (assessment below). No V1 fallback/automatic replacement.
+  Review script/audio/Stop; release on navigation. No actual listening verified.
+  Owner-only staging/A4 safe failure details; A6/TTL/A2 erase bounded diagnostics,
+  never raw provider output/logs/audit. Extraction itself is not repaired.
+- Nav: Upload / Generate / Review / Start learning. Review reads durable PG text,
+  levels/parts/source evidence; tab-only feedback and A7 selection persist. Expired
+  text readable; A7 needs completed temporary/archived output. Ownership/course/
+  deletion/publication fences; unpublished candidates hidden, content-free audit.
+- Archive: ignored course_archive/, optional UPRAISE_LESSON_ARCHIVE_DIR on API/
+  workers. Manifest/WAV/hash verified; A5/A7/A8/B1 survive staging TTL. A7/B7 removes
+  superseded packages; B7/A2 erases owner archives, A6 withdraws delivery only.
+  Startup rescues intact expired packages; no audio regeneration/chat archive.
+  artifact_job_id/hash/manifest selects current owner paths.
+- A1 Docling/vision/math PDF, CsvProcessor, WordProcessor/LibreOffice fidelity
+  fallback -> ordered Titan/Qdrant chunks; active-attempt fences, ingestion-v1.6.
+  CSV UTF8/BOM headers, comma/semicolon/tab, complete rows; Word block refs, no
+  invented PDF pages. PDF quality fingerprints/contracts remain.
+- A2 deletes dependent PG/plans/artifacts/feedback; writer/admission fences and
+  durable503 recovery. IDs/audit remain; fresh A1 allowed.
+- A3v1 ordered5page windows/V3 roles/checked translation/speech. A3v2 shares a
+  canonical plan/content units across levels, distinct chunk/audio IDs. Text/plans
+  precede TTS; target200/max500words, max2 shared refinements. v2.5/promptv6 bounds
+  ID-aware recovery, rejects ambiguous/truncated output; approved drafts skip edits.
+- A3v2 levels:1-8 configured names, omitted/null=all, config order. Plan level if
+  selected, else first selected. Fingerprint ignores ordering, conflicts on selection.
+- CSV/Word pages[]/page_count0; source_blocks/CSV row_ranges/Word refs. CSV header
+  row1, multiline cells one record. A3/A7/B4 preserve refs, omit row/block labels
+  from speech; PDF unchanged. Extraction does not establish accuracy.
+- A4 level/total counts; A5 bundle/learner_level slice shares full integrity hash;
+  A8 expands before pagination. A6 fences writers; retained text/plans independent.
+- A7 source-pinned chunk/content_unit_id edits, optional levels;2corrections,
+  cache survives TTS outage. Atomic PG/manifest/hash/WAV; stale409, unrelated edits
+  merge, artifact_job_id/current-result.json recovery; success refreshes TTL.
+  ChildA6 protects current;rootA6/A2 removes output. UI cross-level off/manual;
+  failures never audited, erased by A6/TTL/A2/replacement. docs/a7.md.
+- B1 binds job/context/hash/level. Local DRAFT preview or signed OAuth/mTLS
+  approval/consent; RAM30min capped by token/lesson, clears on restart/hash change.
   B2 supplied score>.5 HIGH_COGNITIVE_LOAD else PROCEED;consent,no measurement.
-  B4 source-scoped PG/Qdrant LangGraph;text or WAV-STT -> answer/SSML/WAV/visemes;
-  TTS outage keeps text,grounding=null/GROUNDING_NOT_VERIFIED. B5 fences late replies,
-  clears RAM,idempotent content-free audit30min. docs/b1-b5 contracts are authoritative.
-- B7 DELETE /v1/lesson-jobs/{id}?learner_level;lessons:write. Omit/last level removes
-  whole lesson, sources preserved; tombstones/fences/recoverable503/repeat204.
-  Partial atomic update preserves siblings/plan/expiry. Running-level409; expired
-  text deletable, no audio revival. UI pinned confirmation/manual retry; docs/b7.md.
-- C1 health/ready; C2 cached provider evidence (UNKNOWN without recent calls), no
-  AWS polling. C3 global/course controls: admin:operations, enabled=true disables,
-  deployment disables prevail, admission fails closed, queued jobs pause without
-  consuming attempts. Atomic audit outbox; local admin opt-in; docs/c3.md.
-  Disabled B2 discards scores/PROCEED; in-flight AI not hard-cancelled.
+  B4 source-scoped PG/Qdrant LangGraph:text/WAV-STT->answer/SSML/WAV/visemes;
+  TTS outage retains text,grounding=null/GROUNDING_NOT_VERIFIED. B5 late fences,
+  RAM clear/idempotent content-free audit30min. Contracts:docs/b1-b5.
+- B7 DELETE /v1/lesson-jobs/{id}?learner_level;lessons:write; preserves sources.
+  Partial/whole deletion, tombstones/503 recovery and manual retry: docs/b7.md.
+- C1 health/ready; C2 cached evidence/no AWS polling. C3 admin:operations controls,
+  enabled=true disables; fail-closed queued pause, audit outbox. docs/c3.md.
   C5 hashes/provenance/checkpoints. Human approval external; all results DRAFT.
 
 ## Important paths
 
 - backend/src/upraise_ai/{api,schemas,workflows}/ contracts; backend/docs/ details.
-  services/{lesson_*,aligned_*,revision_*,lesson_replacement}.py generation/lifecycle;
-  services/pdf/, csv_processor.py, word_processor.py ingestion; storage/ persistence;
-  guards/session_jwt.py sessions; workflows/controls.py C3; schemas/versions.py C5.
-- frontend/ Streamlit authoring/learning modules; tests/ AppTest/fakeHTTP;
-  frontend/README.md commands. backend/{pyproject.toml,uv.lock,Dockerfile,math_runtime/}
-  builds. Chunk uniqueness(job_id,level_key,index); legacy level_key=''.
-- frontend2/{app,api,ui}.js + index.html/styles.css; serve.py HTTP bridge,
-  tests/{test_server.py,ui.test.cjs}; README.md auth/run/verification. Docker allowlist.
-- Teacher review: backend/{schemas,workflows}/lesson_review.py under src/upraise_ai,
-  storage/lessons.py list_reviewable; api/authoring/lessons.py routes;
-  backend/docs/lesson-review.md and tests/test_lesson_review_integration.py.
-- Archive: storage/lesson_archive.py, services/lesson_replacement.py artifact_directory,
-  workflows/archive_lessons.py backfill, backend/docs/lesson-archive.md;
-  tests/test_lesson_archive_integration.py. Keep mount/config on API and all workers.
+  services/{lesson_*,aligned_*,revision_*}.py lifecycle; pdf/,csv_processor.py,
+  word_processor.py ingestion; storage/ persistence; guards/session_jwt.py sessions;
+  workflows/controls.py C3; schemas/versions.py C5. Build:pyproject.toml/uv.lock/
+  Dockerfile/math_runtime/. Chunk uniqueness(job_id,level_key,index).
+- frontend/ Streamlit/AppTest; frontend2/{app,api,ui}.js,index.html,styles.css,
+  serve.py bridge,tests/{test_server.py,ui.test.cjs}. README auth/run/Docker allowlist.
+- Review: {schemas,workflows}/lesson_review.py, storage/lessons.py, docs/lesson-review.md.
+  Archive: storage/lesson_archive.py, services/lesson_replacement.py,
+  workflows/archive_lessons.py, docs/lesson-archive.md. Matching integration tests.
 - codex_helper/: ignored helpers/evidence; FUTURE_UPDATES.md ignored backlog.
   turing-content-verification.md/level-content-assessment.md: semantic findings.
+  teaching-v28-quality-assessment/assessment.md: actual completed V2.8 vs V1,
+  scored rubric, per-part source/script evidence and audio integrity checks.
 
 ## Commands
 
-- Docker Desktop Linux; API8000/UI8501. docker compose config --quiet.
-- Build: docker compose build backend frontend. Additive schema setup:
-  docker compose run --rm --no-deps migrate. Refresh API/UI/workers together:
-  docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend frontend worker lesson-worker lesson-delivery
+- Docker Desktop Linux; API8000/Streamlit8501/frontend2 8502. Build:
+  docker compose build backend frontend frontend2. Migrate:
+  docker compose run --rm --no-deps migrate. Refresh changed shared backend services:
+  docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
 - Drain jobs before pipeline/config changes; restart clears RAM sessions. Never
   reset live volumes/re-ingest sources for A3. Runtime pipeline default lesson-v3-a3-12.
 - codex_helper/validate-a3v2.ps1 -Selection 'not codex_nonexistent_sentinel': full
   suite; empty -k breaks PS. Disposable PG/Qdrant/fake providers, no live data;
   image upraise-word-validation (codex_helper/word-ingestion/Validation.Dockerfile).
-- Frontend: docker compose run --rm --no-deps -v ./frontend:/workspace:ro frontend python -m unittest discover -s /workspace/tests -q
-- Client UI: python frontend2/serve.py [--port 8502 --backend http://127.0.0.1:8000]
-  or docker compose up --build -d --no-deps --wait frontend2. Python3.10+ stdlib;
-  Compose backend default http://backend:8000; gateway env in frontend2/README.md.
+- UI run/auth: frontend{,2}/README.md; local python frontend2/serve.py (3.10+stdlib).
 - UI tests: python -m unittest discover -s frontend2/tests -p test_server.py -v;
   npm --prefix frontend2 ci --ignore-scripts; npm --prefix frontend2 test.
 - Ruff backend config backend/pyproject.toml; frontend scoped E4,E7,E9,F with test
@@ -143,12 +126,10 @@ Its Docker service runs on localhost:8502; original frontend/backend remain sepa
 
 ## Dependencies and environment
 
-Pinned Python3.12/uv, Docling/OCR/CPU Torch, PG17/Qdrant, Streamlit/httpx,
-LangGraph/Transcribe; versions in locks/C5. EU Bedrock GPTOSS/Qwen roles, Nova/Titan
-1024D, eu-central-1 default. Word uses LibreOffice Writer/fonts,per-job profiles,
-180s conversions. Polly neural16kHz mono16bitWAV, PCM-fitted visemes,
-SSML2800billed/5800total. EN/IT/FR/DE math smoke verified. PS5.1 JSON: -Encoding UTF8;
-curl.exe --% JSON single line.
+Python3.12/uv,Docling/OCR/CPU Torch,PG17/Qdrant,Streamlit/httpx,LangGraph/Transcribe;
+EU Bedrock GPTOSS/Qwen,Nova/Titan1024D,eu-central-1. Word LibreOffice/fonts180s.
+Polly neural16kHz mono16bit,PCM visemes,SSML2800billed/5800total. Local Python3.10
+cannot run backend: use Docker. PS5.1 JSON explicitly UTF8; pipe single-quoted here-strings.
 
 ## Conventions and invariants
 
@@ -167,21 +148,25 @@ Missing production auth config closes ingress; no Redis/session renewal.
 
 ## Known limitations and next work
 
-Sequential workers/A3v2 variants;already removed audio needs fresh synthesis, not
-automatic restoration. Archived packages have no TTL; unsaved expired text is read-only. Word complex
-layout/equation/order fidelity requires review. Non-UTF8/headerless CSV,CSV URLs,
-A7 idempotency/structural edits and mid-session level switching remain future.
-Gateway/Moodle callbacks/model access,HA/backups/erasure/orphans unverified.
-Independent post-edit review/grounding deferred. Live generation needs user
-permission(granted for Word test);tests use fake providers. Semantic findings and
-historical A7 failure diagnostics live in codex_helper reports. No auto-resubmit.
-frontend2 review/answer controls verified desktop/mobile; live voice audibility unverified.
-Escaped text has no rich Markdown/LaTeX typesetter. jsdom is test-only; no runtime npm.
+Sequential workers/variants; missing audio needs synthesis. Archive noTTL; expired
+unsaved text read-only. Word fidelity needs review. NonUTF8/headerless CSV/URLs,
+A7 idempotency/structural edits and mid-session level switching are future work.
+Gateway/Moodle/HA/backups/erasure/orphans unverified; V1 final review/grounding deferred.
+Oct19 user approved written-only Bedrock debugging for this Random Graphs course's
+windows/context/drafts/findings via both configured models, no audio/replacement.
+Earlier approval denials resolved; never auto-submit jobs. UI desktop/mobile checked;
+no direct listening or Markdown/LaTeX typesetter/runtime npm.
+V1 Random Graphs has matrix/conditioning/raw-escape SSML defects. Completed V2.8
+improves wording but misreads XF (part7), equates fixed/expected edges (8), assumes
+normal-table p-values (21), adds unreviewed narration.12/23fallback flags,finalpart
+empty. Editorial V1~4/10,V2.8~6/10; spoken wording3->8,reliability4->4.
+Continuity gap confirmed:12/23new-lesson openings; part9 missing formula appears
+in10. Written author has source context but no taught-history/outline; narration
+gets only current text/language. Shared unit plan is alignment, not pedagogy.
+Evidence codex_helper/teaching-v28-quality-assessment/; scripts/audio-integrity only.
 
 ## Recent decisions
 
-- Teacher-selected difficulty levels added to frontend2 and A3v2; defaults preserve
-  all-level requests. No live AI generation was submitted to validate this update.
 - Teacher review lists durable text independently of audio. User approved root
   course_archive/ retention so saved packages stay playable/revisable beyond24h.
 
@@ -189,21 +174,18 @@ Escaped text has no rich Markdown/LaTeX typesetter. jsdom is test-only; no runti
 
 ## Last verified
 
-2026-10-16 answer controls: frontend2 app/ui/CSS/tests/README verified; 33 DOM and
-15 bridge tests pass. Edge native WAV playback verifies pause/resume/stop/replay,
-two questions in one session at the same offset and clean lesson resumption at
-1400x1000/390x844. No live B4/model/TTS calls. Evidence codex_helper/answer-controls-*.
-
-2026-10-16 archive: config/Compose/storage/publication/delivery/revision/deletion/
-session/catalog/review paths and frontend2 expiry UI checked. 106 isolated backend
-lifecycle tests plus 11 final archive tests pass; 29 DOM/15 bridge tests pass.
-Ruff, JS syntax/diff, Compose config and backend/frontend2 builds pass. API, all
-workers and frontend2 refreshed healthy. Startup archived one intact existing
-course (34 JSON/WAV files); live A5/disk checksums match, expiry omitted. Six
-text courses remain listed; five missing old packages were not regenerated.
-Edge live review QA passes at1400x1000/390x844. Evidence codex_helper/archive-* and
-review-*. No live AI/TTS calls. Documentation and ignored archive directory updated.
-
-Prior isolated validation: 2026-10-15 selected-level A3v2/A7/B7 112 tests;
-2026-10-14 full backend955/Streamlit115 tests. Historical Word/CSV/semantic reports
-under codex_helper are DRAFT evidence, not approval or current availability.
+2026-10-19 assessed completed V2.8 c1d0a07c:23parts/23.84min,1973written/
+4376spoken words,12fallback flags. Same source/attempt/models as V1 99d9058e
+(32parts/36.79min); Joanna V1 acd83efc corroborates. Read23V2text/scripts,32latestV1
+texts/matched scripts and sources.23WAV hashes/durations match,mono16bit16kHz.
+No listening/provider calls/code or course edits. Assessment path above; index refreshed.
+Follow-up checked aligned make_plan, V2 models/context/speech inputs and repeated
+openings/formula transition; course continuity absent. Report/index refreshed only.
+Earlier same-day deployment:17hashes/service across4backend services,2V1results
+unchanged,all8healthy.341selected regressions,135+1V2,Ruff/build/diff/rollback checks
+passed. Written debug pilot23windows16normal/7fallback was a separate run;
+actual generation differs. Evidence codex_helper/teaching-v28-{written-verification,
+runtime-verification}.json,final-report.md. Fake-provider success does not establish
+real semantic correctness. No automatic regeneration/submission.
+Historical V1:codex_helper/random-graphs-comparison-20261016/. Diagnostics may
+TTL-clean; prior scoped QA:38DOM/15bridge/Edge,135B1/B4/B5,archive117.

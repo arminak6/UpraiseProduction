@@ -288,8 +288,13 @@ th:last-child, td:last-child { text-align: right; }
 .question-form label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 8px; }
 .question-suggestions { display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0 15px; }
 .question-suggestions button { border: 1px solid #dde7d8; background: #fafcf7; color: #849477; border-radius: 20px; padding: 7px 10px; font-size: 10px; }
-.answer-bubble { background: #f0f6ec; border: 1px solid #e2ecd9; border-radius: 10px; padding: 17px 19px; margin-top: 20px; font-size: 12px; line-height: 1.8; color: #627b58; }
-.answer-bubble > span { display: block; font-size: 9px; letter-spacing: .4px; text-transform: uppercase; color: #8a9f7a; margin-bottom: 8px; }
+.question-history { display: grid; gap: 14px; max-height: 640px; max-height: min(65vh, 640px); overflow-y: auto; overscroll-behavior: contain; margin-bottom: 22px; padding: 2px; }
+.question-history:empty { display: none; }
+.question-bubble, .answer-bubble { min-width: 0; border: 1px solid #e2ecd9; border-radius: 10px; padding: 17px 19px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.question-bubble { background: #f5f8fa; border-color: #e0e7ec; margin-left: 28px; color: var(--ink); }
+.answer-bubble { background: #f0f6ec; color: #627b58; }
+.question-bubble > span, .answer-bubble > span { display: block; font-size: 9px; letter-spacing: .4px; text-transform: uppercase; color: #8a9f7a; margin-bottom: 8px; }
+.question-bubble p { margin: 0; }
 .answer-bubble p { margin: 0 0 15px; }
 .answer-bubble .button { font-size: 10px; }
 .answer-audio-controls, .answer-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }

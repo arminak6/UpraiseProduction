@@ -58,12 +58,12 @@ class Backend {
   reviewText(value) {
     const variants = Object.fromEntries(Object.entries(value.variants).map(([level, lesson]) => [level, {
       learner_level: level,
-      chunks: lesson.chunks.map(({ chunk_id, index, text, sources, reviewer_report }) => ({ chunk_id, index, text, sources, reviewer_report })),
+      chunks: lesson.chunks.map(({ chunk_id, index, text, sources, reviewer_report, narration_text }) => ({ chunk_id, index, text, sources, reviewer_report, narration_text })),
     }]));
     const first = Object.values(value.variants)[0];
     const available = !first.expires_at || Date.parse(first.expires_at) > Date.now();
     return { job_id: value.job_id, lesson_id: first.lesson_id, course_id: first.course_id, activity_id: first.activity_id,
-      language: first.language, voice: first.voice, status: "DRAFT", job_status: "DONE", levels: Object.keys(variants),
+      language: first.language, voice: first.voice, teaching_version: first.versions?.teaching_version || "v1", status: "DRAFT", job_status: "DONE", levels: Object.keys(variants),
       chunk_counts: Object.fromEntries(Object.entries(variants).map(([level, lesson]) => [level, lesson.chunks.length])),
       created_at: new Date().toISOString(), audio_expires_at: first.expires_at,
       revision_available: available, revision_unavailable_reason: available ? null : "LESSON_OUTPUT_EXPIRED", variants };
@@ -138,6 +138,7 @@ class Backend {
             const value = bundle(jobId, job.input.lesson_id, job.input.document_ids[0]);
             value.variants = Object.fromEntries(Object.entries(value.variants).filter(([level]) => !job.input.levels || job.input.levels.includes(level)));
             for (const lesson of Object.values(value.variants)) Object.assign(lesson, { language: job.input.language, voice: job.input.voice });
+            if (job.input.teaching_version === "v2") for (const lesson of Object.values(value.variants)) lesson.versions = { teaching_version: "v2" };
             this.bundles.set(jobId, value); this.hashes.set(jobId, "c".repeat(64));
           } else {
             const value = this.bundles.get(job.input.lesson_job_id);

@@ -156,7 +156,8 @@ def job_status(job_id: UUID, request: Request, principal: Principal = Depends(in
             step=row["step"], progress=row["progress"], attempts=row["attempts"],
             error={"code": row["error_code"], **((row.get("result") or {}).get("revision_failure", {})
                     if row["error_code"] in {"REVISION_ALIGNMENT_REJECTED", "REVISION_MODEL_INVALID_OUTPUT"}
-                    else {})} if row["error_code"] else None,
+                    else (row.get("result") or {}).get("teaching_failure", {})
+                    if row["error_code"] in {"TEACHING_V2_MATERIAL_REJECTED", "TEACHING_V2_REVIEW_EVIDENCE_INVALID"} else {})} if row["error_code"] else None,
             result=row["result"],
             created_at=row["created_at"], updated_at=row["updated_at"], expires_at=row["expires_at"],
             cleanup_pending=bool(row["cleanup_requested_at"] and not row["cleanup_completed_at"]),

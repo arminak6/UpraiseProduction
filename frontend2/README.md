@@ -35,6 +35,13 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
 
 ## Connected behavior
 
+- **Teaching version:** generation defaults to Version 1. Opt into Version 2 for
+  concept-focused teaching, separate spoken formula explanations and additional
+  checks of mathematical meaning. Each generation creates a new course; choosing
+  Version 1 again leaves existing courses intact. V2 review shows the spoken script
+  and lets teachers listen to verified audio for each part. Revisions inherit the
+  course's version. V2 uses extra AI calls; human listening/approval is still needed.
+  See [V2 behavior and rollback](../backend/docs/teaching-v2.md).
 - **Material:** PDF/Word/UTF-8 CSV upload through A1; browser SHA-256; real A2
   document library and progress; confirmed source deletion, including its
   dependent generated courses. Course name/reference maps to the backend's
@@ -68,9 +75,16 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   position, displays real teacher text/audio and any bounded playback instruction,
   and resumes the same part. Answer audio exposes Listen/Pause/Resume, Stop and
   Replay controls. **Ask another question** stops the previous answer, focuses an
-  empty question box and keeps the same session, part and paused position. Each
+  empty question box and keeps the same session, part and paused position. The
+  conversation displays all questions and answers from the current interruption
+  in order; only the newest answer keeps audio controls. Each
   new question gets a new request ID; retries keep their original ID. **Continue
-  learning** releases answer audio before resuming the lesson. B5 closes completed/stopped/expired sessions and
+  learning** releases answer audio and clears the visible transcript before
+  resuming the lesson. The next interruption opens an empty chat. The backend
+  retains complete teaching exchanges only in lesson-session RAM, and uses the
+  latest four previous pairs (up to 2000 characters per message) as model context.
+  No chat is saved to PostgreSQL, browser storage or the course archive.
+  B5 closes completed/stopped/expired sessions and
   clears temporary question/audio data, with explicit retries after failures.
 - Upload, generation, B1 and B4 retries preserve their appropriate request
   identities in tab memory. A7 has no backend idempotency guarantee, so an

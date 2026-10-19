@@ -145,6 +145,10 @@ class LessonWorker:
                     # model text or feedback. A6/TTL/A2 disposes these details.
                     conn.execute("UPDATE lesson_jobs SET result=%s WHERE job_id=%s",
                                  (Jsonb({"revision_failure": error.details}), job["job_id"]))
+                elif code in {"TEACHING_V2_MATERIAL_REJECTED", "TEACHING_V2_REVIEW_EVIDENCE_INVALID"} and hasattr(error, "details"):
+                    # Same protected temporary-output lifecycle as A7 findings.
+                    conn.execute("UPDATE lesson_jobs SET result=%s WHERE job_id=%s",
+                                 (Jsonb({"teaching_failure": error.details}), job["job_id"]))
         except LeaseLost:
             pass
 
@@ -198,9 +202,18 @@ class LessonWorker:
                         revision = job["metadata"]["revision_request"]
                         self.audit.lesson(job, "REVISION_ACCEPTED", {key: revision[key]
                             for key in ("parent_job_id", "chunk_id", "number")})
-                    pipeline.models = self.models or LessonModels(
+                    models_class, speech_class = LessonModels, LessonSpeech
+                    if job["metadata"].get("teaching_version", "v1") == "v2":
+                        from upraise_ai.services.teaching_v2 import TeachingModelsV2, TeachingSpeechV2
+                        models_class, speech_class = TeachingModelsV2, TeachingSpeechV2
+                    pipeline.models = self.models or models_class(
                         self.settings, diagnostic_dir=self.staging.job_dir(job_id) / "model-diagnostics")
-                    pipeline.speech = self.speech or LessonSpeech(self.settings, pipeline.models)
+                    context_hook = getattr(pipeline.models, "set_document_context", None)
+                    if context_hook:
+                        # Sources are authorized/validated before model creation.
+                        # Bind them only now, when the actual job model exists.
+                        context_hook(documents)
+                    pipeline.speech = self.speech or speech_class(self.settings, pipeline.models)
                     expected = {str(row["document_id"]): str(row["active_attempt"]) for row, _ in documents}
 
                     def save_text(chunks, versions, *, partial=False):
