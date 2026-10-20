@@ -23,6 +23,8 @@ from upraise_ai.services.teaching_v2.prompts import (
     MATERIAL_CORRECTION_POLICY,
     TEACHING_POLICY,
 )
+from upraise_ai.services.teaching_v2.review_recovery import POLICY as REVIEW_RECOVERY_POLICY
+from upraise_ai.services.teaching_v2.review_recovery import review_flag
 
 from . import planning
 from .contracts import CourseError, CoverageCheck, ExcerptGroups, LanguageCheck, fingerprint
@@ -48,6 +50,7 @@ class TeachingModelsV3(TeachingModelsV2):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.teaching_versions = {**TeachingModelsV2.teaching_versions, "teaching_version": "v3",
+            "draft_review_recovery": REVIEW_RECOVERY_POLICY,
             "teaching_policy": VERSION, "math_speech_prompt": VERSION,
             "math_runtime": "continuous-reviewed-narration-v3", "course_continuity": VERSION,
             "course_order": "document-order", "thought_units": "atomic-paragraphs-v1",
@@ -175,10 +178,11 @@ class TeachingModelsV3(TeachingModelsV2):
         return [ReviewIssue(category="source", message=message[:2000], pages=section.get("pages", []))
                 for message in dict.fromkeys(warnings) if message.strip()][:20]
 
-    def checked_material(self, section, candidate, language, learner_level, *, units=None, max_words=None,
-                         allow_source_excerpt=False):
+    def _checked_material(self, section, candidate, language, learner_level, *, units=None, max_words=None,
+                          allow_source_excerpt=False, state):
         required = [u.material_text for u in units] if units is not None else None
         for rounds in range(3):
+            state.update(candidate=candidate, rounds=rounds, rejected=False)
             try:
                 if isinstance(candidate, SectionDraft):
                     validate_draft(candidate, section["pages"])
@@ -205,7 +209,9 @@ class TeachingModelsV3(TeachingModelsV2):
                     failure = error
                 else:
                     raise
+                state["rejected"] = True
                 if rounds == 2:
+                    state["source_recovery"] = True
                     if allow_source_excerpt and (not failure.review.correct or not failure.review.complete or not failure.review.in_language):
                         ids = set(section.get("v3_primary_chunk_ids", [c["chunk_id"] for c in section["chunks"]]))
                         primary = {**section, "chunks": [c for c in section["chunks"] if c["chunk_id"] in ids],
@@ -229,6 +235,9 @@ class TeachingModelsV3(TeachingModelsV2):
                                 raise failure
                             if units is None:
                                 text = self.group_excerpts(text)
+                            if self.draft_review_recovery:
+                                warnings.append(review_flag("written material review", failure,
+                                    pages=section["pages"], category="accuracy"))
                             return text, rounds, warnings
                     raise failure
                 payload = {**self.material_context(section), "previous_candidate": candidate.model_dump(mode="json"),
@@ -324,7 +333,8 @@ class TeachingModelsV3(TeachingModelsV2):
         recoveries = [any(w.message in RECOVERY_WARNINGS for w in v[3].issues) for v in values]
         texts, warnings = review_sequence(self, texts, contexts, language=data.language,
                                          kind="written", repair=repair, recoveries=recoveries)
-        if any(not recoveries[i] and any(w.category == "clarity" for w in group) for i, group in enumerate(warnings)):
+        if not self.draft_review_recovery and any(
+                not recoveries[i] and any(w.category == "clarity" for w in group) for i, group in enumerate(warnings)):
             raise CourseError("WRITTEN_CONTINUITY_REJECTED")
         result = [(v[0], text, v[2], self.retain_warnings(v[3], issues), *v[4:])
                   for v, text, issues in zip(values, texts, warnings, strict=True)]

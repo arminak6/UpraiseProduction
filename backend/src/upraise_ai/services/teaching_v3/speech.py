@@ -9,6 +9,7 @@ from upraise_ai.services.lesson_pipeline import write_json
 from upraise_ai.services.lesson_speech import LessonSpeech
 from upraise_ai.services.teaching_v2.contracts import Decision, Narration, structured, validate_spoken
 from upraise_ai.services.teaching_v2.prompts import REVIEW_POLICY
+from upraise_ai.services.teaching_v2.review_recovery import gap_text, review_failure, review_flag
 
 from . import planning
 from .contracts import CourseError, CoverageCheck, LanguageCheck, fingerprint
@@ -26,15 +27,35 @@ class TeachingSpeechV3(LessonSpeech):
     def bind_chunk(self, chunk_id):
         self.bound_chunk = str(chunk_id)
 
+    def review_issues(self, chunk_id):
+        return self.review_warnings.get(str(chunk_id), [])
+
     def script(self, text, language, context, previous, following, *, corrections=None):
+        state = {}
+        try:
+            return self._script(text, language, context, previous, following, corrections=corrections, state=state)
+        except IngestionError as error:
+            if not self.models.draft_review_recovery or not review_failure(error):
+                raise
+            candidate = state.get("candidate") or gap_text(language)
+            issues = [review_flag("narration review", error, category="speech", issues=state.get("problems", []))]
+            self.source_warnings[fingerprint(text)] = issues
+            if cache := state.get("cache"):
+                write_json(cache, {"key": state["cache_key"], "script_hash": fingerprint(candidate),
+                                  "text": candidate, "review_status": "needs_human_review",
+                                  "warnings": [w.model_dump() for w in issues]})
+            return candidate
+
+    def _script(self, text, language, context, previous, following, *, corrections=None, state):
         # Whole-sequence review policy does not change an individual script's
         # factual/format/coverage approval; full-course caches include it below.
         part_versions = {k: v for k, v in self.models.teaching_versions.items() if k != "spoken_sequence_review"}
-        cache_key = fingerprint([VERSION, SPEECH_POLICY, part_versions, text, language,
+        cache_key = fingerprint([VERSION, SPEECH_POLICY, part_versions, self.models.draft_review_recovery, text, language,
             context, previous, following, corrections or [], self.settings.lesson_generation_model_id,
             self.settings.lesson_review_model_id])
         cache = (self.models.diagnostic_dir.parent / "teaching-v3-voice-parts" / f"{cache_key}.json"
                  if self.models.diagnostic_dir else None)
+        state.update(cache=cache, cache_key=cache_key)
         if cache and cache.is_file():
             try:
                 saved = json.loads(cache.read_text())
@@ -42,7 +63,9 @@ class TeachingSpeechV3(LessonSpeech):
                 valid = saved.get("key") == cache_key and saved.get("script_hash") == fingerprint(candidate)
                 validate_spoken(candidate)
                 warnings = [ReviewIssue.model_validate(w) for w in saved.get("warnings", [])]
-                if valid and not missing_decimals(text, candidate):
+                flagged = (self.models.draft_review_recovery and saved.get("review_status") == "needs_human_review"
+                           and bool(warnings))
+                if valid and (flagged or not missing_decimals(text, candidate)):
                     self.source_warnings[fingerprint(text)] = warnings
                     return candidate
             except (ValueError, KeyError, TypeError, IngestionError):
@@ -59,6 +82,7 @@ class TeachingSpeechV3(LessonSpeech):
         problems = []
         last_narration = None
         for attempt in range(3):
+            state["problems"] = problems
             if attempt:
                 narration = structured(self.models,
                     SPEECH_POLICY + VERBALIZATION_TASK + "\nEdit this candidate narrowly against CURRENT written teaching. "
@@ -113,6 +137,7 @@ class TeachingSpeechV3(LessonSpeech):
                     problems = ["Preserve these exact decimal values as NUMERALS, including leading zeroes: " + ", ".join(remaining[:40])]
                     payload.update(previous_narration=narration.text, corrections=problems)
                     continue
+            state["candidate"] = narration.text
             review = structured(self.models, REVIEW_POLICY + SPEECH_POLICY,
                 {"kind": "spoken", "written_lesson": text, "candidate": narration.text,
                  "language": language, "course_context": navigation}, Decision,
@@ -163,10 +188,11 @@ class TeachingSpeechV3(LessonSpeech):
                     message="Written teaching needs source review: " + reason[:1500]) for reason in source_gaps]
                 if cache:
                     write_json(cache, {"key": cache_key, "script_hash": fingerprint(narration.text),
-                        "text": narration.text, "warnings": [w.model_dump()
+                        "text": narration.text, "review_status": "passed", "warnings": [w.model_dump()
                             for w in self.source_warnings[fingerprint(text)]]})
                 return narration.text
             problems = review.issues + issues or ["Preserve all written meaning and conditions, with natural continuous teaching and no added facts."]
+            state["problems"] = problems
             # A separate reviewer edits the actual candidate; the next attempt
             # is not a fresh creative lecture prompted by the error wording.
             payload.pop("previous_narration", None)
@@ -179,7 +205,7 @@ class TeachingSpeechV3(LessonSpeech):
 
     def prepare_course(self, by_level, language, signature, progress):
         for level, values in by_level.items():
-            key = fingerprint([VERSION, SPEECH_POLICY, signature, level, language,
+            key = fingerprint([VERSION, SPEECH_POLICY, self.models.draft_review_recovery, signature, level, language,
                                [(v[0], v[1]) for v in values], self.models.teaching_versions,
                                self.settings.lesson_generation_model_id, self.settings.lesson_review_model_id])
             folder = self.models.diagnostic_dir.parent if self.models.diagnostic_dir else None
@@ -210,7 +236,7 @@ class TeachingSpeechV3(LessonSpeech):
                     kind="spoken", repair=repair, written=written)
                 for index, text in enumerate(written):
                     warnings[index].extend(self.source_warnings.get(fingerprint(text), []))
-                if any(w.category != "source" for group in warnings for w in group):
+                if not self.models.draft_review_recovery and any(w.category != "source" for group in warnings for w in group):
                     if folder:
                         write_json(folder / f"teaching-v3-continuity-failure-{level}.json",
                             {"stage": "spoken_course_continuity", "level": level, "issues": [

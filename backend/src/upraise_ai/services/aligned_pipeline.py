@@ -102,10 +102,15 @@ class AlignedLessonPipeline(LessonPipeline):
                 raise IngestionError('LESSON_ALIGNMENT_CHECKPOINT_INVALID')
             by_level[level] = []
             for unit, item in zip(plan.units, values, strict=True):
-                if len(item['text'].split()) > data.options.max_chunk_words:
+                first = getattr(self.models, "preserve_first_draft", False)
+                if not first and len(item['text'].split()) > data.options.max_chunk_words:
                     raise IngestionError('LESSON_UNIT_TOO_LARGE')
                 chunk_id = str(uuid5(NAMESPACE_URL, f"upraise:aligned:{job['job_id']}:{level}:{unit.content_unit_id}"))
                 report = ReviewReport.model_validate(item['report'])
+                if first and len(item['text'].split()) > data.options.max_chunk_words:
+                    from upraise_ai.services.teaching_v2.review_recovery import review_flag
+                    report = self.models.retain_warnings(report, [review_flag("first-draft length",
+                        IngestionError("LESSON_UNIT_TOO_LARGE"), pages=unit.source.citation_numbers, category="clarity")])
                 value = (chunk_id, display_citations(item['text'], unit.source), unit.source,
                          display_review(report, unit.source), unit.section_index, 1)
                 by_level[level].append(value)
@@ -118,6 +123,9 @@ class AlignedLessonPipeline(LessonPipeline):
                       for unit, value in zip(plan.units, values, strict=True)]
         if hook := getattr(self.speech, 'prepare_course', None):
             hook(by_level, data.language, signature, progress)
+        by_level = {level: self.speech_reviewed_chunks(values) for level, values in by_level.items()}
+        tuples = [(*value, level, unit.content_unit_id) for level, values in by_level.items()
+                  for unit, value in zip(plan.units, values, strict=True)]
         save_plan(plan)
         save_text(tuples, versions)
         progress.set_workload('speech', len(tuples))
@@ -235,11 +243,14 @@ class AlignedLessonPipeline(LessonPipeline):
                                 for item, unit in zip(texts.units, units, strict=True)])
                             translated = self.models.translate_section(draft, section['source_language'],
                                                                        data.language, learner_level=level)
+                            if warnings := getattr(self.models, "translation_review_warnings", []):
+                                reports = {key: self.models.retain_warnings(report, warnings) for key, report in reports.items()}
                             if len(translated.paragraphs) != len(units):
                                 raise IngestionError('LESSON_ALIGNMENT_TRANSLATION_INVALID', retryable=True)
                             for item, paragraph in zip(texts.units, translated.paragraphs, strict=True):
                                 item.text = paragraph.text
-                        if any(len(item.text.split()) > data.options.max_chunk_words for item in texts.units):
+                        first = getattr(self.models, "preserve_first_draft", False)
+                        if not first and any(len(item.text.split()) > data.options.max_chunk_words for item in texts.units):
                             retained_canonical = False
                             texts, reports = self.models.adapt_units(section, units, data.language,
                                 learner_level=level, profiles=data.level_profiles,
@@ -248,10 +259,10 @@ class AlignedLessonPipeline(LessonPipeline):
                             validate_ids(texts.units, units)
                         values = []
                         for item, unit in zip(texts.units, units, strict=True):
-                            if not retained_canonical and not (reuse and unit.canonical_review is not None
+                            if not first and not retained_canonical and not (reuse and unit.canonical_review is not None
                                                               and item.text == unit.material_text):
                                 item.text = validate_material_format(unit, item.text)
-                            if len(item.text.split()) > data.options.max_chunk_words:
+                            if not first and len(item.text.split()) > data.options.max_chunk_words:
                                 raise UnitSizeError(unit.content_unit_id)
                             report = reports[str(unit.content_unit_id)]
                             flags = [*source_issues(section), *(unit.canonical_review.issues if unit.canonical_review else [])]

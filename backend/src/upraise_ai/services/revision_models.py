@@ -185,6 +185,14 @@ def revise_chunk(models, section, original, feedback, neighbours, *, learner_lev
             LECTURE_REVIEW_JSON_SCHEMA, LectureReview, "chunk_revision_review",
             model_id=models.settings.lesson_review_model_id)
         review = teacher._enforce_math_markup_review(review, draft=turn)
+        if getattr(models, "preserve_first_draft", False):
+            from upraise_ai.services.teaching_v2.review_recovery import review_flag
+            report = legacy_review_report(review, turn.source_pages)
+            if not report.approved:
+                report = models.retain_warnings(report, [review_flag("first-draft teacher update review",
+                    IngestionError("REVISION_REVIEW_REJECTED"), pages=turn.source_pages,
+                    issues=[w.message for w in report.issues])])
+            return draft_text, report, 0
         phase = "revision_finalize"
         notify("FINALIZE")
         models.transport.teaching_prompt = level_prompt("editor")
@@ -194,10 +202,21 @@ def revise_chunk(models, section, original, feedback, neighbours, *, learner_lev
         # not imply an independent post-edit approval or human approval.
         return final_text, legacy_review_report(review, turn.source_pages), edits
     except IngestionError as error:
+        if getattr(models, "preserve_first_draft", False) and phase == "revision_review":
+            from upraise_ai.schemas.lessons import ReviewReport
+            from upraise_ai.services.teaching_v2.review_recovery import FLAG_SUMMARY, review_flag
+            return draft_text, ReviewReport(approved=False, summary=FLAG_SUMMARY,
+                issues=[review_flag("first-draft teacher update review", error, pages=turn.source_pages)]), 0
         if isinstance(error, RevisionModelInvalidOutput):
             models.diagnose(phase, error)
         raise
     except Exception as error:
+        if getattr(models, "preserve_first_draft", False) and phase == "revision_review":
+            from upraise_ai.schemas.lessons import ReviewReport
+            from upraise_ai.services.teaching_v2.review_recovery import FLAG_SUMMARY, review_flag
+            return draft_text, ReviewReport(approved=False, summary=FLAG_SUMMARY,
+                issues=[review_flag("first-draft teacher update review", IngestionError("REVISION_MODEL_INVALID_OUTPUT"),
+                                    pages=turn.source_pages)]), 0
         models.diagnose(phase, error)
         if isinstance(error, ValueError):
             raise RevisionModelInvalidOutput(error, stage=phase, learner_level=learner_level,

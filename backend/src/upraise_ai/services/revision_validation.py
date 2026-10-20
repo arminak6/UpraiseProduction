@@ -4,7 +4,7 @@ import hashlib
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.aligned_lessons import AlignedReview, AlignedText, AlignedTexts, ContentUnit
-from upraise_ai.services.aligned_models import accepted, validate_material_format
+from upraise_ai.services.aligned_models import AlignmentModelError, accepted, validate_material_format
 from upraise_ai.services.lesson_pipeline import write_json
 from upraise_ai.services.revision_models import correct_revision, validate_revision_text
 
@@ -40,9 +40,22 @@ def validate_aligned_revision(models, section, data, selected, neighbours, saved
         raise IngestionError("REVISION_CHECKPOINT_CONFLICT")
     section["revision_context"] = {"teacher_feedback": data.revision_request.teacher_review,
                                    "original_chunk": selected.text}
+
+    def retain_first(text, error):
+        from upraise_ai.schemas.lessons import ReviewReport
+        from upraise_ai.services.teaching_v2.review_recovery import review_flag
+        report = ReviewReport.model_validate(saved["review"])
+        report = models.retain_warnings(report, [review_flag("first-draft teacher update alignment", error,
+            pages=unit.source.citation_numbers,
+            issues=[error.details["reason"]] if getattr(error, "details", {}).get("reason") else [])])
+        saved.update(text=text, review=report.model_dump(), correction_rounds=rounds)
+        write_json(path, saved)
+        return text, rounds
     while True:
         text = validate_material_format(unit, validate_revision_text(saved["text"]))
         if len(text.split()) > data.options.max_chunk_words:
+            if getattr(models, "preserve_first_draft", False):
+                return retain_first(text, IngestionError("REVISION_UNIT_TOO_LARGE"))
             raise IngestionError("REVISION_UNIT_TOO_LARGE")
         saved["text"] = text
         digest = hashlib.sha256(text.encode()).hexdigest()
@@ -53,16 +66,26 @@ def validate_aligned_revision(models, section, data, selected, neighbours, saved
             progress("REVIEW", 0.50 + 0.04 * rounds)
             models.transport.language = data.language
             models.transport.teaching_prompt = None
-            review = reviewer(models, section, [unit],
-                AlignedTexts(units=[AlignedText(content_unit_id=unit.content_unit_id, text=text)]),
-                data.language, data.options.learner_level, data.level_profiles)
+            try:
+                review = reviewer(models, section, [unit],
+                    AlignedTexts(units=[AlignedText(content_unit_id=unit.content_unit_id, text=text)]),
+                    data.language, data.options.learner_level, data.level_profiles)
+            except AlignmentModelError as error:
+                if not getattr(models, "preserve_first_draft", False):
+                    raise
+                return retain_first(text, error)
             saved.update(alignment_review=review.model_dump(mode="json"), alignment_text_sha256=digest)
         if len(review.units) != 1 or review.units[0].content_unit_id != unit.content_unit_id:
+            if getattr(models, "preserve_first_draft", False):
+                return retain_first(text, IngestionError("REVISION_REVIEW_INTEGRITY_FAILURE"))
             raise IngestionError("REVISION_REVIEW_INTEGRITY_FAILURE")
         saved["correction_rounds"] = rounds
         write_json(path, saved)
         if accepted(review):
             return text, rounds
+        if getattr(models, "preserve_first_draft", False):
+            return retain_first(text, RevisionAlignmentRejected(review, learner_level=data.options.learner_level,
+                chunk_id=selected.chunk_id, chunk_index=selected.index, correction_rounds=rounds))
         if rounds >= MAX_ALIGNMENT_CORRECTIONS:
             raise RevisionAlignmentRejected(review, learner_level=data.options.learner_level,
                 chunk_id=selected.chunk_id, chunk_index=selected.index, correction_rounds=rounds)

@@ -234,6 +234,8 @@ class LessonPipeline:
                     progress("TRANSLATE", 0.05+0.55*index/len(sections))
                     draft = self.models.translate_section(draft, section["source_language"], data.language,
                                                           learner_level=data.options.learner_level)
+                    if warnings := getattr(self.models, "translation_review_warnings", []):
+                        report = self.models.retain_warnings(report, warnings)
                 validate_draft(draft, section["pages"])
                 write_json(checkpoint, {"signature": signature, "draft": draft.model_dump(),
                                         "review": report.model_dump(), "revisions": revisions})
@@ -264,8 +266,32 @@ class LessonPipeline:
             all_chunks = hook(all_chunks, data, data.options.learner_level, signature, folder, progress)
         if hook := getattr(self.speech, 'prepare_course', None):
             hook({data.options.learner_level: all_chunks}, data.language, signature, progress)
+        all_chunks = self.speech_reviewed_chunks(all_chunks)
         save_text(all_chunks, versions)
         return self.publish(job, data, all_chunks, versions, signature, progress, save_speech)
+
+    def speech_reviewed_chunks(self, values):
+        """Persist preflight flags with teaching text, including if TTS later fails."""
+        hook = getattr(self.speech, "review_issues", None)
+        if hook is None:
+            return values
+        result = []
+        for value in values:
+            issues = hook(value[0])
+            if issues:
+                # Source display mapping also turns Word/CSV numbers into their
+                # proper block/row references for the teacher review screen.
+                from upraise_ai.services.teaching_v2.review_recovery import FLAG_PREFIX, FLAG_SUMMARY
+                mapped = display_review(ReviewReport(approved=False, summary="Narration needs teacher review.",
+                    issues=[w.model_copy(update={"pages": w.pages or value[2].citation_numbers}) for w in issues]), value[2])
+                report = value[3]
+                combined = {json.dumps(w.model_dump(), sort_keys=True): w for w in [*report.issues, *mapped.issues]}
+                summary = FLAG_SUMMARY if any(w.message.startswith(FLAG_PREFIX) for w in combined.values()) else report.summary
+                report = ReviewReport(approved=False, summary=summary, issues=list(combined.values()),
+                                      revision_instructions=report.revision_instructions)
+                value = (*value[:3], report, *value[4:])
+            result.append(value)
+        return result
 
     def publish(self, job, data, all_chunks, versions, signature, progress, save_speech):
         """Shared speech publication for a legacy lesson or one aligned variant."""
@@ -304,6 +330,8 @@ class LessonPipeline:
                                                "audio_sha256": digest, "engine": engine,
                                                "issues": [issue.model_dump() for issue in speech_issues]})
             engines.add(engine)
+            existing_issues = {(w.category, w.message) for w in report.issues}
+            speech_issues = [w for w in speech_issues if (w.category, w.message) not in existing_issues]
             chunk_report = ReviewReport(approved=report.approved and not speech_issues, summary=report.summary,
                                         issues=[*report.issues, *speech_issues], revision_instructions=report.revision_instructions)
             result_chunks.append(LessonChunk(

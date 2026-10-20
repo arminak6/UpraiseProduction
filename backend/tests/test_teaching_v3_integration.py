@@ -56,11 +56,13 @@ class V3Client(V2Client):
         return {"stopReason": "end_turn", "output": {"message": {"content": [{"text": json.dumps(value)}]}}}
 
 
-def generate_v3(integration, lesson, monkeypatch, *, legacy=False, inconsistent=False, reject_spoken=False, levels=None):
+def generate_v3(integration, lesson, monkeypatch, *, legacy=False, inconsistent=False, reject_spoken=False, levels=None,
+                invalid_evidence=False):
     document = submit(integration)
     integration[4].process(integration[1].claim(integration[0].lease_seconds))
     settings, jobs, worker, service, principal, _ = lesson
     client = V3Client(inconsistent=inconsistent, reject_spoken=reject_spoken)
+    client.invalid_evidence = invalid_evidence
     expected = 3 * len(levels or ["intermediate"])
 
     class TrackedPolly(Polly):
@@ -120,16 +122,32 @@ def test_teaching_v3_worker_prepares_all_scripts_before_tts_and_exposes_version(
     assert models.teaching_versions["course_order"] == "document-order"
 
 
-def test_teaching_v3_inconsistent_course_never_reaches_tts(integration, lesson, monkeypatch):
+def test_teaching_v3_inconsistent_course_finishes_with_persistent_review_flags(integration, lesson, monkeypatch):
     row, _, polly, _, _ = generate_v3(integration, lesson, monkeypatch, inconsistent=True)
-    assert row["status"] == "FAILED" and row["error_code"] == "TEACHING_V3_COURSE_INCONSISTENT"
-    assert not polly.calls
+    assert row["status"] == "DONE" and polly.calls
+    assert row["result"]["lesson_status"] == "DRAFT" and not row["result"]["review_approved"]
+    saved = lesson[1].prepared_chunks(row["job_id"])
+    assert all(any("TEACHING_V3_COURSE_INCONSISTENT" in w["message"] for w in c["reviewer_report"]["issues"]) for c in saved)
 
 
-def test_teaching_v3_wrong_spoken_meaning_never_reaches_tts(integration, lesson, monkeypatch):
+def test_teaching_v3_wrong_spoken_meaning_finishes_with_persistent_review_flags(integration, lesson, monkeypatch):
     row, _, polly, _, _ = generate_v3(integration, lesson, monkeypatch, reject_spoken=True)
-    assert row["status"] == "FAILED" and row["error_code"] == "TEACHING_V3_NARRATION_REJECTED"
-    assert not polly.calls
+    assert row["status"] == "DONE" and polly.calls
+    assert not row["result"]["review_approved"]
+    with api(integration, lesson) as http:
+        review = http.get(f"/v1/lesson-reviews/{row['job_id']}").json()
+        chunks = review["variants"]["intermediate"]["chunks"]
+        assert len(chunks) == 3 and all(not c["reviewer_report"]["approved"] and c["narration_text"] for c in chunks)
+        assert all(any("TEACHING_V3_NARRATION_REJECTED" in w["message"] for w in c["reviewer_report"]["issues"]) for c in chunks)
+
+
+def test_teaching_v3_unreadable_written_and_spoken_reviews_complete_all_parts(integration, lesson, monkeypatch):
+    row, _, polly, _, _ = generate_v3(integration, lesson, monkeypatch, invalid_evidence=True)
+    assert row["status"] == "DONE" and row["attempts"] == 1 and polly.calls, row["error_code"]
+    chunks = lesson[1].prepared_chunks(row["job_id"])
+    assert len(chunks) == 3 and all(not c["reviewer_report"]["approved"] for c in chunks)
+    assert all(any("written material review" in w["message"] for w in c["reviewer_report"]["issues"]) for c in chunks)
+    assert all(any("narration review" in w["message"] for w in c["reviewer_report"]["issues"]) for c in chunks)
 
 
 def test_teaching_v3_every_selected_level_is_preflighted_before_any_audio(integration, lesson, monkeypatch):

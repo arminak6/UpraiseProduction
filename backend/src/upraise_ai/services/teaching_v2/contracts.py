@@ -139,10 +139,17 @@ def validate_written(text):
     # Literal syntax is legitimate inside explicitly marked programming examples.
     notation = re.sub(r"```[\s\S]*?```|`[^`\n]+`", " ", text)
     prose = _MATH_PATTERN.sub(" ", notation)
-    if (not text.strip() or r"\n" in prose
-            or re.search(r"\\n(?![A-Za-z])|\\u[0-9a-fA-F]{4}|\\\\[()[\]]", notation)
-            or any(ord(char) < 32 and char not in "\n\r\t" for char in text)):
-        raise IngestionError("TEACHING_V2_TEXT_INVALID", retryable=True)
+    problem = next((code for code, invalid in (
+        ("EMPTY_TEXT", not text.strip()),
+        ("LITERAL_NEWLINE_ESCAPE", r"\n" in prose or re.search(r"\\n(?![A-Za-z])", notation)),
+        ("LITERAL_UNICODE_ESCAPE", re.search(r"\\u[0-9a-fA-F]{4}", notation)),
+        ("DOUBLE_ESCAPED_MATH_DELIMITER", re.search(r"\\\\[()[\]]", notation)),
+        ("CONTROL_CHARACTER", any(ord(char) < 32 and char not in "\n\r\t" for char in text)),
+    ) if invalid), None)
+    if problem:
+        error = IngestionError("TEACHING_V2_TEXT_INVALID", retryable=True)
+        error.details = {"stage": "teaching_v2_text_format", "problem": problem}
+        raise error
 
 
 def validate_spoken(text):

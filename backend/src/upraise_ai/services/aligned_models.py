@@ -292,25 +292,42 @@ def adapt_units(models, section, units, language, *, learner_level, profiles, ta
         learner_level, "generator", profiles=profiles), payload, AlignedTexts, "aligned_unit_draft", expected_units=units)
     if notify:
         notify("REVIEW")
-    review = reviewed(models, section, units, drafts, language, learner_level, profiles)
-    payload.update(draft=drafts.model_dump(mode="json"), review=review.model_dump(mode="json"))
-    if notify:
-        notify("FINALIZE")
-    # Match the original teacher: retain an approved draft; otherwise the editor
-    # applies source-review feedback. A separate fourth judge is deferred.
-    if accepted(review):
-        final = drafts.model_copy(deep=True)
-    else:
-        final = structured(models, POLICY + limits + "\n" + learner_level_system_prompt(
-            learner_level, "editor", profiles=profiles), payload, AlignedTexts, "aligned_unit_final", expected_units=units)
-    if any(len(output.text.split()) > max_words for output in final.units):
+    reports = None
+    first = getattr(models, "preserve_first_draft", False)
+    try:
+        review = reviewed(models, section, units, drafts, language, learner_level, profiles)
+        payload.update(draft=drafts.model_dump(mode="json"), review=review.model_dump(mode="json"))
+        if notify:
+            notify("FINALIZE")
+        # Match the original teacher's review/edit flow. V2/V3 separately review
+        # the final material below; unavailable review never means approval.
+        if accepted(review) or first:
+            final = drafts.model_copy(deep=True)
+            if first and not accepted(review):
+                from upraise_ai.services.teaching_v2.review_recovery import review_flag
+                reports = {str(u.content_unit_id): models.retain_warnings(report,
+                    [review_flag("first-draft difficulty review", IngestionError("LESSON_ALIGNMENT_REVIEW_REJECTED"),
+                        pages=u.source.citation_numbers, issues=[w.message for w in report.issues])])
+                    for u, report in zip(units, draft_reports(units, review).values(), strict=True)}
+        else:
+            final = structured(models, POLICY + limits + "\n" + learner_level_system_prompt(
+                learner_level, "editor", profiles=profiles), payload, AlignedTexts, "aligned_unit_final", expected_units=units)
+    except AlignmentModelError as error:
+        if not getattr(models, "draft_review_recovery", False) or error.stage not in {"aligned_unit_review", "aligned_unit_final"}:
+            raise
+        from upraise_ai.services.teaching_v2.review_recovery import FLAG_SUMMARY, review_flag
+        final = drafts
+        reports = {str(u.content_unit_id): ReviewReport(approved=False, summary=FLAG_SUMMARY,
+            issues=[review_flag("difficulty adaptation review", error, pages=u.source.citation_numbers)]) for u in units}
+    if not first and any(len(output.text.split()) > max_words for output in final.units):
         payload['draft'] = final.model_dump(mode='json')
         payload['length_correction'] = 'Shorten every oversized unit without dropping its required material. Keep all unit IDs.'
         final = structured(models, POLICY + limits + '\n' + learner_level_system_prompt(
             learner_level, 'editor', profiles=profiles), payload, AlignedTexts, 'aligned_unit_shorten', expected_units=units)
     # Preserve hard format/identity/source bounds after editing, as in V3.
     for unit, output in zip(units, final.units, strict=True):
-        output.text = validate_material_format(unit, models.teacher._normalize_page_citations(output.text))
-        if len(output.text.split()) > max_words:
+        if not first:
+            output.text = validate_material_format(unit, models.teacher._normalize_page_citations(output.text))
+        if not first and len(output.text.split()) > max_words:
             raise UnitSizeError(unit.content_unit_id)
-    return final, draft_reports(units, review)
+    return final, reports if reports is not None else draft_reports(units, review)

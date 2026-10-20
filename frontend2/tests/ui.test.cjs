@@ -508,6 +508,24 @@ test("an uncertain revision is never automatically resubmitted", async t => {
   assert.equal(h.backend.records("POST", "/v1/audio:regenerate").length, 1);
 });
 
+test("unresolved automated reviews visibly flag only the affected part and expose escaped findings", async t => {
+  const h = await harness(backend => {
+    backend.bundles.get(id(10)).variants.beginner.chunks[0].reviewer_report = {
+      approved: false, summary: "DRAFT; human review required.",
+      issues: [{ message: "Human review required: invalid evidence <img src=x>." }],
+    };
+  }); t.after(h.close);
+  await h.navigate("review"); h.click(`[data-action="review-course"][data-id="${id(10)}"]`); await h.settle();
+  assert.match(h.find(".review-flag-banner").textContent, /Generation continued/);
+  assert.match(h.find("#review-part").options[0].textContent, /Needs review/);
+  assert.doesNotMatch(h.find("#review-part").options[1].textContent, /Needs review/);
+  assert.equal(h.find(".advanced").open, true);
+  assert.match(h.find(".review-findings").textContent, /<img src=x>/);
+  assert.equal(h.document.querySelectorAll(".review-findings img").length, 0);
+  h.click('[data-action="review-next"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".review-flag-banner").length, 0);
+});
+
 test("teacher review opens an existing course and preserves per-part feedback through navigation", async t => {
   const h = await harness(); t.after(h.close);
   assert.equal(h.document.querySelectorAll("[data-nav]").length, 4);

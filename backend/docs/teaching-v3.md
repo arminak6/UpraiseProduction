@@ -7,6 +7,23 @@ request identity. Existing courses are not regenerated or replaced.
 
 ## Course generation
 
+New V3 generation uses its **flag and continue** DRAFT policy
+(`draft_review_recovery=flag-draft-for-human-review-v1`). Invalid/unreadable
+automated reviews, exhausted factual or narration corrections, and unresolved
+course conflicts/continuity add explicit human-review findings to the affected
+parts. Every later part still receives its review. Structurally valid current
+text can remain unverified; known rejected material uses exact primary excerpts
+or a visible gap. A usable spoken script may remain flagged; without one, a
+short review notice is spoken. Flags survive retries and are persisted with
+durable teaching text before TTS, as well as in course manifests and protected
+checkpoints. The Review page marks affected parts and expands their findings.
+V2.8 now has a separate first-draft retention policy; V3 retains its own
+bounded correction and source-excerpt/gap behavior described here.
+Unavailable review is never recorded as approval. Source/citation/identity/
+format/size bounds, actual storage/TTS failures and A7's strict gates remain.
+The shared recovery also handles malformed generated writing before review;
+source/gap replacement still passes local text-format validation.
+
 1. Authorized, active-attempt sources are selected before writing. Every source
    window receives a plan with a descriptive topic and selected original concept/
    definition excerpts. The model selects explicit source indices; software copies
@@ -52,10 +69,10 @@ request identity. Existing courses are not regenerated or replaced.
    and a supported ending. Suspected cross-part contradictions receive independent
    verification: comparing different models, grammar and faithful source ambiguity
    are not automatically factual contradictions. Confirmed unresolved contradictions
-   fail; source/presentation concerns remain teacher-visible warnings. Completeness
+   flag the affected DRAFT parts; source/presentation concerns remain warnings. Completeness
    accusations also receive independent verification: absent derivations or
    distributional assumptions are source warnings, not new teaching requirements. Normal prose
-   with unresolved continuity failures fails after bounded correction. Exact-source
+   with unresolved continuity failures is flagged after bounded correction. Exact-source
    DRAFTs can retain editing warnings rather than inventing unsupported repairs.
 
 ## Text and voice
@@ -69,7 +86,7 @@ preserves questions as questions, and cannot add new examples, answers, distribu
 assumptions, significance thresholds or repaired formulas.
 
 An independent meaning/language/completeness/naturalness review, per-written-
-paragraph spoken coverage checks AND host-bound entailment against the CURRENT written text must pass. Context helps interpretation
+paragraph spoken coverage checks AND host-bound entailment against the CURRENT written text are attempted. Unresolved checks flag new DRAFT narration for human review. Context helps interpretation
 and transitions; it cannot authorize new scientific facts in the voice. Binomial
 coefficients use their actual operands ("a choose b"), and matrices, subscripts,
 conditioning, cardinalities and fixed/expected quantities retain their meaning.
@@ -79,7 +96,7 @@ teaching unit, preserving alternative-case framing across paragraphs. Typed find
 separate genuinely missing available meaning from equivalent wording, source damage
 and source ambiguity. Repeated headings and unexplained extraction fragments are
 not required speech. Source gaps become teacher-visible warnings; missing available
-equations, operators, conditions or assertions still block generation. Forward
+equations, operators, conditions or assertions require correction or a visible DRAFT flag. Forward
 entailment always runs first, so this resolution cannot authorize new spoken claims.
 
 The first narration uses the generation model. Bounded corrections use the separate
@@ -91,12 +108,12 @@ precision, format, meaning and coverage gates.
 Decimal quantities retain their exact numeric values, including leading zeroes.
 Conservative English number-word normalization only applies when the parsed value
 matches a value in the current written teaching. Missing values receive a narrow
-numeric-format repair with no wider course context; incorrect precision still fails.
+numeric-format repair with no wider course context; unresolved precision uses a flagged review notice if no usable script is available.
 Integer operands can use words. Other mathematical notation retains independent
 meaning checks rather than document-specific substitution rules.
 
 The full spoken sequence receives the same boundary/consistency review after all
-scripts exist. Actual spoken continuity problems cannot synthesize after bounded
+scripts exist. Actual spoken continuity problems retain human-review flags after bounded
 corrections. Independently verified source-ambiguity warnings remain in the saved
 teacher report; source warnings do not approve changed mathematical meaning.
 Verified scripts are cached by complete course text/order, policy, plan, language,

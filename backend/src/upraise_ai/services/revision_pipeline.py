@@ -150,6 +150,8 @@ class RevisionPipeline(LessonPipeline):
                 draft = self.models.translate_section(SectionDraft(paragraphs=[{"text": text, "pages": pages}]),
                     section["source_language"], data.language, learner_level=data.options.learner_level)
                 text = validate_revision_text("\n\n".join(paragraph.text for paragraph in draft.paragraphs))
+                if warnings := getattr(self.models, "translation_review_warnings", []):
+                    report = self.models.retain_warnings(report, warnings)
             flags = source_issues(section)
             report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
                                   issues=[*report.issues, *flags], revision_instructions=report.revision_instructions)
@@ -160,6 +162,7 @@ class RevisionPipeline(LessonPipeline):
         if revision.aligned_unit:
             text, correction_rounds = validate_aligned_revision(self.models, section, data, selected, neighbours,
                 saved, checkpoint_path, progress, reviewed)
+            report = ReviewReport.model_validate(saved["review"])
             edits = saved["edits"]
         final_check = getattr(self.models, "check_written", None)
         if final_check:

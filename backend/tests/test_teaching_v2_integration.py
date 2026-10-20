@@ -19,13 +19,16 @@ pytest_plugins = ["test_a1_integration", "test_a3_integration"]
 
 
 class V2Client:
-    def __init__(self, reject_narration=False, material_failures=0, material_warnings=False, reject_entailment=False, invalid_evidence=False):
+    def __init__(self, reject_narration=False, material_failures=0, material_warnings=False, reject_entailment=False, invalid_evidence=False,
+                 malformed_written=False, long_adaptation=False):
         self.calls = []
         self.reject_narration = reject_narration
         self.material_failures = material_failures
         self.material_warnings = material_warnings
         self.reject_entailment = reject_entailment
         self.invalid_evidence = invalid_evidence
+        self.malformed_written = malformed_written
+        self.long_adaptation = long_adaptation
 
     def converse(self, **request):
         self.calls.append(request)
@@ -69,6 +72,8 @@ class V2Client:
                 value = {**MATERIAL_PASS, "natural": False, "warnings": [{"category": "source_gap",
                     "message": "The source does not define the calibration procedure."}]}
         elif "paragraphs" in properties:
+            if self.malformed_written:
+                value = r"The supported feature has value three.\nThis is malformed generated formatting."
             value = {"paragraphs": [{"text": value, "pages": [1]}]}
         elif "text" in properties:
             value = {"text": "Three is the observed value of the supported feature."}
@@ -81,6 +86,9 @@ class V2Client:
             else:
                 value = {"units": [{"content_unit_id": unit["content_unit_id"], "text": unit["material_text"]}
                                    for unit in payload["units"]]}
+                if self.long_adaptation:
+                    for item in value["units"]:
+                        item["text"] += " The supported value is three." * 30
         elif "approved" in properties:
             value = review_data()
         elif "lecture_text" in properties:
@@ -93,11 +101,13 @@ class V2Client:
         return {"stopReason": "end_turn", "output": {"message": {"content": [{"text": value}]}}}
 
 
-def generate(integration, lesson, monkeypatch, *, reject_narration=False, material_failures=0, material_warnings=False, reject_entailment=False, invalid_evidence=False):
+def generate(integration, lesson, monkeypatch, *, reject_narration=False, material_failures=0, material_warnings=False, reject_entailment=False, invalid_evidence=False,
+             malformed_written=False, long_adaptation=False, levels=None):
     doc = submit(integration)
     integration[4].process(integration[1].claim(integration[0].lease_seconds))
     settings, jobs, worker, service, principal, _ = lesson
-    client, polly = V2Client(reject_narration, material_failures, material_warnings, reject_entailment, invalid_evidence), Polly()
+    client, polly = V2Client(reject_narration, material_failures, material_warnings, reject_entailment, invalid_evidence,
+                             malformed_written, long_adaptation), Polly()
     models = TeachingModelsV2(settings, client, diagnostic_dir=settings.data_dir / "v2-test/models")
     voice = TeachingSpeechV2(settings, models, client=polly)
     factories = []
@@ -115,7 +125,7 @@ def generate(integration, lesson, monkeypatch, *, reject_narration=False, materi
     monkeypatch.setattr("upraise_ai.services.teaching_v2.TeachingSpeechV2", speech_factory)
     worker.models = worker.speech = None
     data = AlignedLessonInput.model_validate(request_data(document_ids=[doc["document_id"]], teaching_version="v2",
-        levels=["intermediate"], options={"target_chunk_words": 30, "max_chunk_words": 100}))
+        levels=levels or ["intermediate"], options={"target_chunk_words": 30, "max_chunk_words": 100}))
     result = service.submit(data, principal, "v2-only")
     job = jobs.claim(settings.lease_seconds, [settings.lesson_signature, settings.lesson_v2_signature])
     worker.process(job)
@@ -173,29 +183,101 @@ def test_teaching_v2_api_worker_saves_written_and_spoken_versions_separately_and
     assert lesson[3].result(lesson[1].get(row["job_id"])).variants["intermediate"].versions["teaching_version"] == "v2"
 
 
-def test_teaching_v2_failed_meaning_review_never_synthesizes_or_publishes(integration, lesson, monkeypatch):
+def test_teaching_v2_malformed_written_format_keeps_first_text_with_visible_findings(integration, lesson, monkeypatch):
+    row, _, _, polly, _ = generate(integration, lesson, monkeypatch, malformed_written=True)
+    assert row["status"] == "DONE" and row["attempts"] == 1 and polly.calls, row["error_code"]
+    saved = lesson[1].prepared_chunks(row["job_id"])
+    assert saved and all("malformed generated formatting" in c["text"] and r"\n" in c["text"] for c in saved)
+    with api(integration, lesson) as http:
+        review = http.get(f"/v1/lesson-reviews/{row['job_id']}").json()
+        report = review["variants"]["intermediate"]["chunks"][0]["reviewer_report"]
+        assert not report["approved"]
+        assert any("TEACHING_V2_TEXT_INVALID" in w["message"] and "LITERAL_NEWLINE_ESCAPE" in w["message"]
+                   for w in report["issues"])
+
+
+def test_teaching_v2_failed_meaning_review_finishes_with_durable_human_review_flag(integration, lesson, monkeypatch):
     row, _, _, polly, _ = generate(integration, lesson, monkeypatch, reject_narration=True)
-    assert row["status"] != "DONE" and row["error_code"] == "TEACHING_V2_NARRATION_REJECTED"
-    assert not polly.calls
-    assert not (lesson[2].staging.job_dir(str(row["job_id"])) / "result.json").exists()
+    assert row["status"] == "DONE" and row["error_code"] is None and polly.calls
+    assert row["result"]["lesson_status"] == "DRAFT" and not row["result"]["review_approved"]
+    saved = lesson[1].prepared_chunks(row["job_id"])
+    assert all(any("TEACHING_V2_NARRATION_REJECTED" in w["message"] for w in c["reviewer_report"]["issues"]) for c in saved)
+    with api(integration, lesson) as http:
+        review = http.get(f"/v1/lesson-reviews/{row['job_id']}").json()
+        report = review["variants"]["intermediate"]["chunks"][0]["reviewer_report"]
+        assert not report["approved"] and any("Wrong formula meaning" in w["message"] for w in report["issues"])
 
 
-def test_teaching_v2_entailment_replaces_rejected_prose_with_flagged_source_copy(integration, lesson, monkeypatch):
+def test_teaching_v2_oversized_first_adaptation_is_flagged_without_rewriting_or_changing_shared_units(integration, lesson, monkeypatch):
+    row, _, client, polly, _ = generate(integration, lesson, monkeypatch, long_adaptation=True,
+                                       levels=["beginner", "intermediate"])
+    assert row["status"] == "DONE" and row["attempts"] == 1 and polly.calls, row["error_code"]
+    bundle = lesson[3].result(row)
+    beginner, intermediate = bundle.variants["beginner"], bundle.variants["intermediate"]
+    assert beginner.chunks[0].content_unit_id == intermediate.chunks[0].content_unit_id
+    assert len(beginner.chunks[0].text.split()) > 100
+    assert any("LESSON_UNIT_TOO_LARGE" in w.message for w in beginner.chunks[0].reviewer_report.issues)
+    assert not any("aligned_unit_shorten" in json.dumps(c.get("outputConfig")) for c in client.calls)
+
+
+def test_teaching_v2_human_revision_keeps_candidate_when_final_reviewer_is_unreadable(integration, lesson, monkeypatch):
+    row, _, client, _, _ = generate(integration, lesson, monkeypatch)
+    chunk = lesson[1].prepared_chunks(row["job_id"])[0]
+    client.invalid_evidence = True
+    with api(integration, lesson) as http:
+        accepted = http.post("/v1/audio:regenerate", json={"lesson_job_id": str(row["job_id"]),
+            "chunk_id": str(chunk["chunk_id"]), "teacher_review": "Clarify the supported value."})
+        assert accepted.status_code == 202, accepted.text
+    settings, jobs, worker, service, _, _ = lesson
+    revision = jobs.claim(settings.lease_seconds, [settings.lesson_signature, settings.lesson_v2_signature])
+    worker.process(revision)
+    completed = jobs.get(revision["job_id"])
+    assert completed["status"] == "DONE", completed["error_code"]
+    report = service.result(jobs.get(row["job_id"])).variants["intermediate"].reviewer_report
+    assert not report.approved and any("PARAGRAPH_EVIDENCE_INVALID" in w.message for w in report.issues)
+
+
+def test_teaching_v2_human_revision_retains_first_update_on_alignment_rejection_without_editor_rewrites(integration, lesson, monkeypatch):
+    from upraise_ai.schemas.aligned_lessons import AlignedReview
+    row, _, client, _, _ = generate(integration, lesson, monkeypatch)
+    chunk = lesson[1].prepared_chunks(row["job_id"])[0]
+    def reject(models, section, units, *args):
+        return AlignedReview(units=[{"content_unit_id": units[0].content_unit_id,
+            "material_preserved": False, "level_suitable": True, "in_language": True,
+            "issues": ["A human must check the retained value."], "revision_instructions": []}])
+    monkeypatch.setattr("upraise_ai.services.revision_pipeline.reviewed", reject)
+    with api(integration, lesson) as http:
+        accepted = http.post("/v1/audio:regenerate", json={"lesson_job_id": str(row["job_id"]),
+            "chunk_id": str(chunk["chunk_id"]), "teacher_review": "Clarify the supported value."})
+        assert accepted.status_code == 202, accepted.text
+    settings, jobs, worker, service, _, _ = lesson
+    revision = jobs.claim(settings.lease_seconds, [settings.lesson_signature, settings.lesson_v2_signature])
+    worker.process(revision)
+    completed = jobs.get(revision["job_id"])
+    assert completed["status"] == "DONE", completed["error_code"]
+    report = service.result(jobs.get(row["job_id"])).variants["intermediate"].reviewer_report
+    assert not report.approved and any("A human must check the retained value." in w.message for w in report.issues)
+    assert not any("chunk_revision_alignment_correction" in json.dumps(c.get("outputConfig")) or
+                   "chunk_revision_finalize" in json.dumps(c.get("outputConfig")) for c in client.calls)
+
+
+def test_teaching_v2_entailment_failure_retains_first_prose_and_flags_for_human_editing(integration, lesson, monkeypatch):
     row, _, client, polly, _ = generate(integration, lesson, monkeypatch, reject_entailment=True)
     assert row["status"] == "DONE", row["error_code"]
     assert polly.calls and row["result"]["lesson_status"] == "DRAFT"
     repairs = [call for call in client.calls if "teaching_v2_material_correction" in json.dumps(call.get("outputConfig"))]
-    assert len(repairs) == 2
+    assert len(repairs) == 0
     saved = lesson[1].prepared_chunks(row["job_id"])
-    assert saved and all("The supported feature has value three." not in part["text"] for part in saved)
-    assert all(not part["reviewer_report"]["approved"] and "Source-excerpt DRAFT" in part["reviewer_report"]["summary"]
+    assert saved and all("The supported feature has value three." in part["text"] for part in saved)
+    assert all(not part["reviewer_report"]["approved"] and "human review required" in part["reviewer_report"]["summary"]
                for part in saved)
 
 
-def test_teaching_v2_source_excerpt_does_not_bypass_spoken_meaning_review(integration, lesson, monkeypatch):
+def test_teaching_v2_source_excerpt_keeps_unresolved_spoken_meaning_flags(integration, lesson, monkeypatch):
     row, _, _, polly, _ = generate(integration, lesson, monkeypatch, reject_entailment=True, reject_narration=True)
-    assert row["status"] != "DONE" and row["error_code"] == "TEACHING_V2_NARRATION_REJECTED"
-    assert not polly.calls
+    assert row["status"] == "DONE" and polly.calls
+    report = lesson[3].result(row).variants["intermediate"].reviewer_report
+    assert not report.approved and any("TEACHING_V2_NARRATION_REJECTED" in w.message for w in report.issues)
 
 
 def test_teaching_v2_invalid_quote_recovery_completes_actual_worker_flow(integration, lesson, monkeypatch):
@@ -204,31 +286,34 @@ def test_teaching_v2_invalid_quote_recovery_completes_actual_worker_flow(integra
     assert polly.calls and any("teaching_v2_paragraph_entailment" in json.dumps(call.get("outputConfig")) for call in client.calls)
 
 
-def test_teaching_v2_invalid_references_expose_safe_stage_and_clear_on_cleanup(integration, lesson, monkeypatch):
+def test_teaching_v2_invalid_references_are_teacher_visible_without_failing_job(integration, lesson, monkeypatch):
     row, _, _, polly, _ = generate(integration, lesson, monkeypatch, invalid_evidence=True)
-    assert row["status"] == "FAILED" and row["attempts"] == 1 and not polly.calls
-    assert row["error_code"] == "TEACHING_V2_REVIEW_EVIDENCE_INVALID"
+    assert row["status"] == "DONE" and row["attempts"] == 1 and polly.calls
+    assert row["error_code"] is None and not row["result"]["review_approved"]
     with api(integration, lesson) as http:
         status = http.get(f"/v1/jobs/{row['job_id']}").json()
-        assert status["error"]["stage"] == "teaching_v2_entailment"
-        assert status["error"]["source_window"] == [1, 1]
-        assert status["error"]["problem"] == "PARAGRAPH_EVIDENCE_INVALID"
+        assert status["error"] is None
+        review = http.get(f"/v1/lesson-reviews/{row['job_id']}").json()
+        report = review["variants"]["intermediate"]["chunks"][0]["reviewer_report"]
+        assert not report["approved"] and any("PARAGRAPH_EVIDENCE_INVALID" in w["message"] and w["pages"] == [1]
+                                             for w in report["issues"])
         app.dependency_overrides[ingress] = lambda: replace(lesson[4], client_id="another-client")
         assert http.get(f"/v1/jobs/{row['job_id']}").status_code == 404
         app.dependency_overrides[ingress] = lambda: lesson[4]
         assert http.delete(f"/v1/jobs/{row['job_id']}?reason=RECEIVED").status_code == 204
-        assert "stage" not in http.get(f"/v1/jobs/{row['job_id']}").json()["error"]
+        assert http.get(f"/v1/jobs/{row['job_id']}").json()["error"] is None
     with psycopg.connect(lesson[0].audit_dsn.get_secret_value()) as conn:
         records = conn.execute("SELECT details FROM lesson_audit WHERE job_id=%s", (row['job_id'],)).fetchall()
     assert "PARAGRAPH_EVIDENCE_INVALID" not in json.dumps(records)
 
 
-def test_teaching_v2_feedback_correction_recovers_before_speech(integration, lesson, monkeypatch):
+def test_teaching_v2_factual_finding_is_saved_without_rewriting_the_first_candidate(integration, lesson, monkeypatch):
     row, _, client, polly, _ = generate(integration, lesson, monkeypatch, material_failures=1)
     assert row["status"] == "DONE", row["error_code"]
     repairs = [call for call in client.calls if "teaching_v2_material_correction" in json.dumps(call.get("outputConfig"))]
-    assert len(repairs) == 1 and polly.calls
-    assert "Retain the supported feature value of three." in json.dumps(repairs[0])
+    assert len(repairs) == 0 and polly.calls
+    saved = lesson[1].prepared_chunks(row["job_id"])
+    assert all("Retain the supported feature value of three." in json.dumps(c["reviewer_report"]) for c in saved)
 
 
 def test_teaching_v2_source_gap_warnings_finish_as_draft_and_are_visible_to_teacher(integration, lesson, monkeypatch):
@@ -272,14 +357,14 @@ def test_teaching_v2_exhausted_material_review_finishes_flagged_draft_and_dispos
     row, _, client, polly, _ = generate(integration, lesson, monkeypatch, material_failures=100)
     assert row["status"] == "DONE" and row["attempts"] == 1 and polly.calls, row["error_code"]
     assert row["result"]["lesson_status"] == "DRAFT"
-    assert len([call for call in client.calls if "teaching_v2_material_correction" in json.dumps(call.get("outputConfig"))]) == 2
+    assert len([call for call in client.calls if "teaching_v2_material_correction" in json.dumps(call.get("outputConfig"))]) == 0
     assert (lesson[2].staging.job_dir(str(row["job_id"])) / "teaching-v2-material").is_dir()
     with api(integration, lesson) as http:
         status = http.get(f"/v1/jobs/{row['job_id']}")
         assert status.status_code == 200
         review = http.get(f"/v1/lesson-reviews/{row['job_id']}").json()
         report = review["variants"]["intermediate"]["chunks"][0]["reviewer_report"]
-        assert not report["approved"] and any("Teacher editing required" in issue["message"] for issue in report["issues"])
+        assert not report["approved"] and any("Human review required" in issue["message"] for issue in report["issues"])
         app.dependency_overrides[ingress] = lambda: replace(lesson[4], client_id="another-client")
         assert http.get(f"/v1/jobs/{row['job_id']}").status_code == 404
         app.dependency_overrides[ingress] = lambda: lesson[4]
