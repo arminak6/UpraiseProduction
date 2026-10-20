@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+from psycopg.types.json import Jsonb
 from test_a3_integration import accept, api, process
 
 from upraise_ai.guards.ingress import ingress
@@ -31,12 +32,58 @@ def test_a8_ready_metadata_is_read_only_and_has_no_lesson_content(integration, l
         assert item["language"] == before["metadata"]["language"]
         assert item["chunk_count"] == before["result"]["chunk_count"]
         assert item["expires_at"]
+        assert item["teaching_version"] == "v1"  # Historical requests omitted the V1 default.
         assert set(item) == {"job_id", "lesson_id", "course_id", "activity_id", "language", "voice",
                              "learner_level", "chunk_count", "status", "label", "requires_review",
-                             "review_issue_count", "created_at", "expires_at"}
+                             "review_issue_count", "created_at", "expires_at", "teaching_version"}
         # Listing is repeatable and does not acknowledge or change a generation.
         assert client.get("/v1/lesson-jobs").json() == [item]
     assert lesson[1].get(target["job_id"]) == before
+
+
+@pytest.mark.parametrize("version,policy", [
+    ("v2", "teaching-narration-v2.7"),
+    ("v2", "teaching-narration-v2.8"),
+    ("v3", "continuous-teaching-v3.0"),
+])
+def test_a8_exposes_stored_course_provenance_without_rewriting_it(integration, lesson, version, policy):
+    target, _, _ = completed(integration, lesson)
+    with lesson[1].connect() as conn:
+        conn.execute("UPDATE lesson_jobs SET metadata=metadata || %s WHERE job_id=%s",
+                     (Jsonb({"teaching_version": version}), target["job_id"]))
+        conn.execute("UPDATE prepared_lesson_chunks SET versions=versions || %s WHERE job_id=%s",
+                     (Jsonb({"teaching_version": version, "teaching_policy": policy}), target["job_id"]))
+    before = lesson[1].get(target["job_id"])
+    chunks = lesson[1].prepared_chunks(target["job_id"])
+    with api(integration, lesson) as client:
+        item, = client.get("/v1/lesson-jobs").json()
+        assert item["teaching_version"] == version
+        assert item["teaching_policy"] == policy
+        assert not {"text", "ssml", "versions"}.intersection(item)
+    assert lesson[1].get(target["job_id"]) == before
+    assert lesson[1].prepared_chunks(target["job_id"]) == chunks
+
+
+def test_a8_policy_is_scoped_to_the_listed_level_and_omits_mixed_revisions(integration, lesson, monkeypatch):
+    from test_a3_v2_integration import accept_bundle
+
+    row, _, _ = accept_bundle(integration, lesson, monkeypatch)
+    with lesson[1].connect() as conn:
+        conn.execute("UPDATE lesson_jobs SET metadata=metadata || %s WHERE job_id=%s",
+                     (Jsonb({"teaching_version": "v2"}), row["job_id"]))
+        for level, policy in [("beginner", "teaching-narration-v2.7"),
+                              ("intermediate", "teaching-narration-v2.8")]:
+            conn.execute("UPDATE prepared_lesson_chunks SET versions=versions || %s WHERE job_id=%s AND level_key=%s",
+                         (Jsonb({"teaching_policy": policy}), row["job_id"], level))
+        # An updated part cannot relabel every part as the newer minor revision.
+        conn.execute("UPDATE prepared_lesson_chunks SET versions=versions || %s WHERE job_id=%s AND chunk_index=0",
+                     (Jsonb({"teaching_policy": "teaching-narration-v2.8"}), row["job_id"]))
+    with api(integration, lesson) as client:
+        catalog = {item["learner_level"]: item for item in client.get("/v1/lesson-jobs").json()}
+    assert catalog["intermediate"]["teaching_policy"] == "teaching-narration-v2.8"
+    assert "teaching_policy" not in catalog["beginner"]
+    assert "teaching_policy" not in catalog["advanced"]
+    assert all(item["teaching_version"] == "v2" for item in catalog.values())
 
 
 @pytest.mark.parametrize("principal_change, expected", [

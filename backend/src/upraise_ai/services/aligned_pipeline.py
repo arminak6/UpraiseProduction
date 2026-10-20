@@ -49,6 +49,8 @@ class AlignedLessonPipeline(LessonPipeline):
         folder = self.staging.job_dir(str(job['job_id']))
         self._variant_folder = folder
         sections = plan_sections(documents, data.options.source_window_pages)
+        if hook := getattr(self.models, 'plan_course', None):
+            sections = hook(sections, data, folder, progress)
         if not sections:
             raise IngestionError('LESSON_SOURCE_EMPTY')
         self.speech.validate_voice(data.voice, data.language)
@@ -109,6 +111,13 @@ class AlignedLessonPipeline(LessonPipeline):
                 by_level[level].append(value)
                 tuples.append((*value, level, unit.content_unit_id))
         # Both durable plan and all finalized text commit before the first TTS request.
+        if hook := getattr(self.models, 'finish_course', None):
+            by_level = {level: hook(values, data, level, signature, folder, progress)
+                        for level, values in by_level.items()}
+            tuples = [(*value, level, unit.content_unit_id) for level, values in by_level.items()
+                      for unit, value in zip(plan.units, values, strict=True)]
+        if hook := getattr(self.speech, 'prepare_course', None):
+            hook(by_level, data.language, signature, progress)
         save_plan(plan)
         save_text(tuples, versions)
         progress.set_workload('speech', len(tuples))
@@ -155,7 +164,10 @@ class AlignedLessonPipeline(LessonPipeline):
                 validate_draft(draft, section['pages'])
                 write_json(path, {'signature': signature, 'draft': draft.model_dump(), 'review': report.model_dump()})
             validate_draft(draft, section['pages'])
-            for piece, pages in segment(draft, data.options.target_chunk_words):
+            if hook := getattr(self.models, 'remember_section', None):
+                hook(index, draft)
+            segmenter = getattr(self.models, 'segment_section', segment)
+            for piece, pages in segmenter(draft, data.options.target_chunk_words):
                 source = lesson_source(section, pages)
                 units.append(ContentUnit(content_unit_id=uuid5(NAMESPACE_URL,
                     f"upraise:unit:{job['job_id']}:{index}:{len(units)}:{piece}"), index=len(units),
@@ -178,7 +190,9 @@ class AlignedLessonPipeline(LessonPipeline):
             if len(unit.material_text.split()) < threshold:
                 units.append(unit)
                 continue
-            pieces = split_words(unit.material_text, max(15, len(unit.material_text.split()) // 2))
+            refiner = getattr(self.models, 'refine_unit', None)
+            pieces = (refiner(unit) if refiner else
+                      split_words(unit.material_text, max(15, len(unit.material_text.split()) // 2)))
             if len(pieces) < 2:
                 raise IngestionError('LESSON_UNIT_TOO_LARGE')
             for index, piece in enumerate(pieces):

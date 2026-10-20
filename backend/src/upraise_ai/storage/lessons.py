@@ -200,11 +200,19 @@ class LessonRepository(JobRepository):
         )""")
         with self.connect() as conn:
             return conn.execute(
-                """SELECT j.*, levels.value AS catalog_level FROM lesson_jobs AS j
+                """SELECT j.*, levels.value AS catalog_level, provenance.teaching_policy
+                FROM lesson_jobs AS j
                 CROSS JOIN LATERAL jsonb_array_elements_text(
                     COALESCE(j.result->'levels',jsonb_build_array(
                         COALESCE(j.metadata->'options'->>'learner_level','intermediate')))
-                ) WITH ORDINALITY AS levels(value,position) WHERE """ + " AND ".join(filters)
+                ) WITH ORDINALITY AS levels(value,position)
+                LEFT JOIN LATERAL (
+                    SELECT CASE WHEN count(DISTINCT p.versions->>'teaching_policy')=1
+                        AND count(p.versions->>'teaching_policy')=count(*)
+                        THEN min(p.versions->>'teaching_policy') END AS teaching_policy
+                    FROM prepared_lesson_chunks p WHERE p.job_id=j.job_id AND p.level_key=
+                        CASE WHEN j.metadata->>'generation_version'='a3-v2' THEN levels.value ELSE '' END
+                ) provenance ON true WHERE """ + " AND ".join(filters)
                 + " ORDER BY j.created_at DESC,j.job_id DESC,levels.position LIMIT %s OFFSET %s",
                 [*values, limit, offset],
             ).fetchall()

@@ -206,6 +206,9 @@ class LessonWorker:
                     if job["metadata"].get("teaching_version", "v1") == "v2":
                         from upraise_ai.services.teaching_v2 import TeachingModelsV2, TeachingSpeechV2
                         models_class, speech_class = TeachingModelsV2, TeachingSpeechV2
+                    elif job["metadata"].get("teaching_version") == "v3":
+                        from upraise_ai.services.teaching_v3 import TeachingModelsV3, TeachingSpeechV3
+                        models_class, speech_class = TeachingModelsV3, TeachingSpeechV3
                     pipeline.models = self.models or models_class(
                         self.settings, diagnostic_dir=self.staging.job_dir(job_id) / "model-diagnostics")
                     context_hook = getattr(pipeline.models, "set_document_context", None)

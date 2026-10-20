@@ -52,6 +52,7 @@ class Backend {
       job_id: lesson.job_id, lesson_id: lesson.lesson_id, course_id: lesson.course_id, activity_id: lesson.activity_id,
       language: lesson.language, voice: lesson.voice, learner_level: lesson.learner_level, chunk_count: lesson.chunks.length,
       generation_version: lesson.generation_version, status: "DRAFT", expires_at: lesson.expires_at,
+      teaching_version: lesson.versions?.teaching_version || "v1", teaching_policy: lesson.versions?.teaching_policy,
       created_at: new Date().toISOString(), requires_review: true,
     })));
   }
@@ -138,7 +139,7 @@ class Backend {
             const value = bundle(jobId, job.input.lesson_id, job.input.document_ids[0]);
             value.variants = Object.fromEntries(Object.entries(value.variants).filter(([level]) => !job.input.levels || job.input.levels.includes(level)));
             for (const lesson of Object.values(value.variants)) Object.assign(lesson, { language: job.input.language, voice: job.input.voice });
-            if (job.input.teaching_version === "v2") for (const lesson of Object.values(value.variants)) lesson.versions = { teaching_version: "v2" };
+            if (["v2", "v3"].includes(job.input.teaching_version)) for (const lesson of Object.values(value.variants)) lesson.versions = { teaching_version: job.input.teaching_version };
             this.bundles.set(jobId, value); this.hashes.set(jobId, "c".repeat(64));
           } else {
             const value = this.bundles.get(job.input.lesson_job_id);

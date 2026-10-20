@@ -188,6 +188,8 @@ class RevisionPipeline(LessonPipeline):
             result.versions["revision_correction_rounds"] = str(correction_rounds)
         all_chunks = [(chunk.chunk_id, chunk.text, chunk.sources[0], chunk.reviewer_report,
                        chunk.section_index, chunk.revisions) for chunk in result.chunks]
+        if hook := getattr(self.speech, 'prepare_revision', None):
+            hook(result, selected, data.language)
         if revision.aligned_unit:
             all_chunks = [(*value, result.learner_level, chunk.content_unit_id)
                           for value, chunk in zip(all_chunks, result.chunks, strict=True)]

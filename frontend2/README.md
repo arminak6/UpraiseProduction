@@ -69,7 +69,13 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   after temporary cleanup. Unsaved expired/received output and incomplete
   generations cannot be revised through A7.
 - **Learning:** paginated A8 results group variants into one course. Available
-  levels come from the actual A5 bundle, including custom names. B1 opens the
+  courses show a generation-version badge beside their title, including existing
+  courses. Saved teaching metadata distinguishes V1, V2 and V3; a recorded V2.8
+  policy shows V2.8. Missing/unsupported version metadata shows **Version unknown**,
+  and a V2 course without one consistent minor policy shows V2. A3 v2 is an API
+  format and is never used to infer the teaching version. No course regeneration
+  is needed.
+  Available levels come from the actual A5 bundle, including custom names. B1 opens the
   selected session; A5 text, result hash and checksum-verified WAV are checked
   before explicit playback actions. B4 captures the exact browser playback
   position, displays real teacher text/audio and any bounded playback instruction,

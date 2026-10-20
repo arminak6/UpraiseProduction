@@ -91,6 +91,9 @@ class LessonService:
             revision=row["result"].get("revision"),
             generation_version=row['metadata'].get('generation_version'),
             chunk_plan_id=row['result'].get('chunk_plan_id'),
+            # Omitted teaching_version is the original V1 request contract.
+            teaching_version=row['metadata'].get('teaching_version', 'v1'),
+            teaching_policy=row.get('teaching_policy'),
         ) for row in rows]
 
     def delivery_row(self, job_id, principal):

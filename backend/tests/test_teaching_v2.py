@@ -74,7 +74,7 @@ def material_error(message, *, category="changed_fact", candidate_quote="explana
 def test_teaching_v2_is_explicit_opt_in(schema):
     assert schema.model_validate(request_data()).teaching_version == "v1"
     assert schema.model_validate(request_data(teaching_version="v2")).teaching_version == "v2"
-    for value in ["v3", 2, None, "V2"]:
+    for value in ["v4", 2, None, "V2"]:
         with pytest.raises(ValidationError):
             schema.model_validate(request_data(teaching_version=value))
 

@@ -223,6 +223,9 @@ th:last-child, td:last-child { text-align: right; }
 .course-card .course-art { height: 173px; }
 .course-card-body { padding: 18px 8px 8px; display: flex; flex-direction: column; flex: 1; }
 .course-card h2 { font-size: 20px; font-weight: 500; letter-spacing: -.5px; line-height: 1.3; margin: 11px 0 8px; overflow-wrap: anywhere; }
+.course-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 11px 0 8px; }
+.course-title h2 { margin: 0; }
+.course-version { white-space: nowrap; }
 .course-card .small-copy { min-height: 38px; margin-bottom: 0; }
 .course-card .summary-meta { margin: 16px 0; }
 .course-card-bottom { margin-top: auto; border-top: 1px solid var(--line); padding-top: 16px; }

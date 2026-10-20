@@ -2,7 +2,7 @@
 
 ## Purpose and current state
 
-UPRAISE WP7 implements A1-A8/A3v2,B1/B2/B4/B5/B7,C1/C2/C3/C5;B3/B6/C4 reserved.
+UPRAISE WP7: A1-A8/A3v2,B1/B2/B4/B5/B7,C1/C2/C3/C5;B3/B6/C4 reserved.
 PG DRAFT text/plans and Qdrant sources persist; A5 staging TTL24h, completed packages
 saved in course_archive/. Moodle owns approval. No stage/commit without request.
 ../Uprise/v2 reference-only; semantic findings/evidence in codex_helper/.
@@ -19,34 +19,30 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   until B5/end/expiry/revocation/restart; distinct last2retry/audio cache. Models
   get last4complete pairs,2000chars/message, no blocked/player-only messages;
   question UUID/stable retry identity prevents duplicate pairs.
-- Teaching V2 is distinct from frontend2/A3v2. teaching_version=v2 opts in;
-  absent/v1 preserves original models/prompts/converter/fingerprint. UI defaults V1.
-  Isolated services/teaching_v2/; docs/teaching-v2.md and reverse-checked
-  codex_helper/teaching-v2-runtime.patch preserve earlier chat changes.
-  V2.8 concept author/exact selector checks coverage/quotes, restores original
-  math/tables and excludes incidental fragments. After2bad quote attempts retain
-  original primary chunk, exclude invalid optional context; no guessed repairs.
-  Same-doc/version/attempt context6refs/12000chars clarifies terms, not scope;
-  bind after model creation, cache/job. Empty primary never becomes another topic.
-  Typed factual/omission/language/citation findings and local exact reference/
-  unit checks; absent-source claims use -1/empty quote. Broad review2quote attempts
-  then indexed original spans. Independent verification can downgrade source/
-  presentation-only accusations. Host-bound entailment checks EVERY paragraph
-  against its allowed material; no model-retyped quotes/indices. Numeric question
-  givens bounded; ambiguous labels attributed as printed. No document hardcoding.
-  Max2factual corrections, final edit by reviewer. User approved failed NEW sections
-  copying exact primary excerpts with teacher-editing DRAFT flag; failed adaptation
-  can retain reviewed canonical text flagged for level edit. Preserve IDs/language/
-  references/size; refine common plan, never truncate. Invalid evidence/provider/
-  language still fail closed. A7 remains strict, no fallback discarding teacher edits.
-  Same-level canonical reuse avoids rewrite/V1 markup repair; translations adapt.
-  Policy/recovery metadata invalidate checkpoints. Source/style gaps are warnings.
-  Separate strict spoken meaning/language/naturalness gate before Polly, script
-  cache/published SSML. AI gates remain fallible: real scripts still invent wrong
-  interpretations (assessment below). No V1 fallback/automatic replacement.
-  Review script/audio/Stop; release on navigation. No actual listening verified.
-  Owner-only staging/A4 safe failure details; A6/TTL/A2 erase bounded diagnostics,
-  never raw provider output/logs/audit. Extraction itself is not repaired.
+- Teaching versions are distinct from frontend2/A3v2. teaching_version=v1(default)
+  preserves original teacher/prompts/MathJax. Isolated teaching_v2/: exact source
+  selection, independent material/entailment review, max2corrections, flagged
+  source-excerpt DRAFT recovery, canonical reuse and separate spoken review/cache.
+  Warnings never permit changed facts; A7 strict. docs/teaching-v2.md; rollback
+  snapshots/patches under codex_helper/.
+- Opt-in V3: services/teaching_v3/, docs/teaching-v3.md. Document-order plan,
+  shared context/exact same-page equation definitions. Adjacent continuations
+  merge within24k teaching chars/full payload bound; metadata excluded. Primary
+  coverage differs from supporting citations; split complete paragraphs. All
+  boundaries/levels reviewed before TTS. Max2corrections then flagged PRIMARY-
+  source DRAFT recovery. Narrator sees actual prior writing/navigation, no future
+  source; questions read, not answered. Preserve table columns/cases/leading zeroes;
+  current-written entailment/reverse coverage/source-equal decimal normalization.
+  Explicit math consequences allowed; no guessed conditions or waived omissions.
+  Source typos not foreign prose. Narrow review edits; caches bind context/policy/
+  models/output, changed neighbours invalidate; full-course review always. Conflicts
+  bind actual assertions/explicit subjects; real conflicts block. JSON format/
+  token-limit retries; host index faults fatal. Planning announces workload first.
+  A7 inheritsv3/target-only/strict. V1/V2,TTL/A6/A2 caches/content-free logs preserved.
+- Start learning badges read A8 teaching_version and stored per-level teaching_policy.
+  Historical omitted request version is V1 by contract; V2.8 needs consistent part/
+  level policy, otherwise V2. Missing/unsupported UI provenance shows unknown.
+  These are independent of a3-v2 API format; no generation/backfill is needed.
 - Nav: Upload / Generate / Review / Start learning. Review reads durable PG text,
   levels/parts/source evidence; tab-only feedback and A7 selection persist. Expired
   text readable; A7 needs completed temporary/archived output. Ownership/course/
@@ -106,6 +102,7 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   turing-content-verification.md/level-content-assessment.md: semantic findings.
   teaching-v28-quality-assessment/assessment.md: actual completed V2.8 vs V1,
   scored rubric, per-part source/script evidence and audio integrity checks.
+  teaching-v3-comparison/assessment.md: latest same-PDF V1/V2.8/V3 quality/timing.
 
 ## Commands
 
@@ -137,7 +134,7 @@ UPRAISE_LESSON_LEVEL_PROFILES ordered JSON1-8profiles; plan level must match,
 batch4/max8. Explicit level array survives PG JSONB ordering. Chunk identity
 (job_id,chunk_id), index0-based; content_unit_id links levels. Source content_hash
 opaque/source_hash realSHA256; PDF100MB/500pages, CSV100MB/100krows/256columns.
-Source input untrusted; parsing success does not establish source factual accuracy.
+Sources untrusted; parsing does not establish accuracy.
 Logs/audit omit text/scores/audio/prompts/private provider errors; optional local
 diagnostics removed by A6/TTL or successful replacement. Ownership/source/leases/
 artifact locks fence publishing; corrupt503/pending409/expired410. Attempts3/max12h,
@@ -152,40 +149,36 @@ Sequential workers/variants; missing audio needs synthesis. Archive noTTL; expir
 unsaved text read-only. Word fidelity needs review. NonUTF8/headerless CSV/URLs,
 A7 idempotency/structural edits and mid-session level switching are future work.
 Gateway/Moodle/HA/backups/erasure/orphans unverified; V1 final review/grounding deferred.
-Oct19 user approved written-only Bedrock debugging for this Random Graphs course's
-windows/context/drafts/findings via both configured models, no audio/replacement.
-Earlier approval denials resolved; never auto-submit jobs. UI desktop/mobile checked;
-no direct listening or Markdown/LaTeX typesetter/runtime npm.
-V1 Random Graphs has matrix/conditioning/raw-escape SSML defects. Completed V2.8
-improves wording but misreads XF (part7), equates fixed/expected edges (8), assumes
-normal-table p-values (21), adds unreviewed narration.12/23fallback flags,finalpart
-empty. Editorial V1~4/10,V2.8~6/10; spoken wording3->8,reliability4->4.
-Continuity gap confirmed:12/23new-lesson openings; part9 missing formula appears
-in10. Written author has source context but no taught-history/outline; narration
-gets only current text/language. Shared unit plan is alignment, not pedagogy.
-Evidence codex_helper/teaching-v28-quality-assessment/; scripts/audio-integrity only.
+User authorized V3 repairs and intermediate same-PDF Bedrock/Polly test generation/
+retries; preserve old courses, no unsolicited submissions. UI desktop/mobile
+checked; no listening assessment
+or Markdown/LaTeX typesetter/runtime npm. Earlier Word V1/V2.8:4/10 vs6/10;
+V2.8 has12/23fallback flags and repeated openings/split math/added assumptions.
+V3 does not repair extraction. Evidence codex_helper/teaching-v28-quality-assessment/.
 
 ## Recent decisions
 
 - Teacher review lists durable text independently of audio. User approved root
-  course_archive/ retention so saved packages stay playable/revisable beyond24h.
+  course_archive/ retention beyond24h.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
-2026-10-19 assessed completed V2.8 c1d0a07c:23parts/23.84min,1973written/
-4376spoken words,12fallback flags. Same source/attempt/models as V1 99d9058e
-(32parts/36.79min); Joanna V1 acd83efc corroborates. Read23V2text/scripts,32latestV1
-texts/matched scripts and sources.23WAV hashes/durations match,mono16bit16kHz.
-No listening/provider calls/code or course edits. Assessment path above; index refreshed.
-Follow-up checked aligned make_plan, V2 models/context/speech inputs and repeated
-openings/formula transition; course continuity absent. Report/index refreshed only.
-Earlier same-day deployment:17hashes/service across4backend services,2V1results
-unchanged,all8healthy.341selected regressions,135+1V2,Ruff/build/diff/rollback checks
-passed. Written debug pilot23windows16normal/7fallback was a separate run;
-actual generation differs. Evidence codex_helper/teaching-v28-{written-verification,
-runtime-verification}.json,final-report.md. Fake-provider success does not establish
-real semantic correctness. No automatic regeneration/submission.
-Historical V1:codex_helper/random-graphs-comparison-20261016/. Diagnostics may
-TTL-clean; prior scoped QA:38DOM/15bridge/Edge,135B1/B4/B5,archive117.
+2026-10-20: catalog schema/storage/workflow, frontend2/app.js/styles.css and docs
+checked for generation badges. 43 UI,27 A8 integration,15 bridge tests and Ruff/
+build passed. Backend API/frontend2 deployed healthy; served assets match source.
+All8 existing course result hashes preserved; actual A8/UI labels verified for
+V1943e1d29,V2.8 26225185,V3b8cec526. Evidence codex_helper/course-version-labels/.
+2026-10-19 assessment: latest V3b8cec526 is9parts/11.54min/Matthew,5fallbacks,
+21.11min generation; same-PDF V1/V2.8 are13/9parts,17.13/14.92min audio,
+6.80/14.21min generation. All attempt1; same source/models/options,V2 usesAmy.
+All31 WAV/text/SSML verified; no listening. Overall4.5/6/6.5; V3 improves math
+fidelity but still literal bars/spoken citations,question-only part6,duplicated
+figure/repeated definitions. codex_helper/teaching-v3-comparison/ has evidence.
+Prior V3 repair:88tests/Ruff/build/rollback passed; old results preserved.
+e2014342 repaired test DONEattempt1,5parts/8.14min/Joanna,all5fallback flags.
+PDF79fd4c5e-b3ef-426e-bf47-78ae09a2ef0e. eae69375 failed startup timeout then
+invented-subject conflict; interim5c733517 wrapped unreadable output as fatal.
+Explicit-subject assertion binding and retryable complete JSON/paragraph review
+fixed both. Details codex_helper/v3-inconsistency-repair/. UI defaultsV1.

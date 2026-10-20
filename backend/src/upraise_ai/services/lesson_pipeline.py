@@ -187,6 +187,8 @@ class LessonPipeline:
         job_id = str(job["job_id"])
         folder = self.staging.job_dir(job_id)
         sections = plan_sections(documents, data.options.source_window_pages)
+        if hook := getattr(self.models, 'plan_course', None):
+            sections = hook(sections, data, folder, progress)
         if not sections:
             raise IngestionError("LESSON_SOURCE_EMPTY")
         progress.set_workload("lesson", len(sections))
@@ -237,7 +239,10 @@ class LessonPipeline:
                                         "review": report.model_dump(), "revisions": revisions})
             validate_draft(draft, section["pages"])
             reports.append(report)
-            for text, pages in segment(draft, data.options.target_chunk_words):
+            if hook := getattr(self.models, 'remember_section', None):
+                hook(index, draft)
+            segmenter = getattr(self.models, 'segment_section', segment)
+            for text, pages in segmenter(draft, data.options.target_chunk_words):
                 chunk_index = len(all_chunks)
                 chunk_id = str(uuid5(NAMESPACE_URL, f"upraise:lesson:{job_id}:{chunk_index}"))
                 source = lesson_source(section, pages)
@@ -255,6 +260,10 @@ class LessonPipeline:
                                                    for s in sections)).lower(),
                     "source_languages": ",".join(dict.fromkeys(s["source_language"] for s in sections))}
         versions.update(getattr(self.models, "teaching_versions", {}))
+        if hook := getattr(self.models, 'finish_course', None):
+            all_chunks = hook(all_chunks, data, data.options.learner_level, signature, folder, progress)
+        if hook := getattr(self.speech, 'prepare_course', None):
+            hook({data.options.learner_level: all_chunks}, data.language, signature, progress)
         save_text(all_chunks, versions)
         return self.publish(job, data, all_chunks, versions, signature, progress, save_speech)
 
@@ -266,6 +275,8 @@ class LessonPipeline:
         progress.set_workload("speech", len(all_chunks))
         result_chunks, engines = [], set()
         for index, (chunk_id, text, source, report, section_index, revisions) in enumerate(all_chunks):
+            if hook := getattr(self.speech, 'bind_chunk', None):
+                hook(chunk_id)
             progress("SPEECH", 0.60+0.35*index/len(all_chunks))
             speech_checkpoint = folder / f"speech-{chunk_id}.json"
             audio_path = folder / f"{chunk_id}.wav"

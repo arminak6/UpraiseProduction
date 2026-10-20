@@ -14,6 +14,46 @@ test("loads real API collections without seed content and groups aligned levels"
   assert.equal(h.backend.calls.filter(call => call.method !== "GET").length, 0);
 });
 
+test("existing learning cards show their recorded teaching version without fetching course text", async t => {
+  const h = await harness(backend => {
+    const versions = [null, { teaching_version: "v2", teaching_policy: "teaching-narration-v2.8" },
+      { teaching_version: "v3", teaching_policy: "continuous-teaching-v3.0" },
+      { teaching_version: "v2" }];
+    backend.bundles.clear();
+    versions.forEach((version, index) => {
+      const value = bundle(id(10 + index), "The same course title");
+      for (const lesson of Object.values(value.variants)) lesson.versions = version;
+      backend.bundles.set(value.job_id, value);
+    });
+  }); t.after(h.close);
+  await h.navigate("learn");
+  assert.deepEqual([...h.document.querySelectorAll(".course-card .course-version")].map(node => node.textContent),
+    ["Generation V1", "Generation V2.8", "Generation V3", "Generation V2"]);
+  assert.equal(h.document.querySelectorAll(".course-card").length, 4);
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/result") || call.method !== "GET").length, 0);
+});
+
+test("learning cards never infer missing versions from the title or A3 API version", async t => {
+  const h = await harness(backend => {
+    backend.bundles.get(id(10)).variants.beginner.lesson_id = "V3 course";
+    const catalog = backend.catalog.bind(backend);
+    backend.catalog = () => catalog().map(({ teaching_version, ...item }) => ({ ...item,
+      teaching_policy: "teaching-narration-v2.8" }));
+  }); t.after(h.close);
+  await h.navigate("learn");
+  assert.equal(h.find(".course-version").textContent, "Version unknown");
+});
+
+test("different minor policies across learning levels show the shared major version", async t => {
+  const h = await harness(backend => {
+    for (const [level, lesson] of Object.entries(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v2", teaching_policy: `teaching-narration-v2.${level === "beginner" ? "7" : "8"}` };
+    }
+  }); t.after(h.close);
+  await h.navigate("learn");
+  assert.equal(h.find(".course-version").textContent, "Generation V2");
+});
+
 test("uploads real multipart and SHA-256, preserving the retry key across navigation", async t => {
   const h = await harness(); t.after(h.close);
   h.chooseFile("<img src=x>.pdf", "a document"); h.input("#upload-course", "Client upload");
@@ -115,6 +155,34 @@ test("teaching V2 is opt-in, survives navigation and can switch back to V1 with 
   assert.equal(calls[1].body.teaching_version, undefined);
   assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
   assert.match(h.backend.bundles.get(id(10)).variants.intermediate.chunks[0].text, /source material/);
+});
+
+test("V3 continuous teaching is selectable, survives navigation and has a distinct request identity", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("generate");
+  assert.equal(h.find("#teaching-version").value, "v1");
+  h.input("#teaching-version", "v3", "change");
+  await h.navigate("materials"); await h.navigate("generate");
+  assert.equal(h.find("#teaching-version").value, "v3");
+  h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form"); await h.settle();
+  h.input("#teaching-version", "v2", "change"); h.submit("#generation-form"); await h.settle();
+  const calls = h.backend.records("POST", "/v2/lesson-jobs");
+  assert.equal(calls[0].body.teaching_version, "v3");
+  assert.equal(calls[1].body.teaching_version, "v2");
+  assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
+});
+
+test("V3 review identifies the version and displays its spoken script", async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v3" };
+      for (const chunk of lesson.chunks) chunk.narration_text = "We now continue the explanation.";
+    }
+  }); t.after(h.close);
+  await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
+  assert.match(h.find("main").textContent, /Teaching V3/);
+  assert.match(h.find("main").textContent, /Spoken explanation.*Version 3/);
+  assert.match(h.find("main").textContent, /We now continue the explanation/);
 });
 
 test("V2 review displays an escaped spoken script and verified audio controls that stop on part changes", async t => {
