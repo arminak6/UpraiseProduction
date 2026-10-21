@@ -111,7 +111,7 @@ class AlignedLessonPipeline(LessonPipeline):
                     from upraise_ai.services.teaching_v2.review_recovery import review_flag
                     report = self.models.retain_warnings(report, [review_flag("first-draft length",
                         IngestionError("LESSON_UNIT_TOO_LARGE"), pages=unit.source.citation_numbers, category="clarity")])
-                value = (chunk_id, display_citations(item['text'], unit.source), unit.source,
+                value = (chunk_id, display_citations(item['text'], unit.source, preserve_invalid=first), unit.source,
                          display_review(report, unit.source), unit.section_index, 1)
                 by_level[level].append(value)
                 tuples.append((*value, level, unit.content_unit_id))
@@ -227,7 +227,8 @@ class AlignedLessonPipeline(LessonPipeline):
                         position = 0.20 + 0.40 * completed / total
                         reuse = getattr(self.models, 'reuse_canonical_units', None)
                         retained_canonical = bool(reuse and level == data.plan_level and
-                            all(unit.canonical_review is not None and len(unit.material_text.split()) <= data.options.max_chunk_words for unit in units))
+                            all(unit.canonical_review is not None and (getattr(self.models, "preserve_first_draft", False)
+                                or len(unit.material_text.split()) <= data.options.max_chunk_words) for unit in units))
                         if retained_canonical:
                             texts, reports = reuse(units)
                         else:

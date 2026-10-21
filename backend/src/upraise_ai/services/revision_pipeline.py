@@ -170,7 +170,8 @@ class RevisionPipeline(LessonPipeline):
                         [revision.aligned_unit["material_text"] if revision.aligned_unit else selected.text])
             if warnings:
                 report = self.models.retain_warnings(report, warnings)
-        selected.text, selected.reviewer_report, selected.revisions = display_citations(text, source), display_review(report, source), edits
+        selected.text, selected.reviewer_report, selected.revisions = display_citations(text, source,
+            preserve_invalid=getattr(self.models, "preserve_first_draft", False)), display_review(report, source), edits
         if not revision.aligned_unit:
             if blocks:
                 selected.sources[0].source_blocks = pages

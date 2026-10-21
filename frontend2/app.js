@@ -359,7 +359,14 @@
   function reviewDetails(report) {
     if (!report) return "";
     const flagged = unresolvedReview(report);
-    return `${flagged ? '<div class="review-flag-banner" role="note"><strong>This part needs human review</strong><p>Generation continued with unresolved automated checks. Review the text, source and audio before teaching.</p></div>' : ""}<details class="advanced" ${flagged ? "open" : ""}><summary>Automated review and source evidence</summary><p class="small-copy">${escape(report.summary || "Automated checks are supporting evidence; human review remains required.")}</p>${report.issues?.length ? `<ul class="review-findings">${report.issues.map(issue => `<li>${escape(issue.message)}</li>`).join("")}</ul>` : ""}<p class="small-copy">AI checks do not constitute human approval.</p></details>`;
+    const labels = { accuracy: "Accuracy", citations: "Citations", clarity: "Clarity", bias: "Bias", coverage: "Coverage", source: "Source", speech: "Narration" };
+    const tags = [...new Set((report.issues || []).filter(issue => issue.message?.startsWith("Human review required: ")).map(issue => {
+      if (/REVIEW_UNAVAILABLE|MODEL_OUTPUT_INVALID|ALIGNMENT_MODEL_INVALID|PROVIDER_ERROR/.test(issue.message)) return "Review unavailable";
+      if (/TEXT_INVALID/.test(issue.message)) return "Text formatting";
+      if (/UNIT_TOO_LARGE|TEXT_TOO_LONG/.test(issue.message)) return "Length";
+      return labels[issue.category] || "Human review";
+    }))];
+    return `${flagged ? `<div class="review-flag-banner" role="note"><strong>This part needs human review</strong><div class="review-tags" aria-label="Review tags">${tags.map(tag => `<span class="review-tag">${escape(tag)}</span>`).join("")}</div><p>Generation continued with unresolved automated checks. Review the text, source and audio before teaching.</p></div>` : ""}<details class="advanced" ${flagged ? "open" : ""}><summary>Automated review and source evidence</summary><p class="small-copy">${escape(report.summary || "Automated checks are supporting evidence; human review remains required.")}</p>${report.issues?.length ? `<ul class="review-findings">${report.issues.map(issue => `<li>${escape(issue.message)}</li>`).join("")}</ul>` : ""}<p class="small-copy">AI checks do not constitute human approval.</p></details>`;
   }
   function renderGenerate() {
     const ready = state.materials.filter(item => item.status === "DONE");

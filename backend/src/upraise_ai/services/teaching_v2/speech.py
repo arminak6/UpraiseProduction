@@ -9,7 +9,7 @@ from upraise_ai.services.lesson_pipeline import write_json
 from upraise_ai.services.lesson_speech import LessonSpeech
 
 from .contracts import Decision, Narration, structured, validate_spoken, validate_written
-from .first_draft import storable_text
+from .first_draft import retention_error, storable_text
 from .prompts import NARRATION_POLICY, REVIEW_POLICY, VERSION
 from .review_recovery import POLICY, gap_text, review_failure, review_flag
 
@@ -23,7 +23,7 @@ class TeachingSpeechV2(LessonSpeech):
         for values in by_level.values():
             for value in values:
                 progress("REVIEW", .59)
-                _, issues = self.narration(value[1], language)
+                _, _, issues = self.prepare(value[1], language)
                 self.review_warnings[str(value[0])] = issues
 
     def review_issues(self, chunk_id):
@@ -62,8 +62,10 @@ class TeachingSpeechV2(LessonSpeech):
         retained, issues, problems = None, [], []
         try:
             for attempt in range(3):
-                candidate = structured(self.models, NARRATION_POLICY, payload, Narration,
-                                       "teaching_v2_narration")
+                def generate():
+                    return structured(self.models, NARRATION_POLICY, payload, Narration, "teaching_v2_narration")
+                candidate = (self.models.first_candidate("narration", [NARRATION_POLICY, payload], Narration, generate)
+                             if first else generate())
                 if first:
                     safe = storable_text(candidate.text)
                     retained = Narration(text=safe if safe.strip() else storable_text(text) or gap_text(language))
@@ -87,11 +89,17 @@ class TeachingSpeechV2(LessonSpeech):
                 payload.update(previous_narration=candidate.text, corrections=problems)
             else:
                 raise IngestionError("TEACHING_V2_NARRATION_REJECTED", retryable=True)
-        except IngestionError as error:
-            if not recovery or not review_failure(error):
+        except Exception as error:
+            if first:
+                failure = retention_error(error)
+                if failure is None:
+                    raise
+            elif not recovery or not isinstance(error, IngestionError) or not review_failure(error):
                 raise
+            else:
+                failure = error
             retained = retained or Narration(text=storable_text(text) if first and storable_text(text).strip() else gap_text(language))
-            issues = [review_flag("narration review", error, category="speech", issues=problems)]
+            issues = [review_flag("narration review", failure, category="speech", issues=problems)]
         if path:
             write_json(path, {"key": key, "narration": retained.model_dump(),
                               "review_status": "needs_human_review" if issues else "passed",
@@ -102,5 +110,17 @@ class TeachingSpeechV2(LessonSpeech):
     def prepare(self, text, language):
         narration, warnings = self.narration(text, language)
         # Already verbalised mathematics bypasses V1's symbolic converter.
-        full, parts, issues = super().prepare(narration.text, language)
+        candidates = [narration.text]
+        if self.models.preserve_first_draft:
+            candidates.extend([storable_text(text), gap_text(language)])
+        for candidate in candidates:
+            try:
+                full, parts, issues = super().prepare(candidate, language)
+                break
+            except Exception as error:
+                failure = (IngestionError("TEACHING_V2_NARRATION_INVALID") if isinstance(error, IngestionError)
+                           and error.code == "LESSON_SPEECH_EMPTY" else retention_error(error))
+                if not self.models.preserve_first_draft or failure is None or candidate == candidates[-1]:
+                    raise
+                warnings = [*warnings, review_flag("narration rendering; existing writing retained", failure, category="speech")]
         return full, parts, [*issues, *warnings]

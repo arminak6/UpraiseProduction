@@ -102,11 +102,11 @@ class V2Client:
 
 
 def generate(integration, lesson, monkeypatch, *, reject_narration=False, material_failures=0, material_warnings=False, reject_entailment=False, invalid_evidence=False,
-             malformed_written=False, long_adaptation=False, levels=None):
+             malformed_written=False, long_adaptation=False, levels=None, client_override=None):
     doc = submit(integration)
     integration[4].process(integration[1].claim(integration[0].lease_seconds))
     settings, jobs, worker, service, principal, _ = lesson
-    client, polly = V2Client(reject_narration, material_failures, material_warnings, reject_entailment, invalid_evidence,
+    client, polly = client_override or V2Client(reject_narration, material_failures, material_warnings, reject_entailment, invalid_evidence,
                              malformed_written, long_adaptation), Polly()
     models = TeachingModelsV2(settings, client, diagnostic_dir=settings.data_dir / "v2-test/models")
     voice = TeachingSpeechV2(settings, models, client=polly)
@@ -131,6 +131,45 @@ def generate(integration, lesson, monkeypatch, *, reject_narration=False, materi
     worker.process(job)
     client.context_documents = models.document_context.documents
     return jobs.get(result["job_id"]), data, client, polly, factories
+
+
+def test_teaching_v2_original_generator_text_and_tags_reach_human_review_despite_provider_failures(integration, lesson, monkeypatch):
+    from botocore.exceptions import ClientError
+    original = "The supported feature has value three. [p. 999]"
+    class UnavailableReviewer(V2Client):
+        def converse(self, **request):
+            schema = request.get("outputConfig", {}).get("textFormat", {}).get("structure", {}).get("jsonSchema", {})
+            name = schema.get("name", "")
+            message = request["messages"][0]["content"][0]["text"]
+            if name == "teaching_v2_section":
+                self.calls.append(request)
+                value = json.dumps({"paragraphs": [{"text": original, "pages": [999]}]})
+                return {"output": {"message": {"content": [{"text": value}]}}, "stopReason": "end_turn"}
+            payload, _ = json.JSONDecoder().raw_decode(message)
+            if "units" in payload and "candidates" in payload:
+                self.calls.append(request)
+                raise ClientError({"Error": {"Code": "ServiceUnavailableException", "Message": "PRIVATE provider response"}}, "Converse")
+            return super().converse(**request)
+    row, _, client, polly, _ = generate(integration, lesson, monkeypatch,
+        levels=["beginner", "intermediate", "advanced"], client_override=UnavailableReviewer())
+    assert row["status"] == "DONE", row["error_code"]
+    assert polly.calls
+    with api(integration, lesson) as http:
+        response = http.get(f"/v1/lesson-reviews/{row['job_id']}")
+        assert response.status_code == 200
+        review = response.json()
+        for level in review["levels"]:
+            chunks = review["variants"][level]["chunks"]
+            assert chunks and all(chunk["text"] == original for chunk in chunks)
+            issues = [finding for chunk in chunks for finding in chunk["reviewer_report"]["issues"]]
+            assert any("LESSON_CITATIONS_INVALID" in finding["message"] for finding in issues)
+            if level != "intermediate":
+                assert any("PROVIDER_ERROR" in finding["message"] for finding in issues)
+            assert "PRIVATE" not in json.dumps(issues)
+    names = [call.get("outputConfig", {}).get("textFormat", {}).get("structure", {}).get("jsonSchema", {}).get("name") for call in client.calls]
+    assert names.count("teaching_v2_section") == 1
+    assert "aligned_unit_final" not in names and "aligned_unit_shorten" not in names
+    assert "teaching_v2_material_correction" not in names
 
 
 def test_teaching_v2_api_worker_saves_written_and_spoken_versions_separately_and_revision_stays_v2(integration, lesson, monkeypatch):

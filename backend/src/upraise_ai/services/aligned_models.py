@@ -288,12 +288,15 @@ def adapt_units(models, section, units, language, *, learner_level, profiles, ta
         payload["current_explanations_to_shorten"] = current.model_dump(mode='json')
     limits = (f"\nWrite entirely in {language_name(language)}. Aim for {target_words} words per unit; "
               f"never exceed {max_words} words or 16000 characters." + citation_policy(section))
-    drafts = structured(models, POLICY + limits + "\n" + learner_level_system_prompt(
-        learner_level, "generator", profiles=profiles), payload, AlignedTexts, "aligned_unit_draft", expected_units=units)
+    generator_policy = POLICY + limits + "\n" + learner_level_system_prompt(learner_level, "generator", profiles=profiles)
+    def generate():
+        return structured(models, generator_policy, payload, AlignedTexts, "aligned_unit_draft", expected_units=units)
+    first = getattr(models, "preserve_first_draft", False)
+    drafts = (models.first_candidate("difficulty", [generator_policy, payload], AlignedTexts, generate)
+              if first else generate())
     if notify:
         notify("REVIEW")
     reports = None
-    first = getattr(models, "preserve_first_draft", False)
     try:
         review = reviewed(models, section, units, drafts, language, learner_level, profiles)
         payload.update(draft=drafts.model_dump(mode="json"), review=review.model_dump(mode="json"))
@@ -312,13 +315,21 @@ def adapt_units(models, section, units, language, *, learner_level, profiles, ta
         else:
             final = structured(models, POLICY + limits + "\n" + learner_level_system_prompt(
                 learner_level, "editor", profiles=profiles), payload, AlignedTexts, "aligned_unit_final", expected_units=units)
-    except AlignmentModelError as error:
-        if not getattr(models, "draft_review_recovery", False) or error.stage not in {"aligned_unit_review", "aligned_unit_final"}:
+    except Exception as error:
+        if first:
+            from upraise_ai.services.teaching_v2.first_draft import retention_error
+            failure = retention_error(error)
+            if failure is None:
+                raise
+        elif (not isinstance(error, AlignmentModelError) or not getattr(models, "draft_review_recovery", False)
+                or error.stage not in {"aligned_unit_review", "aligned_unit_final"}):
             raise
+        else:
+            failure = error
         from upraise_ai.services.teaching_v2.review_recovery import FLAG_SUMMARY, review_flag
         final = drafts
         reports = {str(u.content_unit_id): ReviewReport(approved=False, summary=FLAG_SUMMARY,
-            issues=[review_flag("difficulty adaptation review", error, pages=u.source.citation_numbers)]) for u in units}
+            issues=[review_flag("difficulty adaptation review", failure, pages=u.source.citation_numbers)]) for u in units}
     if not first and any(len(output.text.split()) > max_words for output in final.units):
         payload['draft'] = final.model_dump(mode='json')
         payload['length_correction'] = 'Shorten every oversized unit without dropping its required material. Keep all unit IDs.'

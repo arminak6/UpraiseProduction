@@ -512,7 +512,11 @@ test("unresolved automated reviews visibly flag only the affected part and expos
   const h = await harness(backend => {
     backend.bundles.get(id(10)).variants.beginner.chunks[0].reviewer_report = {
       approved: false, summary: "DRAFT; human review required.",
-      issues: [{ message: "Human review required: invalid evidence <img src=x>." }],
+      issues: [
+        { category: "citations", message: "Human review required: source references (LESSON_CITATIONS_INVALID). <img src=x>" },
+        { category: "source", message: "Human review required: difficulty review (TEACHING_V2_REVIEW_UNAVAILABLE; PROVIDER_ERROR)." },
+        { category: "source", message: "Human review required: another unavailable review (TEACHING_V2_REVIEW_UNAVAILABLE)." },
+      ],
     };
   }); t.after(h.close);
   await h.navigate("review"); h.click(`[data-action="review-course"][data-id="${id(10)}"]`); await h.settle();
@@ -522,8 +526,10 @@ test("unresolved automated reviews visibly flag only the affected part and expos
   assert.equal(h.find(".advanced").open, true);
   assert.match(h.find(".review-findings").textContent, /<img src=x>/);
   assert.equal(h.document.querySelectorAll(".review-findings img").length, 0);
+  assert.deepEqual([...h.document.querySelectorAll(".review-tag")].map(tag => tag.textContent), ["Citations", "Review unavailable"]);
   h.click('[data-action="review-next"]'); await h.settle();
   assert.equal(h.document.querySelectorAll(".review-flag-banner").length, 0);
+  assert.equal(h.document.querySelectorAll(".review-tag").length, 0);
 });
 
 test("teacher review opens an existing course and preserves per-part feedback through navigation", async t => {

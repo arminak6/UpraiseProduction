@@ -248,7 +248,7 @@ class LessonPipeline:
                 chunk_index = len(all_chunks)
                 chunk_id = str(uuid5(NAMESPACE_URL, f"upraise:lesson:{job_id}:{chunk_index}"))
                 source = lesson_source(section, pages)
-                text = display_citations(text, source)
+                text = display_citations(text, source, preserve_invalid=getattr(self.models, "preserve_first_draft", False))
                 all_chunks.append((chunk_id, text, source, display_review(report, source), index, revisions))
         versions = {**version_refs, "pipeline": job["pipeline_version"],
                     "generator_model": self.settings.lesson_generation_model_id,

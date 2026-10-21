@@ -262,13 +262,13 @@ def test_first_written_candidate_is_checkpointed_before_review_and_reused_after_
     assert result == original and not retry_client.calls
 
 
-def test_first_draft_keeps_facts_while_removing_unavailable_citation_tags(monkeypatch):
+def test_first_draft_keeps_facts_and_unavailable_citation_tags_for_human_review(monkeypatch):
     model, _ = enabled(TeachingModelsV2)
     monkeypatch.setattr(model, "check_written", lambda *a, **k: [])
     original = SectionDraft(paragraphs=[{"text": "The value remains 0.004. [p. 999]", "pages": [999]}])
     retained, _, warnings = model.checked_material(source(1, "The source."), original, "en", "intermediate",
                                                     allow_source_excerpt=True)
-    assert retained.paragraphs[0].text == "The value remains 0.004. "
+    assert retained.paragraphs[0].text == original.paragraphs[0].text
     assert retained.paragraphs[0].pages == [1]
     assert original.paragraphs[0].pages == [999] and "999" in original.paragraphs[0].text
     assert warnings and all(w.category == "citations" for w in warnings)

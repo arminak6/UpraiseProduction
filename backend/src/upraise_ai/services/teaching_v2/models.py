@@ -7,7 +7,7 @@ import re
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.aligned_lessons import AlignedText, AlignedTexts
 from upraise_ai.schemas.lessons import ReviewIssue, ReviewReport, SectionDraft
-from upraise_ai.services.aligned_models import AlignmentModelError, validate_ids, validate_material_format
+from upraise_ai.services.aligned_models import validate_ids, validate_material_format
 from upraise_ai.services.lesson_models import LessonModels, _LanguageClient
 from upraise_ai.services.source_references import citation_policy
 from upraise_ai.services.v3.bedrock_teacher import BedrockTeacherV1
@@ -23,7 +23,7 @@ from .contracts import (
 )
 from .excerpts import EXCERPT_SUMMARY, EXCERPT_WARNING, RECOVERY_WARNINGS, source_excerpt
 from .first_draft import POLICY as FIRST_DRAFT_POLICY
-from .first_draft import retained_material
+from .first_draft import first_candidate, retained_material, retention_error
 from .material_review import review_material
 from .prompts import (
     CONTEXT_POLICY,
@@ -84,6 +84,26 @@ class TeachingModelsV2(LessonModels):
     def preserve_first_draft(self):
         return self.draft_review_recovery and self.teaching_versions.get("teaching_version") == "v2"
 
+    def first_candidate(self, stage, payload, schema, generate):
+        return first_candidate(self, stage, payload, schema, generate)
+
+    def segment_section(self, draft, target):
+        from upraise_ai.services.lesson_pipeline import segment
+        if not self.preserve_first_draft:
+            return segment(draft, target)
+        output = []
+        for text, pages in segment(draft, target):
+            # Output schemas bound display units, not what the generator may
+            # write. Split an oversized unit without asking an editor to rewrite.
+            while len(text) > 16000:
+                boundary = text.rfind(" ", 1, 16001)
+                boundary = boundary if boundary > 0 else 16000
+                output.append((text[:boundary], pages))
+                text = text[boundary:]
+            if text.strip():
+                output.append((text, pages))
+        return output
+
     def set_document_context(self, documents):
         self.document_context = DocumentContext(documents)
         self.selected_sections = {}
@@ -126,17 +146,26 @@ class TeachingModelsV2(LessonModels):
     def translate_section(self, draft, source_language, target_language, *, learner_level):
         self.translation_review_warnings = []
         self.translator.keep_first_on_review_failure = self.preserve_first_draft
+        self.translator.candidate_checkpoint = (lambda generate: self.first_candidate("translation",
+            [draft.model_dump(), source_language, target_language, learner_level], SectionDraft, generate)
+            ) if self.preserve_first_draft else None
         try:
             return super().translate_section(draft, source_language, target_language, learner_level=learner_level)
-        except IngestionError as error:
+        except Exception as error:
             candidate = getattr(self.translator, "review_candidate", None)
-            if not self.draft_review_recovery or (candidate is None and not self.preserve_first_draft) or error.code not in {
-                    "LESSON_TRANSLATION_INVALID", "LESSON_TRANSLATION_INCOMPLETE", "LESSON_TRANSLATION_REJECTED"}:
+            if self.preserve_first_draft:
+                failure = retention_error(error)
+                if failure is None:
+                    raise
+            elif (not self.draft_review_recovery or candidate is None or not isinstance(error, IngestionError)
+                    or error.code not in {"LESSON_TRANSLATION_INVALID", "LESSON_TRANSLATION_INCOMPLETE", "LESSON_TRANSLATION_REJECTED"}):
                 raise
+            else:
+                failure = error
             candidate = candidate or draft
             pages = sorted({p for paragraph in candidate.paragraphs for p in paragraph.pages})
-            self.translation_review_warnings = [review_flag("translation review", error, pages=pages)]
-            if error.code == "LESSON_TRANSLATION_REJECTED" and not self.preserve_first_draft:
+            self.translation_review_warnings = [review_flag("translation review", failure, pages=pages)]
+            if failure.code == "LESSON_TRANSLATION_REJECTED" and not self.preserve_first_draft:
                 return material_gap({"pages": pages}, target_language)
             return candidate
 
@@ -144,10 +173,11 @@ class TeachingModelsV2(LessonModels):
         try:
             return self._check_written(section, texts, language, learner_level, required_material,
                                        correction_rounds=correction_rounds)
-        except IngestionError as error:
-            if not self.preserve_first_draft or not (review_failure(error) or error.code == "TEACHING_V2_TEXT_INVALID"):
+        except Exception as error:
+            failure = retention_error(error) if self.preserve_first_draft else None
+            if failure is None:
                 raise
-            return [review_flag("first-draft material review", error, pages=section.get("pages", []), category="accuracy")]
+            return [review_flag("first-draft material review", failure, pages=section.get("pages", []), category="accuracy")]
 
     def _check_written(self, section, texts, language, learner_level, required_material=None, *, correction_rounds=0):
         key = tuple(chunk.get("chunk_id", chunk["text"]) for chunk in section["chunks"])
@@ -356,11 +386,12 @@ class TeachingModelsV2(LessonModels):
             try:
                 draft = structured(self, author_policy,
                                    payload, SectionDraft, "teaching_v2_section")
-            except IngestionError as error:
-                if not self.preserve_first_draft or not review_failure(error):
+            except Exception as error:
+                failure = retention_error(error) if self.preserve_first_draft else None
+                if failure is None:
                     raise
                 draft = material_gap(section, language)
-                extra_warnings = [review_flag("first-draft authoring unavailable", error, pages=section["pages"])]
+                extra_warnings = [review_flag("first-draft authoring unavailable", failure, pages=section["pages"])]
             if path and not extra_warnings:
                 from upraise_ai.services.lesson_pipeline import atomic_write
                 # Save the first parsed draft BEFORE review; even formatting
@@ -383,12 +414,13 @@ class TeachingModelsV2(LessonModels):
             author_section = {**section, "chunks": [factual_chunk(chunk) for chunk in section["chunks"]]}
             try:
                 texts, reports = super().adapt_units(author_section, units, language, learner_level=learner_level, **kwargs)
-            except AlignmentModelError as error:
-                if not self.preserve_first_draft or error.stage != "aligned_unit_draft":
+            except Exception as error:
+                failure = retention_error(error) if self.preserve_first_draft else None
+                if failure is None:
                     raise
                 texts = AlignedTexts(units=[AlignedText(content_unit_id=u.content_unit_id, text=u.material_text) for u in units])
                 reports = {str(u.content_unit_id): ReviewReport(approved=False, summary=FLAG_SUMMARY,
-                    issues=[review_flag("difficulty authoring unavailable; original teaching retained", error,
+                    issues=[review_flag("difficulty authoring unavailable; original teaching retained", failure,
                                         pages=u.source.citation_numbers)]) for u in units}
         finally:
             self.transport.authoring = False

@@ -20,15 +20,16 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   get last4complete pairs,2000chars/message, no blocked/player-only messages;
   question UUID/stable retry identity prevents duplicate pairs.
 - Teaching versions differ from frontend2/A3v2. v1(default) keeps original teacher/
-  prompts/MathJax. V2.8 uses keep-first-draft-for-human-review-v1: exact source
-  selection, first parsed writing checkpointed BEFORE review, canonical reuse.
-  Failed material/adaptation/translation/narration reviews retain first usable
-  text with human-review flags; no factual rewrites or source/gap replacement
-  when writing exists. Literal formatting stays visible; only unstorable chars/
-  invalid references are cleaned. Word targets become editing flags. V2 A7 also
-  retains first teacher-update candidates on failed review/alignment. Narrator
-  unavailable: read existing writing through V1 renderer, flagged. Source/owner/
-  identity/lease/storage/TTS fences remain. docs/teaching-v2.md; first_draft.py.
+  prompts/MathJax. V2.8 uses generator-text-with-review-tags-v2: exact source
+  selection; first writing/adaptation/translation/narration checkpointed BEFORE
+  review. Review failures/provider errors become section tags, never correction
+  rewrites. Original citation/format text stays visible; only unstorable chars
+  are replaced and reference metadata restricted. Word targets are flags;
+  oversized display units split without rewording. V2 A7 retains first teacher
+  updates on review/alignment failure. Unrenderable narration reads existing
+  writing or a review notice; findings saved before TTS. Review UI shows tags,
+  notes and original text. Source/owner/identity/lease/storage/TTS fences remain.
+  docs/teaching-v2.md; first_draft.py. V1/V3 policies remain separate.
 - Opt-in V3: services/teaching_v3/, docs/teaching-v3.md. Document-order plan,
   same-page equation definitions; adjacent continuations merge within24k teaching
   chars/full payload bound. Primary coverage differs from supporting citations;
@@ -158,8 +159,7 @@ repair extraction; quality/timing assessments are indexed above.
 
 ## Recent decisions
 
-- V2 retains first drafts for human editing. Existing courses/failed job94c56df7
-  unchanged; user authorized restarting job779c1b64 with the new policy.
+- Existing courses are not regenerated when teaching policies change.
 - Teacher review lists durable text independently of audio. User approved root
   course_archive/ retention beyond24h.
 
@@ -170,10 +170,9 @@ repair extraction; quality/timing assessments are indexed above.
 2026-10-20: approved one-page process/score/timing report exported and visually
 checked: codex_helper/course-generation-report/output/pdf/course-generation-v1-v28-v3.pdf.
 Uses Oct19 assessment; historical scores/timings, no listening assessment.
-2026-10-20: V2 first-draft policy and alignment/translation/A7 docs checked.
-489 backend regressions, 7 edge cases and final 28 focused tests passed; Ruff passed.
-Deployed16 source files match all4 backend services;22 prior results unchanged.
-Job779c1b64 restarted attempt3; first section retained exactly after failed review,
-flagged for human editing. Evidence: codex_helper/first-draft-implementation.md.
-Review UI:44 UI/15 bridge tests passed; codex_helper/review-recovery-*.
+2026-10-20: V2 annotation-only policy/docs, UI tags and first-output retry caches
+verified. 646 backend regressions, final61 focused checks,44 UI/15 bridge tests
+passed; Ruff passed. Deployed10 files match all4 backend services;23 completed
+results unchanged; no jobs interrupted. codex_helper/generator-tags-implementation.md.
+Earlier first-draft evidence: codex_helper/first-draft-implementation.md.
 Earlier QA: codex_helper/{course-version-labels,teaching-v3-comparison,v3-inconsistency-repair}/.

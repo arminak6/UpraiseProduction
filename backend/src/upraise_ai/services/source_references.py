@@ -65,11 +65,13 @@ def display_review(report, source):
     return report
 
 
-def display_citations(text, source, *, strict=True):
+def display_citations(text, source, *, strict=True, preserve_invalid=False):
     if source.source_format in {'doc', 'docx'}:
         def word_replace(match):
             start, end = int(match[2]), int(match[3] or match[2])
             if end < start or end - start > 5000 or not set(range(start, end + 1)).issubset(source.source_blocks):
+                if preserve_invalid:
+                    return match[0]
                 if not strict:
                     return '[Word source reference unavailable]'
                 raise IngestionError('LESSON_CITATIONS_INVALID', retryable=True)
@@ -82,6 +84,8 @@ def display_citations(text, source, *, strict=True):
     def replace(match):
         start, end = int(match[2]), int(match[3] or match[2])
         if end < start or end - start > 5000 or any(block not in mapping for block in range(start, end + 1)):
+            if preserve_invalid:
+                return match[0]
             raise IngestionError("LESSON_CITATIONS_INVALID", retryable=True)
         return f"[CSV rows {mapping[start]['start']}-{mapping[end]['end']}]"
 

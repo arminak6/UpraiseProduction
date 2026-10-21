@@ -203,8 +203,15 @@ class LessonTranslator:
         )
         for revision in range(2):
             self.review_candidate = None
-            translated = self.request(self.settings.lesson_generation_model_id, system, payload, _Translated, 8000)
-            final = self.restore(draft, original, masked, protected, translated)
+            def generate():
+                translated = self.request(self.settings.lesson_generation_model_id, system, payload, _Translated, 8000)
+                return self.restore(draft, original, masked, protected, translated)
+            checkpoint = getattr(self, "candidate_checkpoint", None)
+            if checkpoint:
+                final = checkpoint(generate)
+            else:
+                translated = self.request(self.settings.lesson_generation_model_id, system, payload, _Translated, 8000)
+                final = self.restore(draft, original, masked, protected, translated)
             self.review_candidate = final
             check = self.verify(draft, final, source_language, target_language, learner_level)
             failures = self.validate_review(check, final)

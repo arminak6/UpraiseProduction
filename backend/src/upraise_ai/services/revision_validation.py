@@ -4,7 +4,7 @@ import hashlib
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.aligned_lessons import AlignedReview, AlignedText, AlignedTexts, ContentUnit
-from upraise_ai.services.aligned_models import AlignmentModelError, accepted, validate_material_format
+from upraise_ai.services.aligned_models import accepted, validate_material_format
 from upraise_ai.services.lesson_pipeline import write_json
 from upraise_ai.services.revision_models import correct_revision, validate_revision_text
 
@@ -70,10 +70,12 @@ def validate_aligned_revision(models, section, data, selected, neighbours, saved
                 review = reviewer(models, section, [unit],
                     AlignedTexts(units=[AlignedText(content_unit_id=unit.content_unit_id, text=text)]),
                     data.language, data.options.learner_level, data.level_profiles)
-            except AlignmentModelError as error:
-                if not getattr(models, "preserve_first_draft", False):
+            except Exception as error:
+                from upraise_ai.services.teaching_v2.first_draft import retention_error
+                failure = retention_error(error) if getattr(models, "preserve_first_draft", False) else None
+                if failure is None:
                     raise
-                return retain_first(text, error)
+                return retain_first(text, failure)
             saved.update(alignment_review=review.model_dump(mode="json"), alignment_text_sha256=digest)
         if len(review.units) != 1 or review.units[0].content_unit_id != unit.content_unit_id:
             if getattr(models, "preserve_first_draft", False):

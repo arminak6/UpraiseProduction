@@ -20,35 +20,41 @@ model/speech classes only for a V2 job. Original `lesson_models.py`,
 
 ## Behavior
 
-V2.8 now uses `draft_review_recovery=keep-first-draft-for-human-review-v1`.
-The user requested V1-like DRAFT completion: keep the first usable explanation,
-flag failed checks and let a human edit it later. V1 itself is unchanged. V3
-retains its separate bounded correction/source-excerpt-or-gap recovery policy.
+V2.8 now uses `draft_review_recovery=generator-text-with-review-tags-v2`.
+The generator owns the teaching text; reviewers provide annotations only. Keep
+the first usable explanation, tag failed checks and let a human edit it later.
+V1 itself is unchanged. V3 retains its separate bounded correction/source-excerpt-or-gap
+recovery policy.
 
 - The writer receives exact selected primary evidence and bounded same-document
   definitions. Source selection cannot invent quotations, definitions or repaired
   formulas. Failed selection uses the original primary source with a review flag.
   Optional context defines existing terms; it does not introduce unrelated topics.
-- The first parsed written draft is checkpointed in job staging BEFORE review.
+- The first parsed written draft, difficulty adaptation, translation and narration
+  are checkpointed in job staging BEFORE their respective reviews.
   Source/request/profile/model identity binds this checkpoint. Interrupted review
   can reuse that first draft without paying for a different explanation.
 - Independent material, finding and paragraph entailment checks still identify
   changed facts, invented claims, missing coverage, wrong language and source gaps.
   Reviewers have bounded quote/index/JSON recovery. A failed verdict or unreadable
-  reviewer creates an explicit **Human review required** finding. V2.8 retains the
-  original explanation; it does not run factual correction rewrites or replace
+  reviewer creates an explicit **Human review required** finding. Provider errors
+  and unexpected reviewer-response failures also become findings when a usable
+  generator draft exists. V2.8 retains the original explanation; it does not run
+  factual correction rewrites or replace
   available prose with raw source excerpts or generic gap notices.
 - Formatting problems such as literal newline/Unicode escapes and doubled math
   delimiters stay visible in that first text and receive findings. Only actual
   characters that cannot travel safely through UTF-8/PostgreSQL/XML are replaced
-  with spaces. Invalid out-of-window citation tags are removed and paragraph
-  reference metadata is restricted to actual source numbers, with a citation flag.
+  with spaces. Invalid out-of-window citation tags remain visible in the original
+  text with citation findings; paragraph reference metadata is restricted to actual
+  source numbers. This also handles a paragraph containing only a bad citation.
   Meaning, equations, values and available teaching prose are not reconstructed.
 - Same-level generation reuses canonical text and its warnings. Other levels keep
   their first adapted candidate when a review fails. An unavailable adaptation
   can retain the existing canonical teaching, explicitly flagged. Exceeding the
-  requested word target is an editing finding; unit identity and representable
-  schema bounds remain requirements. The shared plan still links corresponding
+  requested word target is an editing finding, including for same-level canonical
+  reuse. Oversized canonical display units are split without rewording. Unit
+  identity and representable schema bounds remain requirements. The shared plan still links corresponding
   chunks across levels.
 - Translation protects paragraph identity, mathematical notation, code and source
   references. A failed translation review retains the first structurally valid
@@ -58,8 +64,10 @@ retains its separate bounded correction/source-excerpt-or-gap recovery policy.
   completeness review fails, with speech findings. V2 does not repeatedly rewrite
   that narration to satisfy the reviewer. If no usable narration was returned,
   read the existing written teaching through the shared V1 speech renderer and
-  mark it for review. If the writer never returned any usable teaching at all,
-  an explicit human-review notice is the honest last resort.
+  mark it for review. Rendering failures are preflighted and tagged before saving
+  text; if narration cannot be rendered, try the existing writing, then an explicit
+  review notice. The written teaching remains unchanged. If the writer never
+  returned any usable teaching at all, an explicit human-review notice is the last resort.
 - All parts are preflighted before synthesis. Review flags persist with durable
   PostgreSQL teaching text BEFORE TTS, as well as in manifests and narration
   checkpoints. Passed and needs-human-review statuses remain distinct. Cache
@@ -70,13 +78,15 @@ retains its separate bounded correction/source-excerpt-or-gap recovery policy.
   findings into the replacement DRAFT. Unreadable reviewers cannot silently
   approve an edit. Source ownership, unit identity, local reference/encoding
   bounds, leases and atomic replacement still apply; other chunks stay intact.
-- The Review page marks affected parts with a visible banner, expands findings,
-  labels the part selector **Needs review**, and presents the actual text, source
+- The Review page marks affected parts with a visible banner and section tags
+  (for example **Citations**, **Review unavailable**, **Text formatting**, **Length**),
+  expands findings, labels the part selector **Needs review**, and presents the actual text, source
   evidence and narration for the human reviewer. Existing A7 feedback controls
   allow correction. All results remain DRAFT; external approval stays external.
 - Actual storage, source/access/lease and TTS availability failures remain real
-  operational failures. They cannot create nonexistent audio or authorize another
-  owner's material. Prepared teaching text and its flags survive a TTS outage.
+  operational failures. Cancellation, memory exhaustion and ownership loss also
+  retain their worker handling. They cannot create nonexistent audio or authorize
+  another owner's material. Prepared teaching text and its flags survive a TTS outage.
 
 V2 uses `services/teaching_v2/`, especially `first_draft.py`, `models.py`,
 `speech.py` and `review_recovery.py`. The worker enables this policy for V2
