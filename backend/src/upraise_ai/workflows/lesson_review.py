@@ -70,7 +70,7 @@ def review_text(lessons, job_id, principal):
                 continue
             variant = variants.setdefault(level, {"learner_level": level, "chunks": []})
             narration = None
-            if row["metadata"].get("teaching_version") in {"v2", "v3"} and chunk["ssml"]:
+            if row["metadata"].get("teaching_version") in {"v2", "v2.9", "v3"} and chunk["ssml"]:
                 try:
                     narration = "".join(ET.fromstring(chunk["ssml"]).itertext())
                 except ET.ParseError:

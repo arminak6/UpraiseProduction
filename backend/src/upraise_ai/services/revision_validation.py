@@ -40,6 +40,10 @@ def validate_aligned_revision(models, section, data, selected, neighbours, saved
         raise IngestionError("REVISION_CHECKPOINT_CONFLICT")
     section["revision_context"] = {"teacher_feedback": data.revision_request.teacher_review,
                                    "original_chunk": selected.text}
+    if getattr(models, "reviews_final_candidate", False):
+        # V2.9 already judged this fixed topic and independently reviewed C.
+        # Do not enter the historical alignment correction loop after that gate.
+        return saved["text"], rounds
 
     def retain_first(text, error):
         from upraise_ai.schemas.lessons import ReviewReport

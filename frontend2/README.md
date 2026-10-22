@@ -1,9 +1,15 @@
 # UPRAISE client interface
 
 The client-facing UPRAISE interface has four sections: **Upload material**,
-**Generate course**, **Review courses**, and **Start learning**. It connects to the existing backend
+**Generate course**, **Teacher review**, and **Start learning**. It connects to the existing backend
 through a small Python HTTP bridge. The original Streamlit `frontend/` remains
 available independently.
+
+**Version 2.9** is an opt-in teaching/narration choice. It runs writer, reviewer,
+one judge/editing pass and a fresh final review. Unresolved final findings keep
+the judge's output with human-review tags and continue generation. Version 2.8
+remains separately selectable; existing courses keep their recorded versions.
+See [V2.9 behavior and API selection](../backend/docs/teaching-v29.md).
 
 ## Run
 
@@ -59,9 +65,21 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   course. Cancellation uses A6 `CANCEL`. No A6 `RECEIVED` is sent automatically.
 - **Review:** a dedicated course collection uses `GET /v1/lesson-reviews` and
   `GET /v1/lesson-reviews/{job_id}` to read retained teaching text independently
-  of temporary audio. One entry per course, searchable by title/reference, with
-  pagination, custom difficulty levels, full text/source evidence and part
-  navigation. Feedback stays in tab memory per course/part while browsing. A7
+  of temporary audio. The **Teacher review** course selector opens a course with
+  counts of sections needing review, recorded findings and total sections at the
+  selected difficulty. **Needs review** shows sections with findings, missing
+  verdicts or a non-passing automated review; **All sections** also includes those
+  without findings. Tags and finding previews identify what needs checking.
+  Opening a section shows its original saved text, expanded reviewer notes, source
+  references and available audio. V1 audio also works without a separate spoken
+  script. Previous/next navigation follows the selected filter; choosing an
+  unflagged part from the part selector opens All sections. Course switching and
+  pagination preserve per-part feedback and stop obsolete audio responses.
+  One entry per course remains searchable by title/reference, with pagination and
+  custom difficulty levels. Counts and filters are computed from existing review
+  data; browsing never regenerates a course or submits feedback automatically.
+  No backend API or generation behavior changes are required. Feedback stays in
+  tab memory per course/part while browsing. A7
   updates the selected part or its counterparts across levels, with inline
   progress, manual status recovery, and refreshed text after success. No learner
   session is required. Expired/received output and incomplete generations remain

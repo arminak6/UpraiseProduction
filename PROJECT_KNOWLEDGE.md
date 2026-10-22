@@ -30,6 +30,14 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   writing or a review notice; findings saved before TTS. Review UI shows tags,
   notes and original text. Source/owner/identity/lease/storage/TTS fences remain.
   docs/teaching-v2.md; first_draft.py. V1/V3 policies remain separate.
+- Opt-in V2.9 (`teaching_version=v2.9`): services/teaching_v29/; docs/teaching-v29.md.
+  A writer -> B source/level review -> C source-authoritative judge -> fresh B.
+  One judge pass for writing/adaptation/A7/narration; failed/unavailable final
+  review keeps C with per-unit human flags. Unusable C retains A explicitly.
+  A/C use generation model, B review model. C checkpoint precedes final B;
+  source/policy/model changes invalidate cache. New adaptations drop stale
+  canonical findings; actual source warnings remain. A7 avoids legacy edit loops.
+  V2.8 (`v2`) stays selectable; ordinary translation retains its existing checks.
 - Opt-in V3: services/teaching_v3/, docs/teaching-v3.md. Document-order plan,
   same-page equation definitions; adjacent continuations merge within24k teaching
   chars/full payload bound. Primary coverage differs from supporting citations;
@@ -45,9 +53,10 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   Historical omitted request version is V1 by contract; V2.8 needs consistent part/
   level policy, otherwise V2. Missing/unsupported UI provenance shows unknown.
   These are independent of a3-v2 API format; no generation/backfill is needed.
-- Nav: Upload / Generate / Review / Start learning. Review reads durable PG text,
-  levels/parts/source evidence; tab-only feedback and A7 selection persist. Expired
-  text readable; A7 needs completed temporary/archived output. Ownership/course/
+- Nav: Upload / Generate / Teacher review / Start learning. Review selects courses/
+  levels, counts and filters flagged/all sections; original PG text, expanded notes,
+  sources and available audio (including V1). Feedback/A7 selection persist in-tab.
+  Expired text readable; A7 needs completed temporary/archived output. Ownership/
   deletion/publication fences; unpublished candidates hidden, content-free audit.
 - Archive: ignored course_archive/, optional UPRAISE_LESSON_ARCHIVE_DIR on API/
   workers. Manifest/WAV/hash verified; A5/A7/A8/B1 survive staging TTL. A7/B7 removes
@@ -98,15 +107,19 @@ remains a separate Streamlit testbench/player. C3 schema exists.
 - frontend/ Streamlit/AppTest; frontend2/{app,api,ui}.js,index.html,styles.css,
   serve.py bridge,tests/{test_server.py,ui.test.cjs}. README auth/run/Docker allowlist.
 - Review: {schemas,workflows}/lesson_review.py, storage/lessons.py, docs/lesson-review.md.
-  teaching_v2/{first_draft,review_recovery}.py: V2 first-draft/V3 recovery flags.
-  Worker enables V2 generation/A7 and V3 generation. Frontend2 shows part banners,
-  expanded findings and Needs review selectors. Tests: test_teaching_review_recovery.py.
+  teaching_v2/{first_draft,review_recovery}.py: first-draft/recovery flags.
+  Frontend2 picker/counts/filter: app.js/styles.css, tests/ui.test.cjs.
+  Backend flags: test_teaching_review_recovery.py; V2 generation/A7, V3 generation.
   Archive: storage/lesson_archive.py, services/lesson_replacement.py,
   workflows/archive_lessons.py, docs/lesson-archive.md. Matching integration tests.
 - codex_helper/: ignored helpers/evidence; FUTURE_UPDATES.md ignored backlog.
   Source/script/timing/audio QA: turing-content-verification.md,
   level-content-assessment.md, teaching-v28-quality-assessment/assessment.md,
   teaching-v3-comparison/assessment.md.
+- Latest paired V2.8/V2.9 random-graphs assessment:
+  codex_helper/teaching-v29-comparison/assessment.md. Same PDF/attempt/settings;
+  explicit flags36/36 ->8/33, shorter scripts, but unflagged ratio/Poisson errors
+  and misleading page31 extraction remain. Voices differ; no listening assessment.
 
 ## Commands
 
@@ -153,26 +166,36 @@ Sequential workers/variants; missing audio needs synthesis. Archive noTTL; expir
 unsaved text read-only. Word fidelity needs review. NonUTF8/headerless CSV/URLs,
 A7 idempotency/structural edits and mid-session level switching are future work.
 Gateway/Moodle/HA/backups/erasure/orphans unverified; V1 final review/grounding deferred.
-Preserve old courses; no unsolicited submissions. UI desktop/mobile checked;
-no listening assessment or Markdown/LaTeX typesetter/runtime npm. V3 does not
+Preserve old courses; no unsolicited submissions. Oct21 review visual QA unavailable;
+no persistent human-reviewed/dismissed status, listening assessment or LaTeX renderer. V3 does not
 repair extraction; quality/timing assessments are indexed above.
 
 ## Recent decisions
 
 - Existing courses are not regenerated when teaching policies change.
-- Teacher review lists durable text independently of audio. User approved root
-  course_archive/ retention beyond24h.
 
 ## User notes (preserve verbatim)
 
 ## Last verified
 
+2026-10-21: Read-only comparison of latest V2.9 d7e037de and V2.8 8edaa522.
+Checked both manifests/reports/scripts,69 WAV hashes/durations, pinned PDF hash,
+original PDF pages2/4/23/31, job timings and52 judge checkpoints. No course or
+application changes. Evidence: codex_helper/teaching-v29-comparison/assessment.md.
+2026-10-21: V2.9 deployed and separately selectable;617 shared regressions,
+24 focused checks (overlapping),53 UI/15 bridge tests; Ruff/syntax/diff passed.
+Checked services/teaching_v29/*, generation/catalog/review schemas, worker factory,
+aligned/revision hooks, tests/test_teaching_v29*.py and frontend2 version UI.
+12 runtime files match host in four backend services; eight services healthy.
+All27 completed result hashes unchanged; no real course/model generation submitted.
+Evidence: codex_helper/teaching-v29-{verification.json,implementation.md}.
+2026-10-21: Teacher review picker/counts/filters/text/audio/A7:51 UI/15 bridge tests,
+JS syntax/diff checks. Frontend-only deploy healthy; served assets match source;
+other containers unchanged. Browser unavailable. Checked frontend2/{app.js,
+styles.css,index.html,README.md,tests/ui.test.cjs}; codex_helper/teacher-review-implementation.md.
 2026-10-20: approved one-page process/score/timing report exported and visually
 checked: codex_helper/course-generation-report/output/pdf/course-generation-v1-v28-v3.pdf.
 Uses Oct19 assessment; historical scores/timings, no listening assessment.
-2026-10-20: V2 annotation-only policy/docs, UI tags and first-output retry caches
-verified. 646 backend regressions, final61 focused checks,44 UI/15 bridge tests
-passed; Ruff passed. Deployed10 files match all4 backend services;23 completed
-results unchanged; no jobs interrupted. codex_helper/generator-tags-implementation.md.
-Earlier first-draft evidence: codex_helper/first-draft-implementation.md.
+2026-10-20: V2 retention deployed;646 backend/61 focused checks passed;23 completed
+results unchanged. codex_helper/{generator-tags,first-draft}-implementation.md.
 Earlier QA: codex_helper/{course-version-labels,teaching-v3-comparison,v3-inconsistency-repair}/.

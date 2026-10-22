@@ -139,7 +139,7 @@ class Backend {
             const value = bundle(jobId, job.input.lesson_id, job.input.document_ids[0]);
             value.variants = Object.fromEntries(Object.entries(value.variants).filter(([level]) => !job.input.levels || job.input.levels.includes(level)));
             for (const lesson of Object.values(value.variants)) Object.assign(lesson, { language: job.input.language, voice: job.input.voice });
-            if (["v2", "v3"].includes(job.input.teaching_version)) for (const lesson of Object.values(value.variants)) lesson.versions = { teaching_version: job.input.teaching_version };
+            if (["v2", "v2.9", "v3"].includes(job.input.teaching_version)) for (const lesson of Object.values(value.variants)) lesson.versions = { teaching_version: job.input.teaching_version };
             this.bundles.set(jobId, value); this.hashes.set(jobId, "c".repeat(64));
           } else {
             const value = this.bundles.get(job.input.lesson_job_id);

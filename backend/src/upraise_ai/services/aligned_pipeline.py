@@ -266,7 +266,8 @@ class AlignedLessonPipeline(LessonPipeline):
                             if not first and len(item.text.split()) > data.options.max_chunk_words:
                                 raise UnitSizeError(unit.content_unit_id)
                             report = reports[str(unit.content_unit_id)]
-                            flags = [*source_issues(section), *(unit.canonical_review.issues if unit.canonical_review else [])]
+                            flags = [*source_issues(section), *(unit.canonical_review.issues if unit.canonical_review
+                                and not getattr(self.models, "reviews_final_candidate", False) else [])]
                             report = ReviewReport(approved=report.approved and not flags, summary=report.summary,
                                 issues=[*report.issues, *flags], revision_instructions=report.revision_instructions)
                             values.append({'content_unit_id': str(unit.content_unit_id), 'text': item.text,

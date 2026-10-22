@@ -1,5 +1,9 @@
 # Optional teaching and narration V2
 
+For the separate opt-in V2.9 writer/reviewer/judge/final-review workflow, see
+[Teaching and narration V2.9](teaching-v29.md). `"v2"` retains V2.8 behavior;
+`"v2.9"` selects the new workflow.
+
 This is independent of the `/v2/lesson-jobs` aligned-level API and the `frontend2`
 application name. Both generation APIs accept a new top-level field:
 
@@ -8,8 +12,8 @@ application name. Both generation APIs accept a new top-level field:
 ```
 
 Omitting it or sending `"v1"` uses the original generator, prompts and speech
-converter. Frontend V2 defaults to **Version 1 · Current**. Choose **Version 2 ·
-Natural formula explanations** in Generate course to opt in. Version choices
+converter. Frontend V2 defaults to **Version 1 · Current**. Choose **Version 2.8 ·
+First draft with review flags** in Generate course to opt in. Version choices
 survive navigation and participate in request identity; changing versions after
 an uncertain submission creates a new idempotency key. Existing V1 request
 fingerprints retain their original metadata shape.

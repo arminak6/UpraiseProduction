@@ -28,7 +28,7 @@
     startAttempt: null, startPending: null, sessionToken: "", questionsConsent: true,
     deletion: null, revision: null, revisionUncertain: new Set(),
     reviewCourses: [], reviewError: "", reviewMore: false, reviewSearch: "", reviewEditor: null,
-    reviewDrafts: new Map(),
+    reviewDrafts: new Map(), reviewScope: "flagged",
   };
   let toastTimer;
   let pollTimer;
@@ -57,7 +57,7 @@
     const records = Object.values(course.variants || {});
     if (!records.length) records.push(course);
     const version = records[0].teaching_version;
-    if (!["v1", "v2", "v3"].includes(version) || records.some(item => item.teaching_version !== version)) return "Version unknown";
+    if (!["v1", "v2", "v2.9", "v3"].includes(version) || records.some(item => item.teaching_version !== version)) return "Version unknown";
     const policy = records[0].teaching_policy;
     const revision = records.every(item => item.teaching_policy === policy) && /^teaching-narration-v(2\.\d+)$/.exec(policy || "");
     return `Generation ${version === "v2" && revision ? `V${revision[1]}` : version.toUpperCase()}`;
@@ -133,7 +133,7 @@
     if (state.page === "generate") renderGenerate();
     if (state.page === "review") renderReview();
     if (state.page === "learn") renderLearn();
-    document.title = `UPRAISE · ${{ materials: "Your material", generate: "Generate course", review: "Review courses", learn: "Start learning" }[state.page]}`;
+    document.title = `UPRAISE · ${{ materials: "Your material", generate: "Generate course", review: "Teacher review", learn: "Start learning" }[state.page]}`;
   }
 
   async function loadMaterials() {
@@ -356,17 +356,26 @@
   function unresolvedReview(report) {
     return report?.issues?.some(issue => issue.message?.startsWith("Human review required: ")) || false;
   }
-  function reviewDetails(report) {
-    if (!report) return "";
-    const flagged = unresolvedReview(report);
+  function needsReview(report) {
+    return !report || report.approved !== true || Boolean(report.issues?.length);
+  }
+  function reviewTags(report, humanFlagsOnly = false) {
     const labels = { accuracy: "Accuracy", citations: "Citations", clarity: "Clarity", bias: "Bias", coverage: "Coverage", source: "Source", speech: "Narration" };
-    const tags = [...new Set((report.issues || []).filter(issue => issue.message?.startsWith("Human review required: ")).map(issue => {
+    const tags = [...new Set((report?.issues || []).filter(issue => !humanFlagsOnly || issue.message?.startsWith("Human review required: ")).map(issue => {
       if (/REVIEW_UNAVAILABLE|MODEL_OUTPUT_INVALID|ALIGNMENT_MODEL_INVALID|PROVIDER_ERROR/.test(issue.message)) return "Review unavailable";
       if (/TEXT_INVALID/.test(issue.message)) return "Text formatting";
       if (/UNIT_TOO_LARGE|TEXT_TOO_LONG/.test(issue.message)) return "Length";
       return labels[issue.category] || "Human review";
     }))];
-    return `${flagged ? `<div class="review-flag-banner" role="note"><strong>This part needs human review</strong><div class="review-tags" aria-label="Review tags">${tags.map(tag => `<span class="review-tag">${escape(tag)}</span>`).join("")}</div><p>Generation continued with unresolved automated checks. Review the text, source and audio before teaching.</p></div>` : ""}<details class="advanced" ${flagged ? "open" : ""}><summary>Automated review and source evidence</summary><p class="small-copy">${escape(report.summary || "Automated checks are supporting evidence; human review remains required.")}</p>${report.issues?.length ? `<ul class="review-findings">${report.issues.map(issue => `<li>${escape(issue.message)}</li>`).join("")}</ul>` : ""}<p class="small-copy">AI checks do not constitute human approval.</p></details>`;
+    return tags.length || humanFlagsOnly ? tags : !report ? ["Review unavailable"] : needsReview(report) ? ["Review needed"] : [];
+  }
+  function reviewTagMarkup(tags) {
+    return tags.map(tag => `<span class="review-tag">${escape(tag)}</span>`).join("");
+  }
+  function reviewDetails(report, expanded = false) {
+    if (!report) return "";
+    const flagged = unresolvedReview(report);
+    return `${flagged ? `<div class="review-flag-banner" role="note"><strong>This part needs human review</strong><div class="review-tags" aria-label="Review tags">${reviewTagMarkup(reviewTags(report, true))}</div><p>Generation continued with unresolved automated checks. Review the text, source and audio before teaching.</p></div>` : ""}<details class="advanced review-evidence" ${flagged || expanded ? "open" : ""}><summary>Automated review and source evidence</summary><p class="small-copy">${escape(report.summary || "Automated checks are supporting evidence; human review remains required.")}</p>${report.issues?.length ? `<ul class="review-findings">${report.issues.map(issue => `<li>${escape(issue.message)}</li>`).join("")}</ul>` : ""}<p class="small-copy">AI checks do not constitute human approval.</p></details>`;
   }
   function renderGenerate() {
     const ready = state.materials.filter(item => item.status === "DONE");
@@ -381,7 +390,7 @@
   function generationForm(ready) {
     return `<form id="generation-form"><fieldset class="plain-fieldset" ${state.generationBusy ? "disabled" : ""}><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.filename)}</strong><small>${escape(item.course_id)} · ${escape(languageLabel(item.language))}</small></span><input type="radio" name="source" value="${escape(item.document_id)}" ${item.document_id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>
       <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div><div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
-      <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2 · Natural formula explanations</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option></select><p class="small-copy" id="teaching-version-help">Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2 provides natural formula explanations. Each generation creates a new course; earlier versions remain available.</p></div></div>
+      <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2.8 · First draft with review flags</option><option value="v2.9" ${state.draft.teachingVersion === "v2.9" ? "selected" : ""}>Version 2.9 · Writer, reviewer and judge</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option></select><p class="small-copy" id="teaching-version-help">Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2.9 adds one judge edit and a fresh final review; unresolved findings keep the judge’s text with human-review flags. Version 2.8 keeps the first draft with review flags. Each generation creates a new course; earlier versions remain available.</p></div></div>
       <div class="form-section"><fieldset class="plain-fieldset" aria-describedby="generation-level-help"><legend class="step-label"><span>3</span>Choose difficulty levels</legend><div class="generation-level-options">${configuredLevels().map(level => `<label class="level-option"><input type="checkbox" name="levels" value="${escape(level)}" ${selectedGenerationLevels().includes(level) ? "checked" : ""}><span><strong>${escape(levelLabel(level))}</strong>${levelDescriptions[level] ? `<small>${escape(levelDescriptions[level])}</small>` : ""}</span></label>`).join("")}</div><p class="small-copy" id="generation-level-help">Choose one or more levels. We’ll create text and narration only for your selection.</p><p class="inline-error" id="generation-level-error" ${selectedGenerationLevels().length ? "hidden" : ""}>Select at least one difficulty level.</p></fieldset></div>
       <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
       <button class="button button-wide generate-submit" type="submit" ${selectedGenerationLevels().length ? "" : "disabled"}>${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
@@ -409,7 +418,7 @@
     if (words > maximum) { state.generationError = "Target words must be at or below the maximum words per part."; renderGenerate(); return; }
     state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize, levels, teachingVersion: form.elements.teachingVersion.value };
     const body = { lesson_id: title, course_id: material.course_id, activity_id: material.activity_id, document_ids: [material.document_id], language: state.draft.language, voice: state.draft.voice, levels, options: { source_window_pages: windowSize, target_chunk_words: words, max_chunk_words: maximum } };
-    if (["v2", "v3"].includes(state.draft.teachingVersion)) body.teaching_version = state.draft.teachingVersion;
+    if (["v2", "v2.9", "v3"].includes(state.draft.teachingVersion)) body.teaching_version = state.draft.teachingVersion;
     const signature = JSON.stringify(body);
     if (state.generationAttempt?.signature !== signature) state.generationAttempt = { signature, key: crypto.randomUUID() };
     state.generationBusy = true; state.generationError = ""; renderGenerate();
@@ -530,7 +539,7 @@
     const draft = state.reviewDrafts.get(reviewDraftKey(editor));
     editor.text = draft?.text || ""; editor.all = draft?.all || false; editor.error = "";
   }
-  async function openReview(id, level = "", index = 0) {
+  async function openReview(id, level = "", index) {
     if (state.reviewEditor?.busy) return;
     const previous = state.reviewEditor;
     if (previous?.bundle) rememberReviewDraft(previous);
@@ -542,7 +551,10 @@
       if (state.reviewEditor !== editor) return;
       editor.bundle = bundle;
       editor.level = bundle.levels.includes(level) ? level : bundle.levels[0];
-      editor.index = Math.max(0, Math.min(index, bundle.variants[editor.level].chunks.length - 1));
+      const chunks = bundle.variants[editor.level].chunks;
+      const firstFlagged = chunks.findIndex(chunk => needsReview(chunk.reviewer_report));
+      const preferred = Number.isInteger(index) ? index : state.reviewScope === "flagged" && firstFlagged >= 0 ? firstFlagged : 0;
+      editor.index = Math.max(0, Math.min(preferred, chunks.length - 1));
       const draft = state.reviewDrafts.get(reviewDraftKey(editor));
       editor.text = draft?.text || ""; editor.all = draft?.all || false;
     } catch (error) { if (state.reviewEditor === editor) editor.error = error.message; }
@@ -560,15 +572,44 @@
     if (!courses.length) return `${alert}<div class="card empty-state">${icon("book")}<h3>${state.reviewSearch ? "No matching courses" : "Your teaching text will appear here"}</h3><p>${state.reviewSearch ? "Try another course title or reference." : "Generate a course to begin reviewing its explanations, one part at a time."}</p>${!state.reviewSearch ? '<a class="button button-secondary" href="#generate">Generate course</a>' : ""}</div>`;
     return `${alert}<div class="review-course-list">${courses.map(course => `<article class="card review-course-row"><div><div class="summary-meta">${badge("AI-generated draft", "badge-amber")}${badge(course.revision_available && !expired(course.audio_expires_at) ? "Ready to revise" : "Text available")}</div><h3>${escape(course.lesson_id)}</h3><p class="small-copy">${escape(course.course_id)} · ${escape(course.activity_id)} · ${escape(languageLabel(course.language))}</p>${levelChips(course.levels)}<p class="small-copy">${course.levels.map(level => `${escape(levelLabel(level))}: ${Number(course.chunk_counts[level])} parts`).join(" · ")}</p></div><button class="button button-secondary" data-action="review-course" data-id="${escape(course.job_id)}">${icon("eye")}Review course ${icon("arrow")}</button></article>`).join("")}</div>`;
   }
+  function reviewCoursePicker(editor) {
+    const courses = new Map(state.reviewCourses.map(course => [course.job_id, course]));
+    if (editor?.bundle && !courses.has(editor.id)) courses.set(editor.id, editor.bundle);
+    return `<section class="card review-course-picker" aria-label="Choose a course to review"><div class="field"><label for="review-course-select">Course to review</label><select id="review-course-select" ${editor?.busy || !courses.size ? "disabled" : ""}><option value="">Choose a course…</option>${[...courses.values()].map(course => {
+      const created = new Date(course.created_at);
+      const date = Number.isFinite(created.getTime()) ? created.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+      const version = ["v1", "v2", "v2.9", "v3"].includes(course.teaching_version) ? course.teaching_version.toUpperCase() : "Version unknown";
+      return `<option value="${escape(course.job_id)}" ${editor?.id === course.job_id ? "selected" : ""}>${escape([course.lesson_id, version, course.course_id, date].filter(Boolean).join(" · "))}</option>`;
+    }).join("")}</select><small>Open the saved text, review findings and source references for a course.</small></div>${editor && state.reviewMore ? '<button class="button button-secondary button-sm" data-action="load-more-reviews">Load more courses</button>' : ""}</section>`;
+  }
+  function visibleReviewParts(editor) {
+    return editor.bundle.variants[editor.level].chunks.flatMap((chunk, index) =>
+      state.reviewScope === "all" || needsReview(chunk.reviewer_report) ? [index] : []);
+  }
+  function adjacentReviewPart(editor, direction) {
+    const indices = visibleReviewParts(editor);
+    return direction < 0 ? indices.filter(index => index < editor.index).at(-1) : indices.find(index => index > editor.index);
+  }
+  function reviewSectionBrowser(editor) {
+    const chunks = editor.bundle.variants[editor.level].chunks;
+    const flagged = chunks.filter(chunk => needsReview(chunk.reviewer_report)).length;
+    const findings = chunks.reduce((count, chunk) => count + (chunk.reviewer_report?.issues?.length || 0), 0);
+    const indices = visibleReviewParts(editor);
+    return `<section class="review-dashboard" aria-labelledby="review-sections-title"><dl class="review-stats" aria-label="Review summary for ${escape(levelLabel(editor.level))}"><div><dt>Sections needing review</dt><dd data-review-count="flagged">${flagged}</dd></div><div><dt>Recorded findings</dt><dd data-review-count="findings">${findings}</dd></div><div><dt>Total sections at this level</dt><dd data-review-count="total">${chunks.length}</dd></div></dl><div class="section-heading"><div><h2 id="review-sections-title">Sections to check</h2><p>Flags identify things to check; the teacher decides what needs changing.</p></div><div class="review-scope" role="group" aria-label="Sections to show"><button type="button" data-action="review-filter" data-scope="flagged" aria-pressed="${state.reviewScope === "flagged"}">Needs review (${flagged})</button><button type="button" data-action="review-filter" data-scope="all" aria-pressed="${state.reviewScope === "all"}">All sections (${chunks.length})</button></div></div>${indices.length ? `<ul class="review-section-list" aria-label="Course sections">${indices.map(index => {
+      const chunk = chunks[index], report = chunk.reviewer_report;
+      const message = report?.issues?.[0]?.message || (needsReview(report) ? report?.summary || "Automated review is unavailable. Check this section against its source." : "No automated findings recorded. Human review is still required.");
+      return `<li><button type="button" class="review-section ${editor.index === index ? "selected" : ""}" data-action="review-open-section" data-index="${index}" ${editor.index === index ? 'aria-current="true"' : ""} ${editor.busy ? "disabled" : ""}><span class="review-section-title"><strong>Part ${index + 1} — ${escape(partTitle(chunk))}</strong>${icon("arrow")}</span><span class="review-tags">${reviewTagMarkup(reviewTags(report))}</span><span class="review-section-note">${escape(message.replace(/^Human review required: /, "").slice(0, 200))}${message.length > 200 ? "…" : ""}</span><span class="review-section-source">${escape(sourceReferences(chunk.sources))}</span></button></li>`;
+    }).join("")}</ul>` : '<div class="card review-no-findings" role="status"><h3>No automated findings for this level</h3><p>You can still read every section and request changes.</p><button class="button button-secondary button-sm" data-action="review-filter" data-scope="all">Show all sections</button></div>'}</section>`;
+  }
   function renderReview() {
     releaseReviewAudio();
     const editor = state.reviewEditor;
-    const heading = intro("03", "A TEACHER’S PERSPECTIVE", "Good explanations grow<br>with <em>your feedback.</em>", "Read your courses, check each part, and guide the next revision.");
+    const heading = intro("03", "TEACHER REVIEW", "See what needs<br><em>your attention.</em>", "Choose a course, inspect flagged sections, and guide the next revision.");
     if (!editor) {
-      main.innerHTML = `${heading}<section aria-labelledby="review-courses-title"><div class="section-heading"><div><h2 id="review-courses-title">Courses to review <span class="count-pill">${state.reviewCourses.length}</span></h2><p>All retained teaching text, including courses whose temporary narration has expired.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses to review</span><input id="review-search" type="search" placeholder="Find a course…" value="${escape(state.reviewSearch)}"></label></div><div id="review-results">${reviewCards()}</div>${state.reviewMore ? '<button class="button button-secondary load-more" data-action="load-more-reviews">Load more courses</button>' : ""}</section>`;
+      main.innerHTML = `${heading}${reviewCoursePicker(null)}<section aria-labelledby="review-courses-title"><div class="section-heading"><div><h2 id="review-courses-title">Courses to review <span class="count-pill">${state.reviewCourses.length}</span></h2><p>All retained teaching text, including courses whose temporary narration has expired.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search courses to review</span><input id="review-search" type="search" placeholder="Find a course…" value="${escape(state.reviewSearch)}"></label></div><div id="review-results">${reviewCards()}</div>${state.reviewMore ? '<button class="button button-secondary load-more" data-action="load-more-reviews">Load more courses</button>' : ""}</section>`;
       return;
     }
-    const back = '<button class="back-button" data-action="review-back">← Back to courses to review</button>';
+    const back = '<button class="back-button" data-action="review-back">← Back to courses to review</button>' + reviewCoursePicker(editor);
     if (editor.loading) { main.innerHTML = `${heading}${back}<div class="card empty-state" role="status">${icon("loader", "spinner")}<h3>Loading teaching text…</h3></div>`; return; }
     if (!editor.bundle) { main.innerHTML = `${heading}${back}${errorBox(editor.error, "reload-review", "Reload course text")}`; return; }
     const bundle = editor.bundle, lesson = bundle.variants[editor.level], chunk = lesson.chunks[editor.index];
@@ -579,14 +620,16 @@
     main.innerHTML = `${heading}${back}<div class="review-course-heading"><div><h2>${escape(bundle.lesson_id)}</h2><p class="small-copy">${escape(bundle.course_id)} · ${escape(languageLabel(bundle.language))} · ${escape(bundle.voice)} · Teaching ${escape((bundle.teaching_version || "v1").toUpperCase())}</p></div>${badge("AI-generated draft · Human review required", "badge-amber")}</div>
       ${job ? `<div class="review-progress" aria-live="polite">${generationView(job)}</div>` : ""}
       ${!available ? `<div class="learning-note">${icon("info")}<div><strong>Teaching text remains available</strong><p>${escape(reviewUnavailable(bundle))}</p><a class="text-button" href="#generate">Go to Generate course ${icon("arrow")}</a></div></div>` : ""}
-      <div class="form-grid review-selectors"><div class="field"><label for="review-level">Learning level</label><select id="review-level" ${editor.busy ? "disabled" : ""}>${bundle.levels.map(level => `<option value="${escape(level)}" ${editor.level === level ? "selected" : ""}>${escape(levelLabel(level))}</option>`).join("")}</select></div><div class="field"><label for="review-part">Course part</label><select id="review-part" ${editor.busy ? "disabled" : ""}>${lesson.chunks.map((part, index) => `<option value="${index}" ${editor.index === index ? "selected" : ""}>Part ${index + 1}${unresolvedReview(part.reviewer_report) ? " · Needs review" : ""} — ${escape(partTitle(part))}</option>`).join("")}</select></div></div>
-      <div class="review-workspace"><section class="card card-padding review-reading" aria-labelledby="review-part-title"><div class="card-title-row"><h2 id="review-part-title">Part ${editor.index + 1} of ${lesson.chunks.length}</h2>${badge(levelLabel(editor.level))}</div><div class="review-full-text">${textParagraphs(chunk.text, "lesson-paragraph")}</div>${reviewNarration(chunk, bundle, available && !disabled)}<p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report)}<div class="lesson-navigation"><button class="button button-secondary" data-action="review-previous" ${editor.index === 0 || editor.busy ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button button-secondary" data-action="review-next" ${editor.index === lesson.chunks.length - 1 || editor.busy ? "disabled" : ""}>Next part ${icon("arrow")}</button></div></section>
+      <div class="form-grid review-selectors"><div class="field"><label for="review-level">Learning level</label><select id="review-level" ${editor.busy ? "disabled" : ""}>${bundle.levels.map(level => `<option value="${escape(level)}" ${editor.level === level ? "selected" : ""}>${escape(levelLabel(level))} · ${bundle.variants[level].chunks.filter(part => needsReview(part.reviewer_report)).length} to check</option>`).join("")}</select></div><div class="field"><label for="review-part">Course part</label><select id="review-part" ${editor.busy ? "disabled" : ""}>${lesson.chunks.map((part, index) => `<option value="${index}" ${editor.index === index ? "selected" : ""}>Part ${index + 1}${needsReview(part.reviewer_report) ? " · Needs review" : ""} — ${escape(partTitle(part))}</option>`).join("")}</select></div></div>
+      ${reviewSectionBrowser(editor)}
+      <div class="review-workspace"><section class="card card-padding review-reading" aria-labelledby="review-part-title"><div class="card-title-row"><h2 id="review-part-title" tabindex="-1">Part ${editor.index + 1} of ${lesson.chunks.length}</h2>${badge(levelLabel(editor.level))}</div><div class="review-full-text">${textParagraphs(chunk.text, "lesson-paragraph")}</div>${reviewNarration(chunk, bundle, available && !disabled)}<p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report, needsReview(chunk.reviewer_report))}<div class="lesson-navigation"><button class="button button-secondary" data-action="review-previous" ${!Number.isInteger(adjacentReviewPart(editor, -1)) || editor.busy ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button button-secondary" data-action="review-next" ${!Number.isInteger(adjacentReviewPart(editor, 1)) || editor.busy ? "disabled" : ""}>Next part ${icon("arrow")}</button></div></section>
       <aside class="card card-padding review-feedback" aria-labelledby="feedback-title"><h2 id="feedback-title">Your feedback</h2><p class="small-copy">Describe how this part should change. Updating replaces its text and narration in the same course.</p>${editor.uncertain || state.revisionUncertain.has(editor.id) ? `${errorBox("The previous revision may already have been accepted. Refresh the course and check its text before preparing another request. No revision is retried automatically.")}<button class="button button-secondary" data-action="reload-review">Refresh course text</button><button class="text-button" data-action="prepare-new-review">I checked; prepare new request</button>` : `<form id="review-form"><fieldset class="plain-fieldset" ${disabled ? "disabled" : ""}><div class="field"><label for="review-feedback">What would you change in part ${editor.index + 1}?</label><textarea id="review-feedback" maxlength="8000" required placeholder="e.g. Add a practical example and explain the key term more simply.">${escape(editor.text)}</textarea><small>Your comments stay in this tab while you move between parts.</small></div>${bundle.levels.length > 1 ? `<label class="checkbox-label"><input id="review-all" type="checkbox" ${editor.all ? "checked" : ""}>Apply this change to the corresponding part in every available level</label>` : ""}<button class="button button-wide" type="submit">${icon(editor.busy || pending ? "loader" : "edit", editor.busy || pending ? "spinner" : "")}${editor.busy ? "Submitting…" : pending ? "Revision in progress…" : "Update this part"}</button></fieldset>${editor.error ? errorBox(editor.error) : ""}</form>`}<p class="preview-note">${icon("info")}The updated explanation remains a draft for human review.</p></aside></div>`;
   }
 
   function reviewNarration(chunk, bundle, playable) {
-    if (!["v2", "v3"].includes(bundle.teaching_version) || !chunk.narration_text) return "";
-    return `<details class="advanced review-narration"><summary>Spoken explanation · Version ${bundle.teaching_version === "v3" ? "3" : "2"}</summary><div class="review-narration-text result-text">${textParagraphs(chunk.narration_text, "lesson-paragraph")}</div><p class="small-copy">Check the formula explanations and listen before approving this draft.</p>${playable ? `<div class="answer-audio-controls"><button class="button button-secondary button-sm" data-action="review-listen">${icon("headphones")}Listen to this part</button><button class="button button-secondary button-sm" data-action="review-stop" disabled>${icon("stop")}Stop narration</button></div><audio id="review-audio" controls preload="none" aria-label="Narration for this course part" style="display:block;width:100%;margin-top:14px"></audio>` : ""}</details>`;
+    const scripted = ["v2", "v2.9", "v3"].includes(bundle.teaching_version) && Boolean(chunk.narration_text);
+    if (!scripted && !playable) return "";
+    return `<details class="advanced review-narration"><summary>${scripted ? `Spoken explanation · Version ${bundle.teaching_version === "v3" ? "3" : bundle.teaching_version === "v2.9" ? "2.9" : "2"}` : "Generated narration"}</summary>${scripted ? `<div class="review-narration-text result-text">${textParagraphs(chunk.narration_text, "lesson-paragraph")}</div>` : ""}<p class="small-copy">Listen while checking the teaching text and its source references.</p>${playable ? `<div class="answer-audio-controls"><button class="button button-secondary button-sm" data-action="review-listen">${icon("headphones")}Listen to this part</button><button class="button button-secondary button-sm" data-action="review-stop" disabled>${icon("stop")}Stop narration</button></div><audio id="review-audio" controls preload="none" aria-label="Narration for this course part" style="display:block;width:100%;margin-top:14px"></audio>` : ""}</details>`;
   }
   function releaseReviewAudio() {
     ++reviewAudioEpoch;
@@ -990,7 +1033,20 @@
     if (action === "connection-info") { connectionInfo(); return; }
     if (action === "refresh-connection") { modal.close(); await refreshWorkspace(); return; }
     if (action === "refresh-workspace") { await refreshWorkspace(); return; }
-    if (action === "review-course") { await openReview(id, control.dataset.level || "", Number(control.dataset.part || 0)); return; }
+    if (action === "review-course") { await openReview(id, control.dataset.level || "", control.dataset.part === undefined ? undefined : Number(control.dataset.part)); return; }
+    if (action === "review-filter") {
+      const editor = state.reviewEditor, scope = control.dataset.scope;
+      if (!editor?.bundle || editor.busy || !["flagged", "all"].includes(scope)) return;
+      state.reviewScope = scope;
+      const indices = visibleReviewParts(editor);
+      if (scope === "flagged" && indices.length && !indices.includes(editor.index)) selectReviewPart(editor, editor.level, indices[0]);
+      renderReview(); document.querySelector(`[data-action="review-filter"][data-scope="${scope}"]`)?.focus(); return;
+    }
+    if (action === "review-open-section") {
+      const editor = state.reviewEditor, index = Number(control.dataset.index);
+      if (!editor?.bundle || editor.busy || !Number.isInteger(index) || !visibleReviewParts(editor).includes(index)) return;
+      selectReviewPart(editor, editor.level, index); renderReview(); document.querySelector("#review-part-title")?.focus(); return;
+    }
     if (action === "review-back") {
       if (state.reviewEditor?.busy) return;
       if (state.reviewEditor?.bundle) rememberReviewDraft(state.reviewEditor);
@@ -1013,8 +1069,8 @@
     if (action === "review-previous" || action === "review-next") {
       const editor = state.reviewEditor;
       if (!editor?.bundle || editor.busy) return;
-      const index = editor.index + (action === "review-next" ? 1 : -1);
-      if (index >= 0 && index < editor.bundle.variants[editor.level].chunks.length) { selectReviewPart(editor, editor.level, index); renderReview(); }
+      const index = adjacentReviewPart(editor, action === "review-next" ? 1 : -1);
+      if (Number.isInteger(index)) { selectReviewPart(editor, editor.level, index); renderReview(); }
       return;
     }
     if (action === "create-from-material") { selectedSource(id); state.activeJobId = null; state.generatedId = null; navigate("generate"); return; }
@@ -1113,8 +1169,27 @@
     if (target.id === "revision-level") { state.revision.level = target.value; state.revision.index = 0; renderRevisionDialog(); }
     if (target.id === "revision-part") { state.revision.index = Number(target.value); renderRevisionDialog(); }
     if (target.id === "revision-all") state.revision.all = target.checked;
-    if (target.id === "review-level" && state.reviewEditor && !state.reviewEditor.busy) { selectReviewPart(state.reviewEditor, target.value, 0); renderReview(); }
-    if (target.id === "review-part" && state.reviewEditor && !state.reviewEditor.busy) { selectReviewPart(state.reviewEditor, state.reviewEditor.level, Number(target.value)); renderReview(); }
+    if (target.id === "review-course-select" && !state.reviewEditor?.busy) {
+      if (target.value) void openReview(target.value).catch(error => toast(error.message));
+      else {
+        if (state.reviewEditor?.bundle) rememberReviewDraft(state.reviewEditor);
+        state.reviewEditor = null; renderReview();
+      }
+    }
+    if (target.id === "review-level" && state.reviewEditor?.bundle && !state.reviewEditor.busy) {
+      const chunks = state.reviewEditor.bundle.variants[target.value]?.chunks;
+      if (chunks) {
+        const first = state.reviewScope === "flagged" ? chunks.findIndex(chunk => needsReview(chunk.reviewer_report)) : 0;
+        selectReviewPart(state.reviewEditor, target.value, Math.max(0, first)); renderReview();
+      }
+    }
+    if (target.id === "review-part" && state.reviewEditor?.bundle && !state.reviewEditor.busy) {
+      const editor = state.reviewEditor, index = Number(target.value), chunk = editor.bundle.variants[editor.level].chunks[index];
+      if (chunk && Number.isInteger(index)) {
+        if (!needsReview(chunk.reviewer_report)) state.reviewScope = "all";
+        selectReviewPart(editor, editor.level, index); renderReview();
+      }
+    }
     if (target.id === "review-all" && state.reviewEditor) { state.reviewEditor.all = target.checked; rememberReviewDraft(state.reviewEditor); }
     if (target.id === "playback-position" && state.player) {
       const player = state.player, offset = Number(target.value), autoplay = Boolean(player.seekPlaying);

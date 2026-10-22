@@ -172,6 +172,31 @@ test("V3 continuous teaching is selectable, survives navigation and has a distin
   assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
 });
 
+test("V2.9 judge workflow is selectable and has a distinct request from V2.8", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("generate");
+  assert.match(h.find('option[value="v2.9"]').textContent, /2\.9.*judge/);
+  h.input("#teaching-version", "v2.9", "change");
+  await h.navigate("materials"); await h.navigate("generate");
+  assert.equal(h.find("#teaching-version").value, "v2.9");
+  h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form"); await h.settle();
+  h.input("#teaching-version", "v2", "change"); h.submit("#generation-form"); await h.settle();
+  const calls = h.backend.records("POST", "/v2/lesson-jobs");
+  assert.equal(calls[0].body.teaching_version, "v2.9");
+  assert.equal(calls[1].body.teaching_version, "v2");
+  assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
+});
+
+test("V2.9 learning cards preserve the version recorded in the catalog", async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v2.9", teaching_policy: "teaching-narration-v2.9" };
+    }
+  }); t.after(h.close);
+  await h.navigate("learn");
+  assert.equal(h.find(".course-version").textContent, "Generation V2.9");
+});
+
 test("V3 review identifies the version and displays its spoken script", async t => {
   const h = await harness(backend => {
     for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
@@ -518,18 +543,184 @@ test("unresolved automated reviews visibly flag only the affected part and expos
         { category: "source", message: "Human review required: another unavailable review (TEACHING_V2_REVIEW_UNAVAILABLE)." },
       ],
     };
+    backend.bundles.get(id(10)).variants.beginner.chunks[1].reviewer_report = { approved: true, summary: "No findings.", issues: [] };
   }); t.after(h.close);
   await h.navigate("review"); h.click(`[data-action="review-course"][data-id="${id(10)}"]`); await h.settle();
   assert.match(h.find(".review-flag-banner").textContent, /Generation continued/);
   assert.match(h.find("#review-part").options[0].textContent, /Needs review/);
   assert.doesNotMatch(h.find("#review-part").options[1].textContent, /Needs review/);
-  assert.equal(h.find(".advanced").open, true);
+  assert.equal(h.find(".review-evidence").open, true);
   assert.match(h.find(".review-findings").textContent, /<img src=x>/);
   assert.equal(h.document.querySelectorAll(".review-findings img").length, 0);
-  assert.deepEqual([...h.document.querySelectorAll(".review-tag")].map(tag => tag.textContent), ["Citations", "Review unavailable"]);
+  assert.deepEqual([...h.document.querySelectorAll(".review-flag-banner .review-tag")].map(tag => tag.textContent), ["Citations", "Review unavailable"]);
+  h.click('[data-action="review-filter"][data-scope="all"]'); await h.settle();
   h.click('[data-action="review-next"]'); await h.settle();
   assert.equal(h.document.querySelectorAll(".review-flag-banner").length, 0);
-  assert.equal(h.document.querySelectorAll(".review-tag").length, 0);
+  assert.equal(h.document.querySelectorAll(".review-flag-banner .review-tag").length, 0);
+});
+
+test("teacher dashboard selects courses and levels, counts findings and preserves feedback across filters", async t => {
+  const h = await harness(backend => {
+    const value = backend.bundles.get(id(10));
+    for (const lesson of Object.values(value.variants)) {
+      lesson.versions = { teaching_version: "v2" };
+      for (const chunk of lesson.chunks) chunk.reviewer_report = { approved: true, summary: "No findings.", issues: [] };
+    }
+    value.variants.beginner.chunks[1].reviewer_report = { approved: false, summary: "Check this section.", issues: [
+      { category: "citations", message: "Human review required: check page references. <img src=x>" },
+      { category: "source", message: "Human review required: TEACHING_V2_REVIEW_UNAVAILABLE; PROVIDER_ERROR" },
+    ] };
+    value.variants.advanced.chunks[0].reviewer_report = { approved: false, summary: "Check the value.",
+      issues: [{ category: "accuracy", message: "The reviewer suggested checking this value." }] };
+    const other = bundle(id(11), "Another saved course");
+    for (const lesson of Object.values(other.variants)) for (const chunk of lesson.chunks) chunk.reviewer_report = { approved: true, summary: "No findings.", issues: [] };
+    backend.bundles.set(id(11), other);
+  }); t.after(h.close);
+  const original = JSON.stringify([...h.backend.bundles]);
+  await h.navigate("review");
+  assert.match(h.find('[data-nav="review"]').textContent, /Teacher review/);
+  h.input("#review-course-select", id(10), "change"); await h.settle();
+  assert.equal(h.find("#review-part").value, "1");
+  assert.equal(h.find('[data-review-count="flagged"]').textContent, "1");
+  assert.equal(h.find('[data-review-count="findings"]').textContent, "2");
+  assert.equal(h.find('[data-review-count="total"]').textContent, "2");
+  assert.equal(h.document.querySelectorAll(".review-section").length, 1);
+  assert.match(h.find(".review-section").textContent, /Citations.*Review unavailable/);
+  assert.equal(h.document.querySelectorAll(".review-dashboard img").length, 0);
+  assert.match(h.find(".review-full-text").textContent, /beginner part 2/);
+  h.input("#review-feedback", "Check the second part's source.");
+  h.click('[data-action="review-filter"][data-scope="all"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".review-section").length, 2);
+  h.click('[data-action="review-open-section"][data-index="0"]'); await h.settle();
+  h.input("#review-feedback", "A comment on the first part.");
+  h.click('[data-action="review-filter"][data-scope="flagged"]'); await h.settle();
+  assert.equal(h.find("#review-feedback").value, "Check the second part's source.");
+  h.input("#review-level", "advanced", "change"); await h.settle();
+  assert.equal(h.find('[data-review-count="findings"]').textContent, "1");
+  assert.equal(h.find("#review-part").value, "0");
+  h.input("#review-level", "intermediate", "change"); await h.settle();
+  assert.match(h.find(".review-no-findings").textContent, /No automated findings/);
+  assert.equal(h.find('[data-review-count="flagged"]').textContent, "0");
+  assert.equal(h.document.querySelectorAll(".review-section").length, 0);
+  h.input("#review-course-select", id(11), "change"); await h.settle();
+  assert.equal(h.find(".review-course-heading h2").textContent, "Another saved course");
+  h.click('[data-action="review-filter"][data-scope="all"]'); await h.settle();
+  assert.equal(h.document.querySelectorAll(".review-section").length, 2);
+  h.input("#review-course-select", id(10), "change"); await h.settle();
+  assert.equal(h.find("#review-feedback").value, "A comment on the first part.");
+  assert.equal(JSON.stringify([...h.backend.bundles]), original);
+  assert.equal(h.backend.calls.filter(call => call.method !== "GET").length, 0);
+});
+
+test("teacher review navigation follows the flagged section filter and manual selection can show all", async t => {
+  const h = await harness(backend => {
+    const lesson = backend.bundles.get(id(10)).variants.beginner, template = lesson.chunks[0];
+    lesson.chunks = [0, 1, 2, 3].map(index => ({ ...template, index, chunk_id: id(9000 + index), text: `Original section ${index + 1}.`,
+      reviewer_report: { approved: index % 2 === 1, summary: "Check the source.",
+        issues: index % 2 === 0 ? [{ category: "accuracy", message: "Check this source value." }] : [] } }));
+  }); t.after(h.close);
+  await h.navigate("review"); h.input("#review-course-select", id(10), "change"); await h.settle();
+  assert.equal(h.document.querySelectorAll(".review-section").length, 2);
+  h.click('[data-action="review-next"]'); await h.settle();
+  assert.equal(h.find("#review-part").value, "2");
+  assert.equal(h.find('[data-action="review-next"]').disabled, true);
+  h.click('[data-action="review-previous"]'); await h.settle();
+  assert.equal(h.find("#review-part").value, "0");
+  h.input("#review-part", "1", "change"); await h.settle();
+  assert.equal(h.find('[data-action="review-filter"][data-scope="all"]').getAttribute("aria-pressed"), "true");
+  assert.equal(h.document.querySelectorAll(".review-section").length, 4);
+  assert.match(h.find(".review-full-text").textContent, /Original section 2/);
+});
+
+test("teacher review includes legacy findings and unavailable verdicts without claiming human approval", async t => {
+  const h = await harness(backend => {
+    const chunks = backend.bundles.get(id(10)).variants.beginner.chunks;
+    chunks[0].reviewer_report = { approved: true, summary: "A source warning.", issues: [{ category: "source", message: "Check the extracted table." }] };
+    chunks[1].reviewer_report = { approved: false, summary: "No passing automated verdict is recorded.", issues: [] };
+  }); t.after(h.close);
+  await h.navigate("review"); h.input("#review-course-select", id(10), "change"); await h.settle();
+  assert.equal(h.find('[data-review-count="flagged"]').textContent, "2");
+  assert.equal(h.find('[data-review-count="findings"]').textContent, "1");
+  assert.match(h.find(".review-section-list").textContent, /Source.*Review needed/s);
+  assert.equal(h.find(".review-evidence").open, true);
+  assert.match(h.find(".review-findings").textContent, /Check the extracted table/);
+  assert.match(h.find(".review-course-heading").textContent, /Human review required/);
+});
+
+test("teacher can request a revision directly from a flagged section without changing other parts", async t => {
+  const h = await harness(backend => {
+    const chunks = backend.bundles.get(id(10)).variants.beginner.chunks;
+    chunks[0].reviewer_report = { approved: true, summary: "No findings.", issues: [] };
+    chunks[1].reviewer_report = { approved: false, summary: "Check the citation.",
+      issues: [{ category: "citations", message: "Human review required: check the page reference." }] };
+  }); t.after(h.close);
+  const originalFirst = h.backend.bundles.get(id(10)).variants.beginner.chunks[0].text;
+  const target = h.backend.bundles.get(id(10)).variants.beginner.chunks[1].chunk_id;
+  await h.navigate("review"); h.input("#review-course-select", id(10), "change"); await h.settle();
+  h.input("#review-feedback", "Correct this section's page reference."); h.submit("#review-form"); await h.settle(); await h.runTimers(5000);
+  const [call] = h.backend.records("POST", "/v1/audio:regenerate");
+  assert.deepEqual(call.body, { lesson_job_id: id(10), chunk_id: target,
+    teacher_review: "Correct this section's page reference.", apply_to_all_levels: false });
+  assert.equal(h.backend.bundles.get(id(10)).variants.beginner.chunks[0].text, originalFirst);
+  assert.equal(h.find("#review-part").value, "1");
+  assert.match(h.find(".review-full-text").textContent, /Updated explanation/);
+  assert.equal(h.backend.records("POST", "/v2/lesson-jobs").length, 0);
+});
+
+test("course selector ignores late course and narration responses and supports V1 audio", async t => {
+  let releaseCourse, releaseAudio;
+  const h = await harness(backend => {
+    backend.bundles.set(id(11), bundle(id(11), "A different course"));
+    backend.intercept = call => {
+      if (call.path === `/v1/lesson-reviews/${id(10)}`) return new Promise(resolve => { releaseCourse = () => resolve(backend.response(backend.reviewText(backend.bundles.get(id(10))))); });
+      if (call.path.includes("/audio/")) return new Promise(resolve => { releaseAudio = () => resolve(backend.response(Buffer.from("unused"), 200, "audio/wav")); });
+      return undefined;
+    };
+  }); t.after(h.close);
+  await h.navigate("review"); h.input("#review-course-select", id(10), "change"); await h.settle();
+  h.input("#review-course-select", id(11), "change"); await h.settle(); releaseCourse(); await h.settle();
+  assert.equal(h.find(".review-course-heading h2").textContent, "A different course");
+  assert.match(h.find(".review-narration").textContent, /Generated narration/);
+  h.click('[data-action="review-listen"]'); await h.settle();
+  h.input("#review-course-select", "", "change"); await h.settle();
+  releaseAudio(); await h.settle();
+  assert.equal(h.urls.size, 0);
+  assert.equal(h.document.querySelectorAll("#review-audio").length, 0);
+  assert.equal(h.backend.records("POST", "/v1/sessions").length, 0);
+});
+
+test("teacher course picker loads older courses without losing the current review or feedback", async t => {
+  const h = await harness(backend => {
+    for (let number = 11; number <= 110; number++) backend.bundles.set(id(number), bundle(id(number), `Older course ${number}`));
+  }); t.after(h.close);
+  await h.navigate("review");
+  assert.equal(h.find("#review-course-select").options.length, 101);
+  h.input("#review-course-select", id(10), "change"); await h.settle();
+  h.input("#review-feedback", "Keep this feedback while loading older courses.");
+  h.click('[data-action="load-more-reviews"]'); await h.settle();
+  assert.equal(h.find("#review-course-select").options.length, 102);
+  assert.equal(h.find("#review-course-select").value, id(10));
+  assert.equal(h.find("#review-feedback").value, "Keep this feedback while loading older courses.");
+  assert.equal(h.backend.records("GET", "/v1/lesson-reviews").at(-1).query.get("offset"), "100");
+  h.input("#review-course-select", id(110), "change"); await h.settle();
+  assert.equal(h.find(".review-course-heading h2").textContent, "Older course 110");
+  assert.equal(h.backend.calls.filter(call => call.method !== "GET").length, 0);
+});
+
+test("teacher review uses custom course difficulty names and their own finding counts", async t => {
+  const h = await harness(backend => {
+    const value = backend.bundles.get(id(10));
+    const foundation = { ...value.variants.beginner, learner_level: "foundation" };
+    const expert = { ...value.variants.advanced, learner_level: "expert" };
+    for (const chunk of expert.chunks) chunk.reviewer_report = { approved: true, summary: "No findings.", issues: [] };
+    value.variants = { foundation, expert };
+  }); t.after(h.close);
+  await h.navigate("review"); h.input("#review-course-select", id(10), "change"); await h.settle();
+  assert.deepEqual([...h.find("#review-level").options].map(option => option.value), ["foundation", "expert"]);
+  assert.equal(h.find('[data-review-count="flagged"]').textContent, "2");
+  h.input("#review-level", "expert", "change"); await h.settle();
+  assert.equal(h.find('[data-review-count="flagged"]').textContent, "0");
+  assert.match(h.find(".review-no-findings").textContent, /No automated findings/);
 });
 
 test("teacher review opens an existing course and preserves per-part feedback through navigation", async t => {

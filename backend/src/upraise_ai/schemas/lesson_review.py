@@ -15,7 +15,7 @@ class ReviewLessonSummary(BaseModel):
     activity_id: str
     language: str
     voice: str
-    teaching_version: Literal["v1", "v2", "v3"] = "v1"
+    teaching_version: Literal["v1", "v2", "v2.9", "v3"] = "v1"
     status: Literal["DRAFT"] = "DRAFT"
     job_status: str
     levels: list[str]
