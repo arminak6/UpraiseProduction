@@ -65,7 +65,7 @@ def plan_sections(documents, window_pages):
             raise IngestionError("LESSON_SOURCE_LANGUAGE_MISSING")
         source_format = row['metadata'].get('source_format', 'pdf')
         csv = source_format == 'csv'
-        blocks = source_format in {'csv', 'doc', 'docx'}
+        blocks = source_format in {'csv', 'doc', 'docx', 'pptx'}
         if blocks:
             chunks = citation_chunks(chunks)
         page_count = int(row["result"]["source_block_count"] if blocks else row["result"]["page_count"])
@@ -90,7 +90,8 @@ def plan_sections(documents, window_pages):
                 sections[-1].update(source_format="csv", reference_kind="csv_source_block",
                                     row_count=row["result"]["row_count"])
             elif blocks:
-                sections[-1].update(source_format=source_format, reference_kind='word_source_block')
+                sections[-1].update(source_format=source_format,
+                                    reference_kind='powerpoint_slide' if source_format == 'pptx' else 'word_source_block')
         if len(seen) != len(chunks):
             raise IngestionError("LESSON_SOURCE_COVERAGE_INVALID")
     return sections

@@ -183,7 +183,7 @@ class IngestionWorkspaceTests(unittest.TestCase):
         data = b"%PDF-1.7 synthetic fixture"
         upload = SimpleNamespace(name="synthetic.pdf", getvalue=lambda: data)
         def uploader(label, *args, **kwargs):
-            return upload if label == "Teaching material (PDF, CSV or Word)" else original(label, *args, **kwargs)
+            return upload if label == "Teaching material (PDF, CSV, Word or PowerPoint)" else original(label, *args, **kwargs)
         with patch("api_client.request", side_effect=self.response) as send, patch("streamlit.file_uploader", side_effect=uploader):
             app = self.app()
             self.stage(app, 0)
@@ -197,8 +197,8 @@ class IngestionWorkspaceTests(unittest.TestCase):
         data = b"Concept,Definition\nTape,Read write memory\n"
         upload = SimpleNamespace(name="teaching.csv", getvalue=lambda: data)
         def uploader(label, *args, **kwargs):
-            if label == "Teaching material (PDF, CSV or Word)":
-                self.assertEqual(kwargs["type"], ["pdf", "csv", "docx", "doc"])
+            if label == "Teaching material (PDF, CSV, Word or PowerPoint)":
+                self.assertEqual(kwargs["type"], ["pdf", "csv", "docx", "doc", "pptx"])
                 return upload
             return original(label, *args, **kwargs)
         with patch("api_client.request", side_effect=self.response) as send, patch("streamlit.file_uploader", side_effect=uploader):
@@ -220,7 +220,7 @@ class IngestionWorkspaceTests(unittest.TestCase):
             upload = SimpleNamespace(name='teaching.' + extension, getvalue=lambda: data)
             original = st.file_uploader
             def uploader(label, *args, **kwargs):
-                return upload if label == 'Teaching material (PDF, CSV or Word)' else original(label, *args, **kwargs)
+                return upload if label == 'Teaching material (PDF, CSV, Word or PowerPoint)' else original(label, *args, **kwargs)
             with patch('api_client.request', side_effect=self.response) as send, patch(
                     'streamlit.file_uploader', side_effect=uploader):
                 app = self.app()

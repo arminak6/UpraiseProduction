@@ -53,11 +53,17 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   repairs affected paragraphs and flags incomplete difficulty adaptation.
   Course cards and teacher review retain V3.1 provenance and spoken scripts.
   See [V3.1 behavior and validation](../backend/docs/teaching-v31.md).
-- **Material:** PDF/Word/UTF-8 CSV upload through A1; browser SHA-256; real A2
+- **Material:** PDF/Word/PowerPoint (`.pptx`)/UTF-8 CSV upload through A1; browser SHA-256; real A2
   document library and progress; confirmed source deletion, including its
   dependent generated courses. Course name/reference maps to the backend's
   `course_id`; the expandable activity reference defaults to `upraise-learning`.
   Production callers must enter identifiers allowed by their gateway.
+  Selecting PowerPoint exposes speaker-note and hidden-slide options, both off
+  by default. Original slide numbers and native structure are retained alongside
+  rendered slide checks. Teacher review offers original slide previews on request.
+  Generation, revisions and questions preserve slide references. See
+  [PowerPoint ingestion](../backend/docs/powerpoint-ingestion.md) for content
+  support, source checks and preview retention.
 - **Generation:** selected source supplies course/activity/document identifiers;
   title, language, voice and word/window settings map to A3 v2. Difficulty
   checkboxes default to all configured levels and require at least one; only the

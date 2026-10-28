@@ -25,50 +25,46 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   WAV/UUID/chunk/offset. Active mic stops on cancel/nav/hide/B5/expiry; blob/tabRAM
   released on success/discard/end. Localhost/HTTPS + mic permission; AWS STT IAM
   still required. Voice turns have a label, not a returned STT transcript.
-- Teaching versions differ from frontend2/A3v2; V1 is default. V2.8 (`v2`)
-  checkpoints first authoring/translation/speech before review; failures flag
-  original text without rewrites. Format/identity/storage fences remain; large
-  units split without rewording. A7 retains teacher updates on review failure.
-  Details: docs/teaching-v2.md and teaching_v2/{first_draft,review_recovery}.py.
-- V2.9: teaching_v29/, docs/teaching-v29.md. Writer -> source/level reviewer ->
-  one source-authoritative judge edit -> fresh review. A/C generation model, B
-  review model; judge checkpoint precedes final review. Failed review retains C
-  with human flags; unusable C retains A explicitly. Current adaptations drop
-  stale canonical findings; source warnings persist. A7 avoids legacy edit loops.
-- V3: teaching_v3/, docs/teaching-v3.md. Document-order plan, same-page equation
-  definitions, adjacent continuations within24k teaching chars/full payload cap.
-  Primary coverage differs from supporting citations; whole paragraph units.
-  All levels/boundaries reviewed before TTS. Narrator gets actual prior writing
-  and navigation, no future source; current-written entailment/reverse coverage,
-  source-equal decimals, typed cases and question reading. Context/policy/model
-  caches; explicit subject/assertion conflicts. Bounded edits then flagged DRAFT
-  recovery. A7 strict; TTL/A6/A2 preserved. No extraction repair or guessed facts.
-- V3.1: teaching_v31/, docs/teaching-v31.md. Restores selected original text and
-  heading evidence, recomputes references. Writer/adaptation/A7 select actual
-  chunk IDs; host renders citations. Cited-record entailment/coverage negatives
-  independently verified; host-selected targets preserve passed paragraphs.
-  Per-record source/canonical recovery fits word limits and flags editing; A7 strict. Final learning
-  task review flags incomplete level adaptation; speech checks question roles and
-  subjects. Parsed author checkpoints and full-evidence/policy/model verdict
-  caches follow job TTL; per-stage timing/cache counters. Latest same-source audit finds learner-text regressions
-  and a48m18s run; see Last verified. UI8502 selector/cards/review support v3.1.
+- Teaching versions differ from frontend2/A3v2; V1 default. V2.8 (`v2`) checkpoints
+  first authoring/translation/speech; failed reviews flag originals, A7 retains
+  teacher updates. docs/teaching-v2.md, teaching_v2/{first_draft,review_recovery}.py.
+- V2.9: teaching_v29/, docs/teaching-v29.md. Writer -> reviewer -> one source-
+  authoritative judge edit -> fresh review. A/C generation, B review model;
+  failed C retained with flags, unusable C retains A. Adaptations drop stale
+  canonical findings, retain source warnings; A7 avoids legacy edit loops.
+- V3: teaching_v3/, docs/teaching-v3.md. Document-order plan, equation definitions,
+  whole paragraphs, continuation24kchars. All levels/boundaries reviewed before
+  TTS; narrator sees actual prior text. Entailment/coverage, decimals, typed cases,
+  subject conflicts, bounded edits/flagged recovery; strict A7, TTL/A6/A2 intact.
+- V3.1: teaching_v31/, docs/teaching-v31.md. Heading/text recovery, explicit chunk
+  IDs, host citations, verified record entailment/coverage negatives, bounded
+  recovery/editing. Strict A7; speech/tasks preserve subjects. TTL caches and stage
+  counters;8502 selection/review/cards. Latest audit: regressions,48m18s runtime.
 - Learning badges read A8 teaching_version and stored per-level teaching_policy.
   Historical omitted request version means V1; V2.8 needs consistent policy,
   otherwise V2. Missing/unsupported provenance shows unknown. No backfill needed.
-- Nav: Upload / Generate / Teacher review / Start learning. Review selects courses/
-  levels, counts and filters flagged/all sections; original PG text, expanded notes,
-  sources and available audio (including V1). Feedback/A7 selection persist in-tab.
-  Expired text readable; A7 needs completed temporary/archived output. Ownership/
-  deletion/publication fences; unpublished candidates hidden, content-free audit.
+- Nav: Upload/Generate/Teacher review/Start learning. Review filters course/level/
+  flags; PG text, notes, sources, available audio (V1 included). In-tab feedback/A7
+  selection; expired text readable, A7 needs temporary/archived output. Ownership/
+  deletion/publication fences; candidates hidden, content-free audit.
 - Archive: ignored course_archive/, optional UPRAISE_LESSON_ARCHIVE_DIR on API/
   workers. Manifest/WAV/hash verified; A5/A7/A8/B1 survive staging TTL. A7/B7 removes
   superseded packages; B7/A2 erases owner archives, A6 withdraws delivery only.
   Startup rescues intact expired packages; no audio regeneration/chat archive.
   artifact_job_id/hash/manifest selects current owner paths.
 - A1 Docling/vision/math PDF, CsvProcessor, WordProcessor/LibreOffice fidelity
-  fallback -> ordered Titan/Qdrant chunks; active-attempt fences, ingestion-v1.6.
+  fallback and PowerPointProcessor -> ordered Titan/Qdrant chunks; active-attempt fences, ingestion-v1.7.
   CSV UTF8/BOM headers, comma/semicolon/tab, complete rows; Word block refs, no
   invented PDF pages. PDF quality fingerprints/contracts remain.
+  PPTX native Docling + Impress renders; notes/hidden slides opt-in at A1.
+  Original slide ordinals/source_blocks, slide_numbers/slide_references, empty
+  public PDF pages. Chunk boundaries stay within slides. Verified visual
+  descriptions only; failed comparisons/sparse slides flagged. Known defect:
+  PPTX sends incompatible page/native mappings to verify_source; real checks
+  reject before model calls. Screenshots become placeholders; not fixed yet.
+  A3/A7/B4 retain slide refs; speech omits markers. Teacher review explicitly
+  loads source PNGs via version/owner/hash-fenced document slides GET. A6 purges
+  previews, retains source.pptx; A2 revokes access. Legacy PPT/media excluded.
 - A2 deletes dependent PG/plans/artifacts/feedback; writer/admission fences and
   durable503 recovery. IDs/audit remain; fresh A1 allowed.
 - A3v1 ordered5page windows/V3 roles/checked translation/speech. A3v2 shares a
@@ -76,7 +72,7 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   precede TTS; target200/max500words, max2 shared refinements. v2.5/promptv6 bounds
   ID-aware recovery, rejects ambiguous/truncated output; approved drafts skip edits.
 - A3v2 levels:1-8 configured names, omitted/null=all, config order. Plan level if
-  selected, else first selected. Fingerprint ignores ordering, conflicts on selection.
+  selected, else first selected. Fingerprint ignores order, conflicts on selection.
 - CSV/Word pages[]/page_count0; source_blocks/CSV row_ranges/Word refs. CSV header
   row1, multiline cells one record. A3/A7/B4 preserve refs, omit row/block labels
   from speech; PDF unchanged. Extraction does not establish accuracy.
@@ -94,7 +90,7 @@ remains a separate Streamlit testbench/player. C3 schema exists.
   TTS outage retains text,grounding=null/GROUNDING_NOT_VERIFIED. B5 late fences,
   RAM clear/idempotent content-free audit30min. Contracts:docs/b1-b5.
 - B7 DELETE /v1/lesson-jobs/{id}?learner_level;lessons:write; preserves sources.
-  Partial/whole deletion, tombstones/503 recovery and manual retry: docs/b7.md.
+  Partial/whole deletion, tombstones/503 recovery/manual retry: docs/b7.md.
 - C1 health/ready; C2 cached evidence/no AWS polling. C3 admin:operations controls,
   enabled=true disables; fail-closed queued pause, audit outbox. docs/c3.md.
   C5 hashes/provenance/checkpoints. Human approval external; all results DRAFT.
@@ -102,10 +98,10 @@ remains a separate Streamlit testbench/player. C3 schema exists.
 ## Important paths
 
 - backend/src/upraise_ai/: api/schemas/workflows contracts, services/lesson_*,
-  aligned_* and revision_* lifecycle; pdf/,csv_processor.py,word_processor.py
+  aligned_* and revision_* lifecycle; pdf/,csv_processor.py,word_processor.py,powerpoint_processor.py
   ingestion; storage/ persistence; guards/session_jwt.py session assertions.
 - backend/docs/ contains lifecycle/contracts, teaching-v{2,29,3,31}.md,
-  a7.md, lesson-review.md, lesson-archive.md, b1-b5, b7.md and c3.md.
+  a7.md, powerpoint-ingestion.md, lesson-review.md, lesson-archive.md, b1-b5, b7.md and c3.md.
 - frontend/ Streamlit; frontend2/{app,api,ui,voice,voice-capture-worklet}.js,serve.py,index.html,styles.css,
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
 - Archive: storage/lesson_archive.py, services/lesson_replacement.py,
@@ -136,7 +132,8 @@ remains a separate Streamlit testbench/player. C3 schema exists.
 ## Dependencies and environment
 
 Python3.12/uv,Docling/OCR/CPU Torch,PG17/Qdrant,Streamlit/httpx,LangGraph/Transcribe;
-EU Bedrock GPTOSS/Qwen,Nova/Titan1024D,eu-central-1. Word LibreOffice/fonts180s.
+EU Bedrock GPTOSS/Qwen,Nova/Titan1024D,eu-central-1. Word/Impress LibreOffice/fonts180s;
+python-pptx1.0.2 locked. PPTX100MB/500slides/500MB expanded/10000ZIPentries.
 Polly neural16kHz mono16bit,PCM visemes,SSML2800billed/5800total. Local Python3.10
 cannot run backend: use Docker. PS5.1 JSON explicitly UTF8; pipe single-quoted here-strings.
 
@@ -163,6 +160,8 @@ backups/erasure/orphans need review. V1 final grounding deferred. NonUTF8 and
 headerless CSV/URLs, structural A7/idempotency and mid-session level changes are
 future work. No persistent human-dismissal status, listening QA or LaTeX renderer.
 Preserve old courses; no unsolicited generation. V3.1 same-source course scores5/10; see Last verified.
+PPTX source verification and spatial heading/value order need correction before
+complete ingestion; FondoEst assessment and reproduction are indexed below.
 
 ## Recent decisions
 
@@ -170,24 +169,26 @@ Preserve old courses; no unsolicited generation. V3.1 same-source course scores5
 
 ## Last verified
 
-2026-10-28: Voice-question UI/bridge/recorder/Docker assets and README checked.
-69 UI +17 bridge tests passed; real Edge AudioWorklet with synthetic mic through
-actual Python bridge verified WAV/preview/retry/offset/cleanup/mobile. No AWS
-calls or live speech recognition; evidence codex_helper/voice-questions/.
-Added missing voice.js/worklet Docker allowlist; rebuilt/recreated only frontend2.
-Live8502 hashes match source; isolated browser confirms visible/enabled voice
-button and loaded recorder. Existing browser tabs require refresh.
+2026-10-28: Read-only FondoEst PPTX audit:13slides/15chunks,1442 editable tokens
+retained; live Qdrant IDs/text and source/render hashes match. Real verifier rejects
+PPTX mappings (incomplete_source_mapping); permissive fake-verifier tests missed it.
+All134elements NEEDS_REVIEW. Slide8 exclusions/slide12 prices absent from index/
+all3 course levels. Slide9 associations weaken, course conflates limits. Preview
+overlap/clipping; native PowerPoint fidelity unproven. Source7d3f44af/course0c508b95,
+teachingV1. No app/course changes/model calls. Report/evidence/reproduction:
+codex_helper/fondoest-pptx-assessment/assessment.md.
 
-2026-10-26: Four-version same-Word audit, new V3.1 job2a45081b DONE/DRAFT,
-1attempt/48m18s/10parts per level. Same source attempt/request/model IDs as prior
-V1/V2.9/V3. Scores5/6.5/5.5/5; V2.9 remains best teaching draft. V3.1 restores
-founders/citation resolution but exposes UUIDs/review prose, English passages,
-omits block24 ethics and duplicates5/10 advanced/intermediate parts. All129 WAV
-hashes/durations and4 manifests verified;30 new written/spoken scripts read,
-no listening assessment. No application/course changes or model/TTS requests.
-Evidence: codex_helper/gruppo-imprese-four-version-comparison/{assessment.md,
-metrics.json,settings.json,content-observations.json}. Original source in
-codex_helper/gruppo-imprese-assessment/; earlier audits indexed by new report.
-Prior fixes/tests/rollout: codex_helper/v31-implementation/
-{patch-scope-fix.md,material-recovery-fix.md,material-fix-verification.json}.
-Earlier QA: codex_helper/{teaching-v29-comparison,teaching-v3-comparison}/.
+Earlier PPTX deployment:1347 backend +13 focused,73 UI,18 bridge,11 testbench
+checks passed; synthetic deck/chart/browser evidence codex_helper/powerpoint/.
+Services healthy,8502 assets match; ingestionv1.7. These checks did not establish
+real source-verifier compatibility; current unresolved defect supersedes them.
+
+Earlier verification: voice UI (69 UI/17 bridge checks; real Edge synthetic mic)
+and deployed asset/nonce packaging evidence: codex_helper/voice-questions/.
+2026-10-26 same-Word four-version audit: V1/V2.9/V3/V3.1 scores5/6.5/5.5/5;
+V2.9 remains best teaching draft. V3.1 job2a45081b DONE/DRAFT,48m18s; restored
+citations but retained learner-text regressions, omissions and duplicated parts.
+129 WAV hashes/durations and4 manifests checked; no listening assessment.
+Evidence/settings/source observations: codex_helper/gruppo-imprese-four-version-comparison/;
+original source codex_helper/gruppo-imprese-assessment/. Earlier rollout fixes
+and QA indexed in codex_helper/v31-implementation/ and teaching-v{29,3}-comparison/.

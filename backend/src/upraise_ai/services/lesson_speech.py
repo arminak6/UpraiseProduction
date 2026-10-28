@@ -191,6 +191,7 @@ class LessonSpeech:
                      or locale not in SUPPORTED_MATH_LOCALES else MathJaxSpeechRuleConverter(locale=locale))
         spoken_text = re.sub(r"\[CSV rows \d+-\d+\]", "", text)
         spoken_text = re.sub(r"\[Word blocks \d+-\d+\]", "", spoken_text)
+        spoken_text = re.sub(r"\[Slides? \d+(?:-\d+)?\]", "", spoken_text)
         prepared = prepare_speech_document(spoken_text, converter=converter,
                                            fallback=guarded_fallback)
         if not prepared.plain_text:

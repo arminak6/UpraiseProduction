@@ -151,7 +151,12 @@ class VersionCatalog:
             "prompts": {key: value.model_dump() for key, value in prompts.items()},
             "pipelines": {
                 "ingestion": PipelineVersion(version=settings.pipeline_signature, parameters={
-                    "formats": "pdf,csv,docx,doc", "csv_parser": source_constant("services/csv_processor.py", "CSV_PARSER_VERSION"),
+                    "formats": "pdf,csv,docx,doc,pptx", "csv_parser": source_constant("services/csv_processor.py", "CSV_PARSER_VERSION"),
+                    "powerpoint_parser": source_constant("services/powerpoint_processor.py", "POWERPOINT_PARSER_VERSION"),
+                    "max_powerpoint_size_mb": settings.max_powerpoint_size_mb,
+                    "max_powerpoint_uncompressed_mb": settings.max_powerpoint_uncompressed_mb,
+                    "max_powerpoint_slides": settings.max_powerpoint_slides,
+                    "powerpoint_conversion_timeout_seconds": settings.powerpoint_conversion_timeout_seconds,
                     "word_parser": source_constant("services/word_processor.py", "WORD_PARSER_VERSION"),
                     "max_word_size_mb": settings.max_word_size_mb,
                     "max_word_uncompressed_mb": settings.max_word_uncompressed_mb,

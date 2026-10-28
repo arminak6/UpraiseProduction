@@ -22,11 +22,11 @@ class StagingStore:
 
     def source_path(self, job_id: str, source_format: str | None = None) -> Path:
         folder = self.job_dir(job_id)
-        if source_format not in {None, "pdf", "csv", "docx", "doc"}:
+        if source_format not in {None, "pdf", "csv", "docx", "doc", "pptx"}:
             raise ValueError("unsupported source format")
         if source_format:
             return folder / ("source." + source_format)
-        for extension in ("csv", "docx", "doc"):
+        for extension in ("csv", "docx", "doc", "pptx"):
             if (folder / ("source." + extension)).is_file():
                 return folder / ("source." + extension)
         return folder / "source.pdf"
@@ -61,7 +61,7 @@ class StagingStore:
         if not folder.exists():
             return
         for child in folder.iterdir():
-            if child.name in {"source.pdf", "source.csv", "source.docx", "source.doc"}:
+            if child.name in {"source.pdf", "source.csv", "source.docx", "source.doc", "source.pptx"}:
                 continue
             if child.is_symlink() or not child.is_dir():
                 child.unlink()
@@ -84,7 +84,7 @@ class StagingStore:
                 while block := stream.read(1024 * 1024):
                     total += len(block)
                     if total > max_bytes:
-                        code = "WORD_TOO_LARGE" if source_format in {"doc", "docx"} else (
+                        code = "POWERPOINT_TOO_LARGE" if source_format == "pptx" else "WORD_TOO_LARGE" if source_format in {"doc", "docx"} else (
                             "CSV_TOO_LARGE" if source_format == "csv" else "PDF_TOO_LARGE")
                         raise IngestionError(code, status=413)
                     destination.write(block)

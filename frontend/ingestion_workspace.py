@@ -178,7 +178,7 @@ def render_material(connection, state, show_response):
         source = left.text_input("Source / Moodle file ID", key="iw_field_source", max_chars=200)
         version = right.text_input("Source version (optional)", key="iw_field_version", max_chars=120)
         if mode == "PDF / CSV / Word upload":
-            upload = st.file_uploader("Teaching material (PDF, CSV or Word)", type=["pdf", "csv", "docx", "doc"], max_upload_size=100,
+            upload = st.file_uploader("Teaching material (PDF, CSV, Word or PowerPoint)", type=["pdf", "csv", "docx", "doc", "pptx"], max_upload_size=100,
                                       key=f"iw_upload_{state['upload_nonce']}")
             url = ""
             content_hash = ""
@@ -198,7 +198,7 @@ def render_material(connection, state, show_response):
             file = None
             if mode == "PDF / CSV / Word upload":
                 if upload is None:
-                    raise ValueError("Select a PDF, CSV or Word file to upload.")
+                    raise ValueError("Select a PDF, CSV, Word or PowerPoint file to upload.")
                 data = upload.getvalue()
                 if len(data) > 100 * 1024 * 1024:
                     raise ValueError("The file must be at most 100 MB.")
@@ -397,7 +397,7 @@ def render_generation(connection, state, show_response, *, refresh_on_open=False
             left.text_input("Course ID", key="iw_field_draft_course", disabled=True)
             right.text_input("Activity ID", key="iw_field_draft_activity", disabled=True)
             window = left.number_input("Source window size", 1, 50, key="iw_field_window",
-                                       help="PDF pages, CSV row groups or Word blocks per generation window.")
+                                       help="PDF pages, PowerPoint slides, CSV row groups or Word blocks per generation window.")
             words = right.number_input("Target chunk length (words)", 30, 1000, key="iw_field_words")
             maximum = left.number_input("Maximum chunk length (words)", 50, 2000, key="iw_field_maximum")
             st.caption("The backend's configured levels share teaching units, source scope and chunk count.")
@@ -803,8 +803,9 @@ def render_job_tracking(connection, state, show_response, *, course_job=None):
                     pages, chunks, quality = st.columns(3)
                     csv = extraction.get("source_format") == "csv"
                     word = extraction.get('source_format') in {'doc', 'docx'}
-                    pages.metric("Source rows" if csv else 'Word source blocks' if word else "Source pages",
-                                 extraction.get("row_count" if csv else 'source_block_count' if word else "page_count", "—"))
+                    powerpoint = extraction.get('source_format') == 'pptx'
+                    pages.metric('Source slides' if powerpoint else "Source rows" if csv else 'Word source blocks' if word else "Source pages",
+                                 extraction.get('slide_count' if powerpoint else "row_count" if csv else 'source_block_count' if word else "page_count", "—"))
                     chunks.metric("Source chunks", extraction.get("chunk_count", "—"))
                     quality.metric("Source quality", extraction.get("quality_status", "UNVERIFIED"))
                     st.caption("DONE means extraction completed. Automated source checks do not establish human approval.")

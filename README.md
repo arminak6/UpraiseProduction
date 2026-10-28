@@ -1,6 +1,6 @@
 # UPRAISE AI Module
 
-A1 PDF/CSV/Word ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
+A1 PDF/CSV/Word/PowerPoint ingestion, A2 list/delete, A3 draft lessons, A4 status, A5 result/audio, A6 control,
 A7 chunk revision/audio regeneration, A8 ready-lesson listing, B1 lesson start, B2 chunk-end decisions, B4 learner interruption, B5 session end, B7 generated-content deletion,
 C1 health/readiness, C2 feature status, C3 runtime kill switch and C5 deployed versions are implemented.
 The API accepts teaching material from authenticated Middleware, stages it
@@ -60,6 +60,9 @@ See [CSV ingestion and row citations](backend/docs/csv-ingestion.md).
 Word `.docx` and legacy `.doc` uploads use native Docling extraction, retained
 PDF rendering and visual fallback for fragmented content, then the same ingestion
 and course-generation pipeline. See [Word ingestion](backend/docs/word-ingestion.md).
+PowerPoint `.pptx` uses native slide extraction and rendered slide checks, with
+explicit speaker-note/hidden-slide choices and slide references throughout
+generation, review and questions. See [PowerPoint ingestion](backend/docs/powerpoint-ingestion.md).
 Source text/HTML and AI candidates are retained separately. Every visual source
 region has its own provenance-backed crop; AI rewrites/descriptions require
 structural checks and a separate source-comparison pass before acceptance.

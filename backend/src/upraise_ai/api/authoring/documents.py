@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import PurePosixPath
 from typing import Literal
 from uuid import UUID
@@ -9,6 +10,7 @@ from starlette.datastructures import UploadFile
 
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.core.utils import sha256_file
 from upraise_ai.guards.ingress import Principal, ingress
 from upraise_ai.schemas.documents import (
     AcceptedDocument,
@@ -22,10 +24,13 @@ from upraise_ai.services.moodle import download_pdf
 
 router = APIRouter()
 FIELDS = {"course_id", "activity_id", "language", "source_ref", "content_hash", "version"}
+POWERPOINT_FIELDS = {"include_speaker_notes", "include_hidden_slides"}
 MULTIPART_SCHEMA = {
     "type": "object",
     "required": ["file", "course_id", "activity_id", "language", "source_ref", "content_hash"],
-    "properties": {**{f: {"type": "string"} for f in FIELDS}, "file": {"type": "string", "format": "binary"}},
+    "properties": {**{f: {"type": "string"} for f in FIELDS},
+                   **{f: {"type": "boolean", "default": False} for f in POWERPOINT_FIELDS},
+                   "file": {"type": "string", "format": "binary"}},
 }
 
 
@@ -76,6 +81,37 @@ def delete_document(document_id: UUID, request: Request, principal: Principal = 
     return Response(status_code=204)
 
 
+@router.get('/v1/documents/{document_id}/slides/{slide_number}', summary='Read a retained PowerPoint source slide')
+def source_slide(document_id: UUID, slide_number: int, request: Request, document_version_id: UUID = Query(),
+                 principal: Principal = Depends(ingress)):
+    principal.require_scope('documents:read')
+    documents = document_service(request)
+    row = documents.jobs.get_document(str(document_id))
+    documents.authorize(row, principal)
+    staging = service(request).staging
+    with staging.artifact_lock(str(row['job_id']), shared=True):
+        with documents.jobs.document_transaction(str(document_id)) as (_, current):
+            documents.authorize(current, principal)
+            if (current['deletion_requested_at'] or current['status'] != 'DONE'
+                    or current['metadata'].get('source_format') != 'pptx' or not 1 <= slide_number <= 5000):
+                raise HTTPException(404, 'SLIDE_PREVIEW_UNAVAILABLE')
+            folder = staging.job_dir(str(current['job_id'])) / 'powerpoint-artifacts'
+            try:
+                manifest = json.loads((folder / 'slides.json').read_bytes())
+                slide = next((s for s in manifest['slides'] if s['slide_number'] == slide_number), None)
+                if (not slide or manifest['document_id'] != str(document_id)
+                        or manifest['document_version_id'] != str(document_version_id)
+                        or manifest['pipeline_version'] != current['pipeline_version']):
+                    raise HTTPException(404, 'SLIDE_PREVIEW_UNAVAILABLE')
+                path = folder / f'slide-{slide_number}.png'
+                if path.stat().st_size > 12_000_000 or sha256_file(path) != slide['image_sha256']:
+                    raise HTTPException(503, 'SLIDE_PREVIEW_INTEGRITY_FAILURE')
+                data = path.read_bytes()
+            except (FileNotFoundError, KeyError, ValueError, StopIteration):
+                raise HTTPException(404, 'SLIDE_PREVIEW_UNAVAILABLE') from None
+            return Response(data, media_type='image/png', headers={'Cache-Control': 'no-store'})
+
+
 @router.delete("/v1/courses/{course_id:path}", status_code=204, summary="A2 - Remove a course and its generated lessons")
 def delete_course(request: Request, course_id: str = PathParameter(min_length=1, max_length=120),
                   principal: Principal = Depends(ingress)):
@@ -106,7 +142,7 @@ async def ingest_document(request: Request, response: Response, principal: Princ
     content_type = request.headers.get("content-type", "").split(";")[0].lower()
     if content_type == "multipart/form-data":
         async with request.form(max_files=1, max_fields=8, max_part_size=8192) as form:
-            if set(form) - (FIELDS | {"file"}) or any(len(form.getlist(k)) != 1 for k in form):
+            if set(form) - (FIELDS | POWERPOINT_FIELDS | {"file"}) or any(len(form.getlist(k)) != 1 for k in form):
                 raise IngestionError("UNEXPECTED_OR_DUPLICATE_FIELD", status=400)
             upload = form.get("file")
             if not isinstance(upload, UploadFile) or not upload.filename:
@@ -117,7 +153,11 @@ async def ingest_document(request: Request, response: Response, principal: Princ
             from upraise_ai.services.formats import upload_format
 
             source_format = upload_format(filename, upload.content_type)
-            metadata = IngestionMetadata(**data.model_dump(), source_filename=filename, source_format=source_format)
+            options = {key: form[key] for key in POWERPOINT_FIELDS if key in form}
+            if options and (source_format != 'pptx' or any(value not in {'true', 'false'} for value in options.values())):
+                raise IngestionError('INVALID_POWERPOINT_OPTIONS', status=422)
+            metadata = IngestionMetadata(**data.model_dump(), source_filename=filename, source_format=source_format,
+                                         **{key: value == 'true' for key, value in options.items()})
             result = await asyncio.to_thread(submission.submit, metadata, upload.file, principal, key)
     elif content_type == "application/json":
         try:

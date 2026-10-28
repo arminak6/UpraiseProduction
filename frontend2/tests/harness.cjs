@@ -46,7 +46,7 @@ class Backend {
   records(method, path) { return this.calls.filter(call => call.method === method && call.path === path); }
   response(data, status = 200, type = "application/json") {
     const headers = { "Content-Type": type, "X-UPRAISE-Auth-Mode": this.mode };
-    return new Response(status === 204 ? null : type === "audio/wav" ? data : JSON.stringify(data), { status, headers });
+    return new Response(status === 204 ? null : ["audio/wav", "image/png"].includes(type) ? data : JSON.stringify(data), { status, headers });
   }
   catalog() {
     return [...this.bundles.values()].flatMap(value => Object.values(value.variants).map(lesson => ({

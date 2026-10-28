@@ -102,6 +102,10 @@ class InterruptTeacher:
                 if any(item.get('source_format') in {'doc', 'docx'} for item in chunks):
                     request['system'].append({'text': 'Word evidence uses source blocks and native document references, '
                         'not PDF pages. Refer to Word block numbers when identifying source locations.'})
+                if any(item.get('source_format') == 'pptx' for item in chunks):
+                    request['system'].append({'text': 'PowerPoint numeric source locations are original slide numbers, '
+                        'not PDF pages. Cite [Slide N] or [Slides N-M]. Speaker notes are labeled separately; '
+                        'do not invent missing explanations for sparse slides.'})
                 request["messages"][0]["content"].insert(0, {"text":
                     "Current prepared teaching text (context, not original evidence):\n"
                     "<PREPARED_TEACHING_BEGIN>\n" + context + "\n<PREPARED_TEACHING_END>"})
@@ -111,7 +115,7 @@ class InterruptTeacher:
             model_id=self.settings.lesson_generation_model_id, reviewer_model_id=self.settings.lesson_review_model_id)
         sources = [LearningChunk(chunk_id=item["chunk_id"], chunk_index=index,
             document_id=item["document_id"], document_version_id=item["document_version_id"],
-            text=item["text"], page_numbers=item["pages"]) for index, item in enumerate(chunks)]
+            text=item["text"], page_numbers=item.get('slide_numbers') or item["pages"]) for index, item in enumerate(chunks)]
         document = LearningDocument(document_id=self.binding.document_ids[0],
             document_version_id=chunks[0]["document_version_id"] if chunks else "session-source",
             document_title=self.binding.lesson_id, course_id=self.binding.course_id,

@@ -158,6 +158,8 @@ class InterruptService:
                            "row_ranges": item.get("row_ranges", []),
                            "source_blocks": item.get("source_blocks", []),
                            "word_references": item.get("word_references", []),
+                           "slide_numbers": item.get("slide_numbers", []),
+                           "slide_references": item.get("slide_references", []),
                            "quality_status": item.get("quality_status", "UNVERIFIED")})
         return unique
 
@@ -230,7 +232,8 @@ class InterruptService:
                             document_version_id=item["document_version_id"], pages=item["pages"],
                             source_chunk_ids=[item["chunk_id"]], quality_status=item["quality_status"],
                             source_format=item.get("source_format", "pdf"), row_ranges=item.get("row_ranges", []),
-                            source_blocks=item.get('source_blocks', []), word_references=item.get('word_references', []))
+                            source_blocks=item.get('source_blocks', []), word_references=item.get('word_references', []),
+                            slide_numbers=item.get('slide_numbers', []), slide_references=item.get('slide_references', []))
                             for item in chunks]
                         value.warnings.append("GROUNDING_NOT_VERIFIED")
                         if any(source.quality_status != "AUTO_CHECKED" for source in value.sources):

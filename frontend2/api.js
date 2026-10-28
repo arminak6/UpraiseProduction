@@ -21,6 +21,15 @@
     INTERRUPT_STT_UNAVAILABLE: "Speech recognition is temporarily unavailable. Retry the same recording, or discard it and type your question.",
     INTERRUPT_STT_LANGUAGE_UNSUPPORTED: "Voice questions are not available in this course language. You can type your question instead.",
     INTERRUPT_TRANSCRIPT_INVALID: "Speech could not be understood. Discard the recording and try again, or type your question.",
+    SLIDE_PREVIEW_UNAVAILABLE: "The original slide preview is unavailable. The retained course text is still readable.",
+    POWERPOINT_CONVERSION_FAILED: "The PowerPoint could not be rendered. Check the file and try again.",
+    POWERPOINT_INVALID_DOCUMENT: "This file is not a valid .pptx presentation.",
+    POWERPOINT_TOO_MANY_SLIDES: "This presentation exceeds the configured slide limit.",
+    POWERPOINT_TOO_LARGE: "The presentation is too large. Upload a smaller PowerPoint file.",
+    POWERPOINT_ENCRYPTED_UNSUPPORTED: "Password-protected presentations are not supported. Upload an unprotected .pptx copy.",
+    POWERPOINT_MACROS_UNSUPPORTED: "Upload a .pptx copy without macros.",
+    POWERPOINT_EXTERNAL_CONTENT_UNSUPPORTED: "This presentation links to external files. Embed its images or data, then upload it again.",
+    POWERPOINT_CONVERSION_TIMEOUT: "The presentation took too long to render. Try splitting it into smaller decks.",
   };
 
   class APIError extends Error {
@@ -75,7 +84,7 @@
       }
       if (response.status === 204) return null;
       if (options.binary) {
-        if (response.headers.get("Content-Type")?.split(";")[0] !== "audio/wav") throw new Error("The audio response was invalid.");
+        if (response.headers.get("Content-Type")?.split(";")[0] !== (options.mediaType || "audio/wav")) throw new Error("The media response was invalid.");
         return await response.arrayBuffer();
       }
       return await response.json();

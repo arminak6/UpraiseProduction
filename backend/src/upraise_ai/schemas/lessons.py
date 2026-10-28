@@ -126,6 +126,8 @@ class LessonSource(BaseModel):
     source_blocks: list[int] = Field(default_factory=list)
     row_ranges: list[dict[str, int]] = Field(default_factory=list)
     word_references: list[dict] = Field(default_factory=list)
+    slide_numbers: list[int] = Field(default_factory=list)
+    slide_references: list[dict] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def serialize_source(self, handler):
@@ -135,6 +137,9 @@ class LessonSource(BaseModel):
                 data.pop(field, None)
         if self.source_format not in {"doc", "docx"}:
             data.pop("word_references", None)
+        if self.source_format != "pptx":
+            data.pop("slide_numbers", None)
+            data.pop("slide_references", None)
         return data
 
     @property

@@ -42,9 +42,13 @@ class Settings(BaseSettings):
     max_word_uncompressed_mb: int = Field(500, ge=1, le=2000)
     word_conversion_timeout_seconds: int = Field(180, ge=10, le=900)
     word_visual_fallback: bool = True
+    max_powerpoint_size_mb: int = Field(100, ge=1, le=500)
+    max_powerpoint_uncompressed_mb: int = Field(500, ge=1, le=2000)
+    max_powerpoint_slides: int = Field(500, ge=1, le=5000)
+    powerpoint_conversion_timeout_seconds: int = Field(180, ge=10, le=900)
     chunk_max_tokens: int = Field(600, ge=100, le=2000)
     chunk_overlap_tokens: int = Field(60, ge=0)
-    pipeline_version: str = "document-ingestion-v1.6"
+    pipeline_version: str = "document-ingestion-v1.7"
     max_attempts: int = Field(3, ge=1, le=10)
     lease_seconds: int = Field(120, ge=30)
     worker_poll_seconds: float = Field(2, ge=0.1)
@@ -206,6 +210,10 @@ class Settings(BaseSettings):
             "max_word_uncompressed_mb",
             "word_conversion_timeout_seconds",
             "word_visual_fallback",
+            "max_powerpoint_size_mb",
+            "max_powerpoint_uncompressed_mb",
+            "max_powerpoint_slides",
+            "powerpoint_conversion_timeout_seconds",
         )
         digest = hashlib.sha256(
             json.dumps({k: getattr(self, k) for k in keys}, sort_keys=True).encode()

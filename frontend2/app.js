@@ -19,6 +19,7 @@
     config: null, local: false, connected: false, loading: true, refreshing: false,
     materials: [], materialError: "", catalogItems: [], courses: [], catalogError: "", more: false,
     selectedFile: null, selectedMaterial: null, uploadName: "", uploadLanguage: "en", activityId: "",
+    includeSpeakerNotes: false, includeHiddenSlides: false,
     uploadBusy: false, uploadError: "", uploadAttempt: null, uploadJobs: new Map(),
     draft: { title: "", language: "en", voice: "Joanna", words: 200, window: 5, maximum: 500, levels: null, teachingVersion: "v1" },
     generationBusy: false, generationError: "", generationAttempt: null, activeJobId: null,
@@ -44,6 +45,7 @@
   let expiryTimer;
   let reviewAudioUrl = null, reviewAudioEpoch = 0;
   let workspaceEpoch = 0;
+  let slidePreviewUrl = null, slidePreviewEpoch = 0, slidePreviewController;
 
   function badge(text, type = "", symbol = "") { return `<span class="badge ${type}">${symbol ? icon(symbol) : ""}${escape(text)}</span>`; }
   function levelLabel(level) { return String(level).replace(/_/g, " ").replace(/^./, char => char.toUpperCase()); }
@@ -74,7 +76,7 @@
   }
   function fileIcon(material) {
     const format = String(material.filename || "").split(".").pop().toUpperCase();
-    const safeFormat = ["PDF", "DOCX", "DOC", "CSV"].includes(format) ? format : "FILE";
+    const safeFormat = ["PDF", "DOCX", "DOC", "CSV", "PPTX"].includes(format) ? format : "FILE";
     return `<span class="file-icon ${safeFormat.toLowerCase()}">${safeFormat}</span>`;
   }
   function errorBox(message, action = "", label = "Try again") {
@@ -120,7 +122,7 @@
     document.querySelector("#connection-dot").classList.toggle("offline", !state.connected);
   }
   function render() {
-    releaseReviewAudio();
+    releaseReviewAudio(); releaseSlidePreview();
     const page = location.hash.slice(1);
     state.page = ["materials", "generate", "review", "learn"].includes(page) ? page : "materials";
     if (state.page !== "learn") { pausePlayback(); cancelActiveVoice(); }
@@ -215,12 +217,13 @@
   function renderMaterials() {
     main.innerHTML = `${intro("01", "YOUR MATERIAL", "Great learning starts<br>with <em>your material.</em>", "Bring your documents. We’ll help turn them into clear, engaging learning<br class=\"desktop-break\"> experiences, at a level that feels right.", true)}
       <div class="grid-upload"><section class="card card-padding" aria-labelledby="upload-title"><div class="card-title-row"><h2 id="upload-title">Add your teaching material</h2>${icon("upload")}</div>
-      <form id="upload-form"><fieldset class="plain-fieldset" ${state.uploadBusy ? "disabled" : ""}><div class="drop-zone" id="drop-zone"><span class="upload-symbol">${icon("upload")}</span><strong id="file-heading">${state.selectedFile ? escape(state.selectedFile.name) : "Drag your document here"}</strong><p>or <label class="file-label" for="file-input" tabindex="0">browse files</label> to get started</p><span class="file-note" id="file-note">${state.selectedFile ? `${escape(formatSize(state.selectedFile.size))} · Ready to upload` : "PDF, Word or CSV · Up to 100 MB"}</span><input type="file" class="sr-only" id="file-input" accept=".pdf,.docx,.doc,.csv" aria-label="Choose a PDF, Word or CSV document"></div>
+      <form id="upload-form"><fieldset class="plain-fieldset" ${state.uploadBusy ? "disabled" : ""}><div class="drop-zone" id="drop-zone"><span class="upload-symbol">${icon("upload")}</span><strong id="file-heading">${state.selectedFile ? escape(state.selectedFile.name) : "Drag your document here"}</strong><p>or <label class="file-label" for="file-input" tabindex="0">browse files</label> to get started</p><span class="file-note" id="file-note">${state.selectedFile ? `${escape(formatSize(state.selectedFile.size))} · Ready to upload` : "PDF, Word, PowerPoint or CSV · Up to 100 MB"}</span><input type="file" class="sr-only" id="file-input" accept=".pdf,.docx,.doc,.csv,.pptx" aria-label="Choose a PDF, Word, PowerPoint or CSV document"></div>
       <div class="form-grid"><div class="field"><label for="upload-course">Course name or reference</label><input id="upload-course" name="course" maxlength="120" placeholder="e.g. Introduction to artificial intelligence" value="${escape(state.uploadName)}" required></div><div class="field"><label for="upload-language">Document language</label><select id="upload-language" name="language">${languageOptions(state.uploadLanguage)}</select></div></div>
       <details class="advanced upload-advanced"><summary>Course settings</summary><div class="field"><label for="upload-activity">Activity reference</label><input id="upload-activity" name="activity" maxlength="120" value="${escape(state.activityId)}" required><small>For an existing Moodle course, enter its authorized course reference above and the matching activity here.</small></div></details>
       <div class="form-bottom"><span>${icon("lock")}Securely sent through your UPRAISE connection</span><button class="button" type="submit">${icon(state.uploadBusy ? "loader" : "upload", state.uploadBusy ? "spinner" : "")}${state.uploadBusy ? "Uploading…" : state.uploadAttempt?.failed ? "Retry upload" : "Upload material"}</button></div></fieldset><p class="inline-error" id="upload-error" role="alert" ${state.uploadError ? "" : "hidden"}>${escape(state.uploadError)}</p></form></section>
       <aside class="journey-card" aria-label="How UPRAISE works"><p class="eyebrow">SMALL STEPS. NEW POSSIBILITIES.</p><h2>From something you have,<br>to something you know.</h2><div class="journey-step"><span class="journey-icon">${icon("document")}</span><div><h3>Bring your knowledge</h3><p>Start with material you already trust.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("sparkles")}</span><div><h3>Make it a learning experience</h3><p>Clear explanations, at different levels.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("headphones")}</span><div><h3>Learn your way</h3><p>Read, listen, and ask along the way.</p></div></div><p class="journey-footnote">${icon("leaf")}Built around people. Supported by AI.</p></aside></div>
-      <section class="library" aria-labelledby="library-title"><div class="section-heading"><div><h2 id="library-title">Your material <span class="count-pill" id="material-count">${state.materials.length}</span></h2><p>A home for the knowledge your courses are built on.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search material</span><input id="material-search" type="search" placeholder="Search material…" value="${escape(state.search)}"></label></div><div id="material-results">${materialTable()}</div><p class="tip-line">${icon("info")}PDF, Word and UTF-8 CSV are supported. Processing completion does not establish source accuracy.</p></section>`;
+      <section class="library" aria-labelledby="library-title"><div class="section-heading"><div><h2 id="library-title">Your material <span class="count-pill" id="material-count">${state.materials.length}</span></h2><p>A home for the knowledge your courses are built on.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search material</span><input id="material-search" type="search" placeholder="Search material…" value="${escape(state.search)}"></label></div><div id="material-results">${materialTable()}</div><p class="tip-line">${icon("info")}PDF, Word, PowerPoint (.pptx) and UTF-8 CSV are supported. Processing completion does not establish source accuracy.</p></section>`;
+    updatePowerPointOptions();
     const fileInput = document.querySelector("#file-input");
     fileInput.addEventListener("change", () => chooseFile(fileInput.files[0]));
     const zone = document.querySelector("#drop-zone");
@@ -230,16 +233,57 @@
     document.querySelector(".file-label").addEventListener("keydown", event => { if (["Enter", " "].includes(event.key) && !state.uploadBusy) { event.preventDefault(); fileInput.click(); } });
   }
   function formatSize(bytes) { return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`; }
+  function updatePowerPointOptions() {
+    let panel = document.querySelector('#powerpoint-options');
+    if (!panel) {
+      panel = document.createElement('div'); panel.id = 'powerpoint-options';
+      document.querySelector('#drop-zone')?.after(panel);
+    }
+    panel.hidden = !/\.pptx$/i.test(state.selectedFile?.name || '');
+    panel.innerHTML = `<div class="powerpoint-options"><label class="checkbox-label"><input id="include-speaker-notes" type="checkbox" ${state.includeSpeakerNotes ? 'checked' : ''}>Include speaker notes as teaching material</label><label class="checkbox-label"><input id="include-hidden-slides" type="checkbox" ${state.includeHiddenSlides ? 'checked' : ''}>Include hidden slides</label><p class="small-copy">Original slide numbers are preserved. Comments, animations and embedded audio/video are not included as teaching material.</p></div>`;
+  }
+  function sourceSlideControls(chunk) {
+    const slides = new Map();
+    for (const source of chunk.sources || []) {
+      if (source.source_format !== 'pptx') continue;
+      for (const number of source.slide_numbers || source.source_blocks || []) {
+        const key = `${source.document_id}:${number}`;
+        if (slides.has(key)) continue;
+        const notes = source.slide_references?.some(item => item.slide_number === number && item.includes_speaker_notes);
+        slides.set(key, `<button class="button button-secondary button-sm" type="button" data-action="source-slide" data-document="${escape(source.document_id)}" data-version="${escape(source.document_version_id)}" data-slide="${Number(number)}">Slide ${Number(number)}${notes ? ' · notes included' : ''}</button>`);
+      }
+    }
+    return slides.size ? `<details class="advanced source-slides"><summary>Original PowerPoint slides</summary><p class="small-copy">Compare the source slide with the generated explanation. Previews depend on retained ingestion artifacts.</p><div class="voice-actions">${[...slides.values()].join('')}</div><div id="source-slide-view" aria-live="polite"></div></details>` : '';
+  }
+  function releaseSlidePreview() {
+    ++slidePreviewEpoch; slidePreviewController?.abort(); slidePreviewController = null;
+    if (slidePreviewUrl) URL.revokeObjectURL(slidePreviewUrl); slidePreviewUrl = null;
+  }
+  async function showSourceSlide(control) {
+    const editor = state.reviewEditor;
+    if (!editor?.bundle) return;
+    releaseSlidePreview(); const epoch = slidePreviewEpoch, view = document.querySelector('#source-slide-view');
+    view.textContent = 'Loading original slide…';
+    slidePreviewController = new AbortController();
+    try {
+      const bytes = await api.request(`/v1/documents/${encodeURIComponent(control.dataset.document)}/slides/${Number(control.dataset.slide)}?document_version_id=${encodeURIComponent(control.dataset.version)}`, { binary: true, mediaType: 'image/png', signal: slidePreviewController.signal });
+      if (epoch !== slidePreviewEpoch || state.reviewEditor !== editor || !view.isConnected) return;
+      slidePreviewUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+      const image = document.createElement('img'); image.src = slidePreviewUrl; image.alt = `Original PowerPoint slide ${Number(control.dataset.slide)}`;
+      view.replaceChildren(image);
+    } catch (error) { if (epoch === slidePreviewEpoch && view.isConnected) view.textContent = error.message; }
+  }
   function showUploadError(message) { state.uploadError = message; const error = document.querySelector("#upload-error"); if (error) { error.textContent = message; error.hidden = false; } }
   function chooseFile(file) {
     if (!file || state.uploadBusy) return;
+    if (file !== state.selectedFile) { state.includeSpeakerNotes = false; state.includeHiddenSlides = false; }
     let error = "";
-    if (!/\.(pdf|docx|doc|csv)$/i.test(file.name)) error = "Choose a PDF, Word (.docx or .doc), or CSV document.";
+    if (!/\.(pdf|docx|doc|csv|pptx)$/i.test(file.name)) error = "Choose a PDF, Word (.docx or .doc), PowerPoint (.pptx), or CSV document.";
     else if (!file.size) error = "This file is empty. Please choose another document.";
     else if (file.size > 100 * 1024 * 1024) error = "Please choose a document up to 100 MB.";
-    state.selectedFile = error ? null : file;
+    state.selectedFile = error ? null : file; updatePowerPointOptions();
     document.querySelector("#file-heading").textContent = error ? "Drag your document here" : file.name;
-    document.querySelector("#file-note").textContent = error ? "PDF, Word or CSV · Up to 100 MB" : `${formatSize(file.size)} · Ready to upload`;
+    document.querySelector("#file-note").textContent = error ? "PDF, Word, PowerPoint or CSV · Up to 100 MB" : `${formatSize(file.size)} · Ready to upload`;
     if (error) { document.querySelector("#file-input").value = ""; showUploadError(error); return; }
     if (!state.uploadName) {
       state.uploadName = file.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").slice(0, 120);
@@ -269,6 +313,7 @@
     const fields = { course_id: form.elements.course.value.trim(), activity_id: form.elements.activity.value.trim(), language: form.elements.language.value, source_ref: state.selectedFile.name.slice(0, 200) };
     if (!fields.course_id || !fields.activity_id) { showUploadError("Enter the course name and activity reference."); return; }
     const file = state.selectedFile;
+    if (/\.pptx$/i.test(file.name)) Object.assign(fields, { include_speaker_notes: String(state.includeSpeakerNotes), include_hidden_slides: String(state.includeHiddenSlides) });
     state.uploadBusy = true; state.uploadError = ""; renderMaterials();
     try {
       fields.content_hash = await api.sha256(await file.arrayBuffer());
@@ -351,6 +396,7 @@
     return sources.map(source => {
       if (source.source_format === "csv") return (source.row_ranges || []).map(span => `CSV rows ${Number(span.start)}–${Number(span.end)}`).join(", ");
       if (["doc", "docx"].includes(source.source_format)) return source.source_blocks?.length ? `Word blocks ${source.source_blocks.map(Number).join(", ")}` : "Word source";
+      if (source.source_format === "pptx") return `Slides ${(source.slide_numbers || source.source_blocks || []).map(Number).join(", ")}`;
       return source.pages?.length ? `Pages ${source.pages.map(Number).join(", ")}` : "Course material";
     }).filter(Boolean).join(" · ");
   }
@@ -393,7 +439,7 @@
       <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div><div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
       <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2.8 · First draft with review flags</option><option value="v2.9" ${state.draft.teachingVersion === "v2.9" ? "selected" : ""}>Version 2.9 · Writer, reviewer and judge</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option><option value="v3.1" ${state.draft.teachingVersion === "v3.1" ? "selected" : ""}>Version 3.1 · Source-aware teaching and level review</option></select><p class="small-copy" id="teaching-version-help">Version 3.1 preserves source identities, checks evidence-linked references and reviews difficulty adaptation. Unresolved material remains flagged for teacher editing. Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2.9 adds one judge edit and a fresh final review; unresolved findings keep the judge’s text with human-review flags. Version 2.8 keeps the first draft with review flags. Each generation creates a new course; earlier versions remain available.</p></div></div>
       <div class="form-section"><fieldset class="plain-fieldset" aria-describedby="generation-level-help"><legend class="step-label"><span>3</span>Choose difficulty levels</legend><div class="generation-level-options">${configuredLevels().map(level => `<label class="level-option"><input type="checkbox" name="levels" value="${escape(level)}" ${selectedGenerationLevels().includes(level) ? "checked" : ""}><span><strong>${escape(levelLabel(level))}</strong>${levelDescriptions[level] ? `<small>${escape(levelDescriptions[level])}</small>` : ""}</span></label>`).join("")}</div><p class="small-copy" id="generation-level-help">Choose one or more levels. We’ll create text and narration only for your selection.</p><p class="inline-error" id="generation-level-error" ${selectedGenerationLevels().length ? "hidden" : ""}>Select at least one difficulty level.</p></fieldset></div>
-      <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
+      <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, PowerPoint slides, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
       <button class="button button-wide generate-submit" type="submit" ${selectedGenerationLevels().length ? "" : "disabled"}>${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
   }
   function voiceOptions(language) {
@@ -603,7 +649,7 @@
     }).join("")}</ul>` : '<div class="card review-no-findings" role="status"><h3>No automated findings for this level</h3><p>You can still read every section and request changes.</p><button class="button button-secondary button-sm" data-action="review-filter" data-scope="all">Show all sections</button></div>'}</section>`;
   }
   function renderReview() {
-    releaseReviewAudio();
+    releaseReviewAudio(); releaseSlidePreview();
     const editor = state.reviewEditor;
     const heading = intro("03", "TEACHER REVIEW", "See what needs<br><em>your attention.</em>", "Choose a course, inspect flagged sections, and guide the next revision.");
     if (!editor) {
@@ -623,7 +669,7 @@
       ${!available ? `<div class="learning-note">${icon("info")}<div><strong>Teaching text remains available</strong><p>${escape(reviewUnavailable(bundle))}</p><a class="text-button" href="#generate">Go to Generate course ${icon("arrow")}</a></div></div>` : ""}
       <div class="form-grid review-selectors"><div class="field"><label for="review-level">Learning level</label><select id="review-level" ${editor.busy ? "disabled" : ""}>${bundle.levels.map(level => `<option value="${escape(level)}" ${editor.level === level ? "selected" : ""}>${escape(levelLabel(level))} · ${bundle.variants[level].chunks.filter(part => needsReview(part.reviewer_report)).length} to check</option>`).join("")}</select></div><div class="field"><label for="review-part">Course part</label><select id="review-part" ${editor.busy ? "disabled" : ""}>${lesson.chunks.map((part, index) => `<option value="${index}" ${editor.index === index ? "selected" : ""}>Part ${index + 1}${needsReview(part.reviewer_report) ? " · Needs review" : ""} — ${escape(partTitle(part))}</option>`).join("")}</select></div></div>
       ${reviewSectionBrowser(editor)}
-      <div class="review-workspace"><section class="card card-padding review-reading" aria-labelledby="review-part-title"><div class="card-title-row"><h2 id="review-part-title" tabindex="-1">Part ${editor.index + 1} of ${lesson.chunks.length}</h2>${badge(levelLabel(editor.level))}</div><div class="review-full-text">${textParagraphs(chunk.text, "lesson-paragraph")}</div>${reviewNarration(chunk, bundle, available && !disabled)}<p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${reviewDetails(chunk.reviewer_report, needsReview(chunk.reviewer_report))}<div class="lesson-navigation"><button class="button button-secondary" data-action="review-previous" ${!Number.isInteger(adjacentReviewPart(editor, -1)) || editor.busy ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button button-secondary" data-action="review-next" ${!Number.isInteger(adjacentReviewPart(editor, 1)) || editor.busy ? "disabled" : ""}>Next part ${icon("arrow")}</button></div></section>
+      <div class="review-workspace"><section class="card card-padding review-reading" aria-labelledby="review-part-title"><div class="card-title-row"><h2 id="review-part-title" tabindex="-1">Part ${editor.index + 1} of ${lesson.chunks.length}</h2>${badge(levelLabel(editor.level))}</div><div class="review-full-text">${textParagraphs(chunk.text, "lesson-paragraph")}</div>${reviewNarration(chunk, bundle, available && !disabled)}<p class="tip-line">${icon("document")}${escape(sourceReferences(chunk.sources))}</p>${sourceSlideControls(chunk)}${reviewDetails(chunk.reviewer_report, needsReview(chunk.reviewer_report))}<div class="lesson-navigation"><button class="button button-secondary" data-action="review-previous" ${!Number.isInteger(adjacentReviewPart(editor, -1)) || editor.busy ? "disabled" : ""}>${icon("back")}Previous part</button><button class="button button-secondary" data-action="review-next" ${!Number.isInteger(adjacentReviewPart(editor, 1)) || editor.busy ? "disabled" : ""}>Next part ${icon("arrow")}</button></div></section>
       <aside class="card card-padding review-feedback" aria-labelledby="feedback-title"><h2 id="feedback-title">Your feedback</h2><p class="small-copy">Describe how this part should change. Updating replaces its text and narration in the same course.</p>${editor.uncertain || state.revisionUncertain.has(editor.id) ? `${errorBox("The previous revision may already have been accepted. Refresh the course and check its text before preparing another request. No revision is retried automatically.")}<button class="button button-secondary" data-action="reload-review">Refresh course text</button><button class="text-button" data-action="prepare-new-review">I checked; prepare new request</button>` : `<form id="review-form"><fieldset class="plain-fieldset" ${disabled ? "disabled" : ""}><div class="field"><label for="review-feedback">What would you change in part ${editor.index + 1}?</label><textarea id="review-feedback" maxlength="8000" required placeholder="e.g. Add a practical example and explain the key term more simply.">${escape(editor.text)}</textarea><small>Your comments stay in this tab while you move between parts.</small></div>${bundle.levels.length > 1 ? `<label class="checkbox-label"><input id="review-all" type="checkbox" ${editor.all ? "checked" : ""}>Apply this change to the corresponding part in every available level</label>` : ""}<button class="button button-wide" type="submit">${icon(editor.busy || pending ? "loader" : "edit", editor.busy || pending ? "spinner" : "")}${editor.busy ? "Submitting…" : pending ? "Revision in progress…" : "Update this part"}</button></fieldset>${editor.error ? errorBox(editor.error) : ""}</form>`}<p class="preview-note">${icon("info")}The updated explanation remains a draft for human review.</p></aside></div>`;
   }
 
@@ -1109,6 +1155,7 @@
     if (action === "connection-info") { connectionInfo(); return; }
     if (action === "refresh-connection") { modal.close(); await refreshWorkspace(); return; }
     if (action === "refresh-workspace") { await refreshWorkspace(); return; }
+    if (action === "source-slide") { await showSourceSlide(control); return; }
     if (action === "review-course") { await openReview(id, control.dataset.level || "", control.dataset.part === undefined ? undefined : Number(control.dataset.part)); return; }
     if (action === "review-filter") {
       const editor = state.reviewEditor, scope = control.dataset.scope;
@@ -1234,6 +1281,8 @@
   document.addEventListener("change", event => {
     const target = event.target;
     if (target.name === "source") { selectedSource(target.value); renderGenerate(); document.querySelector(`input[name="source"][value="${state.selectedMaterial}"]`)?.focus(); }
+    if (target.id === "include-speaker-notes") state.includeSpeakerNotes = target.checked;
+    if (target.id === "include-hidden-slides") state.includeHiddenSlides = target.checked;
     if (target.id === "upload-language") state.uploadLanguage = target.value;
     if (target.id === "course-language") { state.draft.language = target.value; state.draft.voice = target.value === "it" ? "Bianca" : "Joanna"; document.querySelector("#course-voice").innerHTML = voiceOptions(target.value); }
     if (target.id === "course-voice") state.draft.voice = target.value;
@@ -1290,7 +1339,7 @@
   document.addEventListener("play", event => { if (event.target.id === "voice-preview") { lectureAudio.pause(); pauseReply(); } }, true);
   document.addEventListener("visibilitychange", () => { if (document.hidden) { pausePlayback(); cancelActiveVoice(); } });
   window.addEventListener("pagehide", () => {
-    releaseReviewAudio();
+    releaseReviewAudio(); releaseSlidePreview();
     pausePlayback(); questionController?.abort();
     const player = state.player;
     if (player && !player.closed && player.session) void api.request(`/v1/sessions/${player.session.session_id}/end`, { method: "POST", json: { reason: player.endPending?.reason || "STOPPED_BY_LEARNER" }, headers: sessionHeaders(player), keepalive: true, timeout: 10000 }).catch(() => {});

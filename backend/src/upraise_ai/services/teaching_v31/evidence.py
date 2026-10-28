@@ -7,7 +7,7 @@ from upraise_ai.services.teaching_v2.contracts import validate_written
 from upraise_ai.services.v3.polly_speech import _MATH_PATTERN
 
 TAG = re.compile(r"\[(?:p|pp)\.\s*(\d+)(?:\s*-\s*(\d+))?\]")
-EXTRACTION_LABEL = re.compile(r"(?m)^\s*\[Word blocks? \d+(?:-\d+)?\]\s*\n?")
+EXTRACTION_LABEL = re.compile(r"(?m)^\s*\[(?:Word blocks?|Slides?) \d+(?:-\d+)?\]\s*\n?")
 
 
 def records(section):
@@ -99,7 +99,7 @@ def bind(section, item, *, allowed=None):
         raise IngestionError("LESSON_CITATIONS_INVALID")
     # Do not silently convert model-invented numeric references into valid ones.
     prose = _MATH_PATTERN.sub(" ", item.text)
-    if TAG.search(prose) or re.search(r"\[(?:Word blocks|CSV rows)\b|\[\d+\]", prose):
+    if TAG.search(prose) or re.search(r"\[(?:Word blocks|CSV rows|Slides?)\b|\[\d+\]", prose):
         raise IngestionError("TEACHING_V31_EVIDENCE_INVALID")
     validate_written(item.text)
     text = item.text.strip() + " " + " ".join(f"[p. {n}]" for n in numbers)

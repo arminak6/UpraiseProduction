@@ -167,5 +167,6 @@ def request(connection: Connection, method: str, path: str, *, params=None, json
 def upload_mime(filename):
     extension = filename.rsplit('.', 1)[-1].lower()
     return {'pdf': 'application/pdf', 'csv': 'text/csv', 'doc': 'application/msword',
+            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
             'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}.get(
                 extension, 'application/octet-stream')

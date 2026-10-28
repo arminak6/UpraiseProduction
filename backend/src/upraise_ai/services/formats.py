@@ -35,6 +35,10 @@ class PdfParser(Protocol):
 
 def get_processor(mime_type, settings):
     """Verified format dispatch; future processors share prepare() output."""
+    if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        from upraise_ai.services.powerpoint_processor import PowerPointProcessor
+
+        return PowerPointProcessor(settings)
     if mime_type == "application/pdf":
         from upraise_ai.services.pdf.processor import PdfProcessor
 
@@ -53,7 +57,8 @@ def get_processor(mime_type, settings):
 
 
 FORMAT_MIMES = {"pdf": "application/pdf", "csv": "text/csv", "doc": "application/msword",
-                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
 
 
 def upload_format(filename, mime_type):

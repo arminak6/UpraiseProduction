@@ -33,7 +33,7 @@ def question_number_issues(payload):
     for index, text in enumerate(payload["candidates"]):
         if not any(mark in text for mark in ("?", "？", "؟")):
             continue
-        prose = re.sub(r"\[(?:p\.|pp\.|Word blocks?|CSV blocks?)[^\]]*\]", " ", text, flags=re.IGNORECASE)
+        prose = re.sub(r"\[(?:p\.|pp\.|Word blocks?|CSV blocks?|Slides?)[^\]]*\]", " ", text, flags=re.IGNORECASE)
         prose = re.sub(r"(?m)^\s*\d+[.)]\s+", "", prose)
         if numbers(prose) - allowed:
             issues.append(f"Candidate {index + 1} introduces numerical inputs in a learner question that are absent from the supplied material. "

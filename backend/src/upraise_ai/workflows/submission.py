@@ -23,11 +23,16 @@ class SubmissionService:
             raise IngestionError("INVALID_IDEMPOTENCY_KEY", status=400)
         key_digest = hashlib.sha256(key.encode()).hexdigest() if key else None
         job_id, document_id = str(uuid4()), str(uuid4())
-        maximum = (self.settings.max_word_size_mb if metadata.source_format in {"doc", "docx"} else
+        maximum = (self.settings.max_powerpoint_size_mb if metadata.source_format == "pptx" else
+                   self.settings.max_word_size_mb if metadata.source_format in {"doc", "docx"} else
                    self.settings.max_csv_size_mb if metadata.source_format == "csv" else self.settings.max_pdf_size_mb)
         source = self.staging.stage(job_id, stream, maximum * 1024**2, source_format=metadata.source_format)
         try:
-            if metadata.source_format == "csv":
+            if metadata.source_format == "pptx":
+                from upraise_ai.services.powerpoint_processor import validate_powerpoint_input
+
+                validate_powerpoint_input(source, self.settings)
+            elif metadata.source_format == "csv":
                 from upraise_ai.services.csv_processor import validate_csv_input
 
                 validate_csv_input(source, self.settings, metadata)

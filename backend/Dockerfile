@@ -6,7 +6,7 @@ RUN npm ci --omit=dev --ignore-scripts
 FROM python:3.12.14-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 libgomp1 libreoffice-writer fonts-liberation fonts-dejavu-core \
+    libgl1 libglib2.0-0 libgomp1 libreoffice-writer libreoffice-impress fonts-liberation fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv

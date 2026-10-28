@@ -208,7 +208,7 @@ elif page == "Ingest material":
         content_hash = left.text_input("content_hash", disabled=auto_hash, key="content_hash",
                                        placeholder="Computed on submission" if auto_hash else "Upstream hash or revision")
         if source_mode == "PDF / CSV / Word upload":
-            upload = st.file_uploader("Document (PDF, CSV or Word)", type=["pdf", "csv", "docx", "doc"], max_upload_size=100, key="document_upload")
+            upload = st.file_uploader("Document (PDF, CSV, Word or PowerPoint)", type=["pdf", "csv", "docx", "doc", "pptx"], max_upload_size=100, key="document_upload")
             moodle_url = None
         else:
             upload = None
@@ -265,7 +265,7 @@ elif page == "Generate lesson":
         activity_id = left.text_input("activity_id", key="a3_activity_id")
         document_ids = st.text_area("Document UUIDs in order (one per line)", key="a3_document_ids")
         window = left.number_input("Source window size", min_value=1, max_value=50, value=5, key="a3_window",
-                                   help="PDF pages, CSV row groups or Word blocks per generation window.")
+                                   help="PDF pages, PowerPoint slides, CSV row groups or Word blocks per generation window.")
         words = right.number_input("Target chunk length (words)", min_value=30, max_value=1000, value=200, key="a3_words")
         if aligned:
             maximum = left.number_input('Maximum chunk length (words)', min_value=50, max_value=2000,

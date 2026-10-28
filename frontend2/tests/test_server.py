@@ -192,6 +192,17 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "audio/wav")
         self.assertEqual(hashlib.sha256(body).digest(), hashlib.sha256(WAV).digest())
 
+    def test_powerpoint_previews_forward_image_bytes_and_bound_query(self):
+        self.backend.data = b'\x89PNG\r\nsource-slide'
+        self.backend.response_headers['Content-Type'] = 'image/png'
+        path = f'/api/v1/documents/{JOB}/slides/3?document_version_id={CHUNK}'
+        status, headers, body = self.request(path)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['Content-Type'], 'image/png')
+        self.assertEqual(body, self.backend.data)
+        self.assertEqual(self.request(path + '&asset_path=/private')[0], 404)
+        self.assertEqual(self.request(path.replace('/slides/3', '/slides/0'))[0], 404)
+
     def test_backend_errors_and_safe_headers_are_preserved(self):
         self.backend.status = 503
         self.backend.data = b'{"detail":"CLEANUP_PENDING"}'

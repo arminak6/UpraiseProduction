@@ -21,14 +21,24 @@ converts them to Word block citations. Never describe these numbers as PDF pages
 Do not invent content missing from the source or treat figure descriptions as verified facts.
 """
 
+POWERPOINT_CITATION_POLICY = """
+This source is PowerPoint. Numeric citation slots identify ORIGINAL SLIDE NUMBERS,
+not PDF pages or speaker-note pages. Use [p. N]/[pp. N-M] only for supplied slides;
+publication converts these to slide citations. Preserve slide order, titles and
+the distinction between visible content and explicitly included speaker notes.
+Explain only source-supported material. Sparse bullets do not authorize invented
+facts or relationships. Unverified visual content remains uncertain.
+"""
+
 
 def citation_policy(section):
-    return (WORD_CITATION_POLICY if section.get('source_format') in {'doc', 'docx'} else
+    return (POWERPOINT_CITATION_POLICY if section.get('source_format') == 'pptx' else
+            WORD_CITATION_POLICY if section.get('source_format') in {'doc', 'docx'} else
             CSV_CITATION_POLICY if section.get('source_format') == 'csv' else '')
 
 
 def citation_chunks(chunks):
-    return [{**chunk, "page_numbers": chunk["source_blocks"]} if chunk.get("source_format") in {"csv", "doc", "docx"}
+    return [{**chunk, "page_numbers": chunk["source_blocks"]} if chunk.get("source_format") in {"csv", "doc", "docx", "pptx"}
             else chunk for chunk in chunks]
 
 
@@ -37,17 +47,20 @@ def lesson_source(section, citations):
     selected = [chunk for chunk in section["chunks"] if set(chunk["page_numbers"]) & set(citations)]
     csv = section.get("source_format") == "csv"
     word = section.get('source_format') in {'doc', 'docx'}
+    powerpoint = section.get('source_format') == 'pptx'
     return LessonSource(document_id=section["document_id"], document_version_id=section["document_version_id"],
-        pages=[] if csv or word else citations, source_chunk_ids=[chunk["chunk_id"] for chunk in selected],
+        pages=[] if csv or word or powerpoint else citations, source_chunk_ids=[chunk["chunk_id"] for chunk in selected],
         quality_status="NEEDS_REVIEW" if any(chunk.get("quality", {}).get("status", "UNVERIFIED")
             != "AUTO_CHECKED" for chunk in section["chunks"]) else "AUTO_CHECKED",
-        source_format=section.get('source_format', 'pdf'), source_blocks=citations if csv or word else [],
+        source_format=section.get('source_format', 'pdf'), source_blocks=citations if csv or word or powerpoint else [],
         row_ranges=[span for chunk in selected for span in chunk.get("row_ranges", [])] if csv else [],
-        word_references=[ref for chunk in selected for ref in chunk.get('word_references', [])] if word else [])
+        word_references=[ref for chunk in selected for ref in chunk.get('word_references', [])] if word else [],
+        slide_numbers=citations if powerpoint else [],
+        slide_references=[ref for chunk in selected for ref in chunk.get('slide_references', [])] if powerpoint else [])
 
 
 def display_review(report, source):
-    if source.source_format in {'doc', 'docx'}:
+    if source.source_format in {'doc', 'docx', 'pptx'}:
         report = report.model_copy(deep=True)
         for issue in report.issues:
             issue.source_blocks = [n for n in issue.pages if n in source.source_blocks] or source.source_blocks
@@ -66,15 +79,17 @@ def display_review(report, source):
 
 
 def display_citations(text, source, *, strict=True, preserve_invalid=False):
-    if source.source_format in {'doc', 'docx'}:
+    if source.source_format in {'doc', 'docx', 'pptx'}:
         def word_replace(match):
             start, end = int(match[2]), int(match[3] or match[2])
             if end < start or end - start > 5000 or not set(range(start, end + 1)).issubset(source.source_blocks):
                 if preserve_invalid:
                     return match[0]
                 if not strict:
-                    return '[Word source reference unavailable]'
+                    return '[Slide reference unavailable]' if source.source_format == 'pptx' else '[Word source reference unavailable]'
                 raise IngestionError('LESSON_CITATIONS_INVALID', retryable=True)
+            if source.source_format == 'pptx':
+                return f'[Slide {start}]' if start == end else f'[Slides {start}-{end}]'
             return f'[Word blocks {start}-{end}]'
         return re.sub(r'\[(p|pp)\.\s*(\d+)(?:\s*-\s*(\d+))?\]', word_replace, text)
     if source.source_format != "csv":
@@ -93,13 +108,14 @@ def display_citations(text, source, *, strict=True, preserve_invalid=False):
 
 
 def model_citations(text, source):
-    if source.source_format in {'doc', 'docx'}:
+    if source.source_format in {'doc', 'docx', 'pptx'}:
         def word_replace(match):
-            start, end = int(match[1]), int(match[2])
+            start, end = int(match[1]), int(match[2] or match[1])
             if end < start or end - start > 5000 or not set(range(start, end + 1)).issubset(source.source_blocks):
                 raise IngestionError('LESSON_CITATIONS_INVALID', retryable=True)
             return f'[p. {start}]' if start == end else f'[pp. {start}-{end}]'
-        return re.sub(r'\[Word blocks (\d+)-(\d+)\]', word_replace, text)
+        pattern = r'\[Slides? (\d+)(?:-(\d+))?\]' if source.source_format == 'pptx' else r'\[Word blocks (\d+)-(\d+)\]'
+        return re.sub(pattern, word_replace, text)
     if source.source_format != "csv":
         return text
     mapping = dict(zip(source.source_blocks, source.row_ranges, strict=True))

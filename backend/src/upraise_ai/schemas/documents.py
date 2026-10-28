@@ -36,7 +36,9 @@ class UrlDocumentInput(DocumentInput):
 
 class IngestionMetadata(DocumentInput):
     source_filename: str = Field(min_length=1, max_length=300)
-    source_format: Literal["pdf", "csv", "docx", "doc"] = "pdf"
+    source_format: Literal["pdf", "csv", "docx", "doc", "pptx"] = "pdf"
+    include_speaker_notes: bool = False
+    include_hidden_slides: bool = False
 
     @model_serializer(mode="wrap")
     def serialize_metadata(self, handler):
@@ -45,6 +47,9 @@ class IngestionMetadata(DocumentInput):
         # without this internal field continue to default to PDF.
         if self.source_format == "pdf":
             data.pop("source_format", None)
+        if self.source_format != "pptx":
+            data.pop("include_speaker_notes", None)
+            data.pop("include_hidden_slides", None)
         return data
 
     @property
@@ -180,7 +185,9 @@ class Chunk(BaseModel):
     embedding_text: str
     token_count: int
     page_numbers: list[int] = Field(default_factory=list)
-    source_format: Literal["pdf", "csv", "docx", "doc"] = "pdf"
+    source_format: Literal["pdf", "csv", "docx", "doc", "pptx"] = "pdf"
+    slide_numbers: list[int] = Field(default_factory=list)
+    slide_references: list[dict[str, Any]] = Field(default_factory=list)
     source_blocks: list[int] = Field(default_factory=list)
     word_references: list[dict[str, Any]] = Field(default_factory=list)
     row_ranges: list[RowRange] = Field(default_factory=list)
@@ -197,6 +204,9 @@ class Chunk(BaseModel):
         data = handler(self)
         if self.source_format not in {'doc', 'docx'}:
             data.pop('word_references', None)
+        if self.source_format != 'pptx':
+            data.pop('slide_numbers', None)
+            data.pop('slide_references', None)
         return data
 
 
@@ -214,6 +224,7 @@ class ProcessedDocument(BaseModel):
     row_count: int | None = None
     column_count: int | None = None
     source_block_count: int | None = None
+    slide_count: int | None = None
     elements: list[DocumentElement]
     chunks: list[Chunk]
     warnings: list[str]

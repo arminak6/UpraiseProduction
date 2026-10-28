@@ -25,6 +25,7 @@ ROUTES = [
     ("GET", r"/v1/documents", {"course_id"}),
     ("POST", r"/v1/documents", set()),
     ("DELETE", rf"/v1/documents/{UUID}", set()),
+    ("GET", rf"/v1/documents/{UUID}/slides/[1-9][0-9]{{0,3}}", {"document_version_id"}),
     ("GET", r"/v1/lesson-jobs", {"course_id", "limit", "offset"}),
     ("GET", r"/v1/lesson-reviews", {"course_id", "limit", "offset"}),
     ("GET", rf"/v1/lesson-reviews/{UUID}", set()),
@@ -217,7 +218,7 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
             if len(body) != length:
                 self.json_response(400, {"detail": "INCOMPLETE_REQUEST"})
                 return
-        headers = {"Accept": "application/json, audio/wav"}
+        headers = {"Accept": "application/json, audio/wav, image/png"}
         if content_type:
             headers["Content-Type"] = content_type
         for name in ("Idempotency-Key", "X-UPRAISE-Session-JWT"):
@@ -248,7 +249,7 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
                     self.json_response(502, {"detail": "BACKEND_REDIRECT_BLOCKED"})
                     return
                 media_type = upstream.headers.get("Content-Type", "application/json")
-                if upstream.code != 204 and media_type.split(";", 1)[0] not in {"application/json", "audio/wav"}:
+                if upstream.code != 204 and media_type.split(";", 1)[0] not in {"application/json", "audio/wav", "image/png"}:
                     self.json_response(502, {"detail": "BACKEND_RESPONSE_INVALID"})
                     return
                 self.send_response(upstream.code)

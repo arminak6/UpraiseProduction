@@ -106,7 +106,7 @@ class RevisionPipeline(LessonPipeline):
             raise IngestionError("REVISION_SOURCE_UNAVAILABLE")
         if sum(len(chunk["text"]) for chunk in chunks) > self.settings.lesson_max_source_characters:
             raise IngestionError("REVISION_SOURCE_CONTEXT_TOO_LARGE")
-        blocks = source.source_format in {'csv', 'doc', 'docx'}
+        blocks = source.source_format in {'csv', 'doc', 'docx', 'pptx'}
         chunks = citation_chunks(chunks)
         pages = sorted({page for chunk in chunks for page in chunk["page_numbers"]})
         section = {"document_id": source.document_id, "document_version_id": source.document_version_id,
@@ -175,6 +175,8 @@ class RevisionPipeline(LessonPipeline):
         if not revision.aligned_unit:
             if blocks:
                 selected.sources[0].source_blocks = pages
+                if source.source_format == 'pptx':
+                    selected.sources[0].slide_numbers = pages
             else:
                 selected.sources[0].pages = pages
         result.job_id, result.expires_at = job_id, None

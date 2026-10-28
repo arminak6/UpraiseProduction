@@ -8,6 +8,71 @@ async function recordVoice(h, seconds = 1, channels) {
   h.click('[data-action="stop-recording"]'); await h.settle();
 }
 
+test('PowerPoint upload exposes explicit notes/hidden choices and pins them in the retry identity', async t => {
+  const h = await harness(); t.after(h.close);
+  assert.ok(h.find('#file-input').accept.includes('.pptx'));
+  h.chooseFile('Graph lesson.pptx', 'pptx fixture');
+  assert.equal(h.find('#powerpoint-options').hidden, false);
+  assert.equal(h.find('#include-speaker-notes').checked, false);
+  assert.equal(h.find('#include-hidden-slides').checked, false);
+  h.click('#include-speaker-notes');
+  h.backend.failNext('POST', '/v1/documents'); h.submit('#upload-form'); await h.settle();
+  await h.navigate('learn'); await h.navigate('materials');
+  assert.equal(h.find('#include-speaker-notes').checked, true);
+  h.backend.failNext('POST', '/v1/documents'); h.submit('#upload-form'); await h.settle();
+  let calls = h.backend.records('POST', '/v1/documents');
+  assert.equal(calls[0].rawBody.get('include_speaker_notes'), 'true');
+  assert.equal(calls[0].rawBody.get('include_hidden_slides'), 'false');
+  assert.equal(calls[0].headers.get('Idempotency-Key'), calls[1].headers.get('Idempotency-Key'));
+  h.click('#include-hidden-slides'); h.submit('#upload-form'); await h.settle();
+  calls = h.backend.records('POST', '/v1/documents');
+  assert.equal(calls[2].rawBody.get('include_hidden_slides'), 'true');
+  assert.notEqual(calls[1].headers.get('Idempotency-Key'), calls[2].headers.get('Idempotency-Key'));
+});
+
+test('PowerPoint options are not sent for PDF uploads', async t => {
+  const h = await harness(); t.after(h.close);
+  h.chooseFile('lesson.pptx'); h.click('#include-speaker-notes'); h.chooseFile('lesson.pdf');
+  assert.equal(h.find('#powerpoint-options').hidden, true);
+  h.submit('#upload-form'); await h.settle();
+  assert.equal(h.backend.records('POST', '/v1/documents')[0].rawBody.has('include_speaker_notes'), false);
+});
+
+test('teacher review loads original slides only on request and releases previews on navigation', async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.chunks[0].sources = [{ document_id: id(1), document_version_id: id(4), source_format: 'pptx', pages: [],
+        source_blocks: [1, 3], slide_numbers: [1, 3], slide_references: [{ slide_number: 1, includes_speaker_notes: true }] }];
+    }
+    backend.intercept = call => call.path.includes('/slides/') ? backend.response(Buffer.from('PNG fixture'), 200, 'image/png') : undefined;
+  }); t.after(h.close);
+  await h.navigate('review'); h.click('[data-action="review-course"]'); await h.settle();
+  assert.match(h.find('.review-reading').textContent, /Slides 1, 3/);
+  assert.equal(h.backend.calls.filter(call => call.path.includes('/slides/')).length, 0);
+  h.find('.source-slides').open = true; h.click('[data-action="source-slide"]'); await h.settle();
+  assert.match(h.find('#source-slide-view img').alt, /slide 1/); assert.equal(h.urls.size, 1);
+  const call = h.backend.calls.find(call => call.path.includes('/slides/'));
+  assert.equal(call.query.get('document_version_id'), id(4));
+  assert.equal(call.headers.get('X-UPRAISE-UI'), 'test-ui-nonce');
+  h.click('[data-action="review-next"]'); await h.settle();
+  assert.equal(h.document.querySelector('#source-slide-view img'), null); assert.equal(h.urls.size, 0);
+});
+
+test('a late original-slide response cannot appear after the teacher changes parts', async t => {
+  let resolvePreview;
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.chunks[0].sources = [{ document_id: id(1), document_version_id: id(4), source_format: 'pptx',
+        pages: [], source_blocks: [1], slide_numbers: [1] }];
+    }
+    backend.intercept = call => call.path.includes('/slides/') ? new Promise(resolve => { resolvePreview = () => resolve(backend.response(Buffer.from('PNG'), 200, 'image/png')); }) : undefined;
+  }); t.after(h.close);
+  await h.navigate('review'); h.click('[data-action="review-course"]'); await h.settle();
+  h.find('.source-slides').open = true; h.click('[data-action="source-slide"]'); await h.settle();
+  h.click('[data-action="review-next"]'); await h.settle(); resolvePreview(); await h.settle();
+  assert.equal(h.document.querySelector('#source-slide-view img'), null); assert.equal(h.urls.size, 0);
+});
+
 for (const rate of [44100, 48000]) test(`voice questions encode ${rate} Hz stereo capture as mono 16 kHz WAV and retain retry identity`, async t => {
   const h = await harness(); t.after(h.close);
   h.microphone.sampleRate = rate;

@@ -243,6 +243,8 @@ def render_player(connection, state, *, local_testing=False):
                 if source.get("source_format") == "csv":
                     st.caption("CSV source rows: " + ", ".join(f"{span['start']}–{span['end']}"
                                for span in source.get("row_ranges", [])))
+                elif source.get('source_format') == 'pptx':
+                    st.caption('Slides ' + ', '.join(map(str, source.get('slide_numbers', []))))
                 elif source.get('source_format') in {'doc', 'docx'}:
                     st.caption('Word source blocks: ' + ', '.join(map(str, source.get('source_blocks', []))))
             if state.get("audio_error"):

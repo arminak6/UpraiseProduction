@@ -295,6 +295,9 @@ th:last-child, td:last-child { text-align: right; }
 .voice-question .small-copy { margin: 9px 0; }
 .voice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .voice-question audio { display: block; width: 100%; max-width: 390px; margin-top: 12px; }
+.powerpoint-options { padding: 14px; margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; }
+.powerpoint-options .checkbox-label { margin: 8px 0; }
+.source-slides img { width: 100%; height: auto; border: 1px solid var(--line); margin-top: 14px; }
 .question-history { display: grid; gap: 14px; max-height: 640px; max-height: min(65vh, 640px); overflow-y: auto; overscroll-behavior: contain; margin-bottom: 22px; padding: 2px; }
 .question-history:empty { display: none; }
 .question-bubble, .answer-bubble { min-width: 0; border: 1px solid #e2ecd9; border-radius: 10px; padding: 17px 19px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }

@@ -98,8 +98,8 @@ class AppTests(unittest.TestCase):
         raw = b"Concept,Definition\nTape,Memory\n"
         upload = SimpleNamespace(name="teaching.csv", getvalue=lambda: raw, getbuffer=lambda: raw)
         def uploader(label, *args, **kwargs):
-            if label == "Document (PDF, CSV or Word)":
-                self.assertEqual(kwargs["type"], ["pdf", "csv", "docx", "doc"])
+            if label == "Document (PDF, CSV, Word or PowerPoint)":
+                self.assertEqual(kwargs["type"], ["pdf", "csv", "docx", "doc", "pptx"])
                 return upload
             return original(label, *args, **kwargs)
         accepted = Result("POST", "/v1/documents", 202, 1,
