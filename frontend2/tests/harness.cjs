@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const { createHash, webcrypto } = require("node:crypto");
 const { JSDOM, VirtualConsole } = require("jsdom");
 
@@ -74,6 +75,7 @@ class Backend {
     const route = parsed.pathname.replace(/^\/api/, "");
     const call = { method: options.method || "GET", path: route, query: parsed.searchParams,
       headers: new Headers(options.headers), rawBody: options.body, body: typeof options.body === "string" ? JSON.parse(options.body) : null };
+    if (route.endsWith("/interrupts") && options.body?.get) call.body = Object.fromEntries([...options.body.entries()].filter(([key]) => key !== "audio"));
     this.calls.push(call);
     const failed = this.failures.findIndex(item => item.method === call.method && item.path === route);
     if (failed >= 0) { const failure = this.failures.splice(failed, 1)[0]; return this.response({ detail: failure.detail }, failure.status); }
@@ -182,6 +184,50 @@ async function harness(configure = () => {}) {
   const { window } = dom, { document } = window;
   window.fetch = (...args) => backend.fetch(...args);
   window.Headers = Headers;
+  const microphone = { requests: 0, streams: [], contexts: [], nodes: [], sampleRate: 48000, error: null, hold: false };
+  Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+  Object.defineProperty(window.navigator, "mediaDevices", { value: { getUserMedia: async () => {
+    microphone.requests++;
+    if (microphone.error) throw microphone.error;
+    if (microphone.hold) await new Promise(resolve => { microphone.grant = resolve; });
+    const track = { stopped: false, onended: null, stop() { this.stopped = true; }, end() { this.onended?.(); } };
+    const stream = { getTracks: () => [track] }; microphone.streams.push(stream); return stream;
+  } }, configurable: true });
+  window.AudioContext = class {
+    constructor() {
+      this.sampleRate = microphone.sampleRate; this.state = "suspended"; this.destination = {};
+      this.audioWorklet = { addModule: async name => {
+        assertWorkletPath(name);
+        vm.runInNewContext(fs.readFileSync(path.join(root, name), "utf8"), {
+          sampleRate: this.sampleRate, Float32Array,
+          AudioWorkletProcessor: class { constructor() { this.port = { postMessage() {} }; } },
+          registerProcessor: (name, Processor) => { this.Processor = Processor; },
+        });
+      } };
+      microphone.contexts.push(this);
+    }
+    async resume() { this.state = "running"; }
+    async close() { this.state = "closed"; }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+  };
+  function assertWorkletPath(name) { if (name !== "./voice-capture-worklet.js") throw new Error("Unexpected audio module"); }
+  window.AudioWorkletNode = class {
+    constructor(context, name, options) {
+      this.context = context; this.processor = new context.Processor(options); this.disconnected = false;
+      this.port = { onmessage: null, close() {}, postMessage: data => queueMicrotask(() => this.processor.port.onmessage({ data })) };
+      this.processor.port.postMessage = data => queueMicrotask(() => this.port.onmessage?.({ data }));
+      microphone.nodes.push(this);
+    }
+    connect() {}
+    disconnect() { this.disconnected = true; }
+  };
+  microphone.feed = (seconds, values = [.5]) => {
+    const node = microphone.nodes.at(-1), total = Math.round(seconds * node.context.sampleRate);
+    for (let offset = 0; offset < total; offset += 128) {
+      const channels = values.map(value => new Float32Array(Math.min(128, total - offset)).fill(value));
+      if (!node.processor.process([channels])) break;
+    }
+  };
   Object.defineProperty(window.crypto, "subtle", { value: webcrypto.subtle });
   window.scrollTo = () => {};
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -233,10 +279,13 @@ async function harness(configure = () => {}) {
     submit("#start-form");
     await waitFor(() => Boolean(document.querySelector(".lesson-card")) && !find('[data-action="toggle-play"]').disabled);
   }
-  for (const name of ["api.js", "ui.js", "app.js"]) window.eval(fs.readFileSync(path.join(root, name), "utf8"));
+  const readBlob = blob => new Promise((resolve, reject) => {
+    const reader = new window.FileReader(); reader.onload = () => resolve(Buffer.from(reader.result)); reader.onerror = reject; reader.readAsArrayBuffer(blob);
+  });
+  for (const name of ["api.js", "ui.js", "voice.js", "app.js"]) window.eval(fs.readFileSync(path.join(root, name), "utf8"));
   const style = document.createElement("style"); style.textContent = fs.readFileSync(path.join(root, "styles.css"), "utf8"); document.head.appendChild(style);
   await waitFor(() => Boolean(document.querySelector("#upload-form")));
-  return { backend, window, document, errors, audio, urls, timers, find, click, input, submit, navigate, settle, waitFor, runTimers, chooseFile, start, close: () => dom.window.close() };
+  return { backend, window, document, errors, audio, urls, timers, microphone, readBlob, find, click, input, submit, navigate, settle, waitFor, runTimers, chooseFile, start, close: () => dom.window.close() };
 }
 
 module.exports = { harness, id, wavHash, bundle, Backend };

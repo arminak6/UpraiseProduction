@@ -2,6 +2,137 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { harness, id, bundle } = require("./harness.cjs");
 
+async function recordVoice(h, seconds = 1, channels) {
+  h.click('[data-action="record-question"]'); await h.settle();
+  h.microphone.feed(seconds, channels); await h.settle();
+  h.click('[data-action="stop-recording"]'); await h.settle();
+}
+
+for (const rate of [44100, 48000]) test(`voice questions encode ${rate} Hz stereo capture as mono 16 kHz WAV and retain retry identity`, async t => {
+  const h = await harness(); t.after(h.close);
+  h.microphone.sampleRate = rate;
+  await h.start(id(10), "beginner", "signed-voice-session");
+  h.audio[0].advance(12.345); h.click('[data-action="toggle-question"]');
+  h.input("#question-input", "Keep my typed draft if I discard the recording.");
+  await recordVoice(h, 1, [.75, -.25]);
+  assert.equal(h.microphone.streams[0].getTracks()[0].stopped, true);
+  assert.equal(h.microphone.contexts[0].state, "closed");
+  assert.equal(h.find("#question-input").disabled, true);
+  assert.match(h.find("#voice-status").textContent, /ready/);
+  assert.ok(h.find("#voice-preview").src.startsWith("blob:"));
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/interrupts")).length, 0);
+  const sessionId = [...h.backend.sessions.keys()][0];
+  h.backend.failNext("POST", `/v1/sessions/${sessionId}/interrupts`, 503, "INTERRUPT_STT_UNAVAILABLE");
+  h.submit("#question-form"); await h.settle();
+  assert.match(h.find(".question-form").textContent, /Speech recognition is temporarily unavailable/);
+  h.click('[data-action="retry-question"]'); await h.settle();
+  const calls = h.backend.records("POST", `/v1/sessions/${sessionId}/interrupts`);
+  assert.equal(calls.length, 2); assert.deepEqual(calls[0].body, calls[1].body);
+  assert.equal(calls[1].body.playback_offset_ms, "12345");
+  assert.equal(calls[1].headers.get("X-UPRAISE-Session-JWT"), "signed-voice-session");
+  assert.equal(calls[1].headers.has("Content-Type"), false); // fetch supplies the multipart boundary.
+  assert.equal(calls[1].rawBody.has("text"), false);
+  const file = calls[1].rawBody.get("audio"), bytes = await h.readBlob(file);
+  assert.equal(file.type, "audio/wav"); assert.equal(file.name, "question.wav");
+  assert.equal(bytes.toString("ascii", 0, 4), "RIFF"); assert.equal(bytes.toString("ascii", 8, 12), "WAVE");
+  assert.equal(bytes.readUInt16LE(20), 1); assert.equal(bytes.readUInt16LE(22), 1);
+  assert.equal(bytes.readUInt32LE(24), 16000); assert.equal(bytes.readUInt16LE(34), 16);
+  assert.equal(bytes.length, 44 + 16000 * 2); assert.equal(bytes.readUInt32LE(40), bytes.length - 44);
+  assert.equal(bytes.readInt16LE(44), 8192); // The two microphone channels were averaged.
+  assert.deepEqual(await h.readBlob(calls[0].rawBody.get("audio")), bytes);
+  assert.equal(h.document.querySelectorAll(".question-bubble").length, 1);
+  assert.match(h.find(".question-bubble").textContent, /Voice question \(0:01\)/);
+  assert.equal(h.document.querySelector("#voice-preview"), null);
+  assert.equal(h.find("#question-input").disabled, false);
+  h.click('[data-action="resume-learning"]'); await h.settle();
+  assert.equal(h.audio[0].currentTime, 12.345); assert.equal(h.audio[0].paused, false); assert.equal(h.urls.size, 1);
+});
+
+test("discarding a recording preserves typed input and permits a new text question", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]'); h.input("#question-input", "Explain this example.");
+  await recordVoice(h);
+  assert.equal(h.urls.size, 2);
+  h.click('[data-action="discard-recording"]'); await h.settle();
+  assert.equal(h.find("#question-input").value, "Explain this example."); assert.equal(h.urls.size, 1);
+  h.submit("#question-form"); await h.settle();
+  const call = h.backend.calls.find(call => call.path.endsWith("/interrupts"));
+  assert.equal(call.body.text, "Explain this example."); assert.equal(call.headers.get("Content-Type"), "application/json");
+});
+
+test("microphone denial and insecure contexts leave text questions usable", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  h.microphone.error = new h.window.DOMException("Permission denied", "NotAllowedError");
+  h.click('[data-action="record-question"]'); await h.settle();
+  assert.match(h.find(".voice-question").textContent, /Microphone access was denied/);
+  assert.equal(h.find("#question-input").disabled, false); assert.equal(h.microphone.contexts[0].state, "closed");
+  h.microphone.error = null; Object.defineProperty(h.window, "isSecureContext", { value: false });
+  h.click('[data-action="record-question"]'); await h.settle();
+  assert.match(h.find(".voice-question").textContent, /localhost or over HTTPS/);
+  assert.equal(h.microphone.requests, 1);
+  h.input("#question-input", "A typed question."); h.submit("#question-form"); await h.settle();
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/interrupts")).length, 1);
+});
+
+for (const action of ["discard-recording", "toggle-question", "leave-player"]) test(`${action} cancels pending permission and releases a microphone granted later`, async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]'); h.microphone.hold = true;
+  h.click('[data-action="record-question"]'); await h.settle();
+  assert.match(h.find("#voice-status").textContent, /Waiting/);
+  h.click(`[data-action="${action}"]`); await h.settle();
+  h.microphone.grant(); await h.settle();
+  assert.equal(h.microphone.streams[0].getTracks()[0].stopped, true);
+  assert.equal(h.microphone.contexts[0].state, "closed");
+  assert.equal(h.microphone.nodes.length, 0);
+  assert.equal(h.document.querySelector("#voice-status"), null);
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/interrupts")).length, 0);
+});
+
+for (const exit of ["navigate", "next-part", "leave-player", "pagehide", "hidden"]) test(`active recording stops on ${exit}`, async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  h.click('[data-action="record-question"]'); await h.settle(); h.microphone.feed(.5); await h.settle();
+  assert.equal(h.find('.question-form button[type="submit"]').disabled, true);
+  h.submit("#question-form"); await h.settle();
+  if (exit === "navigate") await h.navigate("materials");
+  else if (exit === "pagehide") {
+    h.window.dispatchEvent(new h.window.Event("pagehide"));
+    h.window.dispatchEvent(new h.window.PageTransitionEvent("pageshow", { persisted: true }));
+  }
+  else if (exit === "hidden") {
+    Object.defineProperty(h.document, "hidden", { value: true }); h.document.dispatchEvent(new h.window.Event("visibilitychange"));
+  } else h.click(`[data-action="${exit}"]`);
+  await h.settle();
+  assert.equal(h.microphone.streams[0].getTracks()[0].stopped, true);
+  assert.equal(h.microphone.contexts[0].state, "closed");
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/interrupts")).length, 0);
+  assert.equal(h.document.querySelector("#voice-status"), null);
+});
+
+test("capture automatically stops at 60 seconds without sending and the WAV stays within the backend limit", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  h.click('[data-action="record-question"]'); await h.settle(); h.microphone.feed(61); await h.settle();
+  assert.match(h.find("#voice-status").textContent, /ready.*1:00/);
+  assert.equal(h.microphone.streams[0].getTracks()[0].stopped, true);
+  assert.equal(h.backend.calls.filter(call => call.path.endsWith("/interrupts")).length, 0);
+  h.submit("#question-form"); await h.settle();
+  const bytes = await h.readBlob(h.backend.calls.find(call => call.path.endsWith("/interrupts")).rawBody.get("audio"));
+  assert.equal(bytes.length, 44 + 60 * 16000 * 2);
+});
+
+test("short captures and disconnected microphones can be discarded without blocking text", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.start(); h.click('[data-action="toggle-question"]');
+  await recordVoice(h, .05);
+  assert.match(h.find(".voice-question").textContent, /too short/);
+  h.click('[data-action="record-question"]'); await h.settle();
+  h.microphone.streams.at(-1).getTracks()[0].end(); await h.settle();
+  assert.match(h.find(".voice-question").textContent, /disconnected/);
+  assert.equal(h.microphone.contexts.at(-1).state, "closed"); assert.equal(h.find("#question-input").disabled, false);
+});
+
 test("loads real API collections without seed content and groups aligned levels", async t => {
   const h = await harness(); t.after(h.close);
   assert.equal(h.document.querySelectorAll("tbody tr").length, 1);
@@ -197,17 +328,38 @@ test("V2.9 learning cards preserve the version recorded in the catalog", async t
   assert.equal(h.find(".course-version").textContent, "Generation V2.9");
 });
 
-test("V3 review identifies the version and displays its spoken script", async t => {
+for (const version of ["v3", "v3.1"]) test(`${version} review identifies the version and displays its spoken script`, async t => {
   const h = await harness(backend => {
     for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
-      lesson.versions = { teaching_version: "v3" };
+      lesson.versions = { teaching_version: version };
       for (const chunk of lesson.chunks) chunk.narration_text = "We now continue the explanation.";
     }
   }); t.after(h.close);
   await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
-  assert.match(h.find("main").textContent, /Teaching V3/);
-  assert.match(h.find("main").textContent, /Spoken explanation.*Version 3/);
+  assert.ok(h.find("main").textContent.includes(`Teaching ${version.toUpperCase()}`));
+  assert.ok(h.find("main").textContent.includes(`Spoken explanation · Version ${version.slice(1)}`));
   assert.match(h.find("main").textContent, /We now continue the explanation/);
+});
+
+test("V3.1 preserves selection, sends a distinct request and labels catalog provenance", async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v3.1", teaching_policy: "continuous-teaching-v3.1" };
+    }
+  }); t.after(h.close);
+  await h.navigate("learn");
+  assert.equal(h.find(".course-version").textContent, "Generation V3.1");
+  await h.navigate("generate");
+  assert.match(h.find('option[value="v3.1"]').textContent, /Version 3\.1/);
+  h.input("#teaching-version", "v3.1", "change");
+  await h.navigate("materials"); await h.navigate("generate");
+  assert.equal(h.find("#teaching-version").value, "v3.1");
+  h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form"); await h.settle();
+  h.input("#teaching-version", "v3", "change"); h.submit("#generation-form"); await h.settle();
+  const calls = h.backend.records("POST", "/v2/lesson-jobs");
+  assert.equal(calls[0].body.teaching_version, "v3.1");
+  assert.equal(calls[1].body.teaching_version, "v3");
+  assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
 });
 
 test("V2 review displays an escaped spoken script and verified audio controls that stop on part changes", async t => {

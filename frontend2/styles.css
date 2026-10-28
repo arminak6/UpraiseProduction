@@ -291,6 +291,10 @@ th:last-child, td:last-child { text-align: right; }
 .question-form label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 8px; }
 .question-suggestions { display: flex; gap: 7px; flex-wrap: wrap; margin: 12px 0 15px; }
 .question-suggestions button { border: 1px solid #dde7d8; background: #fafcf7; color: #849477; border-radius: 20px; padding: 7px 10px; font-size: 10px; }
+.voice-question { background: #f7faf5; border: 1px solid #e0e9da; border-radius: 9px; padding: 14px; margin-bottom: 18px; }
+.voice-question .small-copy { margin: 9px 0; }
+.voice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.voice-question audio { display: block; width: 100%; max-width: 390px; margin-top: 12px; }
 .question-history { display: grid; gap: 14px; max-height: 640px; max-height: min(65vh, 640px); overflow-y: auto; overscroll-behavior: contain; margin-bottom: 22px; padding: 2px; }
 .question-history:empty { display: none; }
 .question-bubble, .answer-bubble { min-width: 0; border: 1px solid #e2ecd9; border-radius: 10px; padding: 17px 19px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }

@@ -24,6 +24,7 @@
     chat: '<path d="M21 11a8 8 0 0 1-8 8H7l-5 3V11a9 9 0 0 1 19 0z"/><path d="M7 10h9M7 14h5"/>',
     send: '<path d="m22 2-7 20-4-9-9-4 20-7zm0 0L11 13"/>',
     headphones: '<path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="12" width="4" height="8" rx="2"/><rect x="17" y="12" width="4" height="8" rx="2"/>',
+    microphone: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     lightbulb: '<path d="M9 18v-1a7 7 0 1 1 6 0v1M9 21h6M9 18h6"/>',
     leaf: '<path d="M20 3C7 2 2 8 5 15c4 9 16 2 15-12zM5 20 16 8"/>',

@@ -15,6 +15,12 @@
     INTERRUPT_RETRY_EXPIRED: "This question can no longer be retried. Send it again as a new question.",
     INTERRUPT_IN_PROGRESS: "Your teacher is still working on this question. Use Retry question in a moment.",
     QUESTIONS_CONSENT_REQUIRED: "Questions are not enabled for this session. Start a new session with questions enabled.",
+    INTERRUPT_AUDIO_TOO_LARGE: "The voice recording is too large. Record a shorter question.",
+    INTERRUPT_AUDIO_TOO_LONG: "The voice recording is too long. Record a question of up to 60 seconds.",
+    INTERRUPT_AUDIO_FORMAT_UNSUPPORTED: "This recording format could not be accepted. Record your question again, or type it.",
+    INTERRUPT_STT_UNAVAILABLE: "Speech recognition is temporarily unavailable. Retry the same recording, or discard it and type your question.",
+    INTERRUPT_STT_LANGUAGE_UNSUPPORTED: "Voice questions are not available in this course language. You can type your question instead.",
+    INTERRUPT_TRANSCRIPT_INVALID: "Speech could not be understood. Discard the recording and try again, or type your question.",
   };
 
   class APIError extends Error {

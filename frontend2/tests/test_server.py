@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from serve import Settings, UpraiseServer  # noqa: E402
+from serve import MAX_JSON, MAX_VOICE_UPLOAD, Settings, UpraiseServer  # noqa: E402
 
 JOB = "10000000-0000-4000-8000-000000000001"
 CHUNK = "20000000-0000-4000-8000-000000000001"
@@ -77,7 +77,7 @@ class BridgeTests(unittest.TestCase):
             connection.close()
 
     def test_static_assets_and_hidden_project_files(self):
-        for path in ("/", "/index.html", "/app.js", "/api.js", "/ui.js", "/styles.css", "/favicon.svg"):
+        for path in ("/", "/index.html", "/app.js", "/api.js", "/ui.js", "/voice.js", "/voice-capture-worklet.js", "/styles.css", "/favicon.svg"):
             with self.subTest(path=path):
                 status, headers, body = self.request(path, nonce=False)
                 self.assertEqual(status, 200)
@@ -146,6 +146,36 @@ class BridgeTests(unittest.TestCase):
     def test_arbitrary_routes_and_query_parameters_are_blocked(self):
         for path in ("/api/v1/operations", "/api/v1/documents?url=https://evil.example", "/api/https://evil.example", "/api/v1/jobs/not-a-uuid", "/api/v1/jobs/%2e%2e", "/api/v1/version"):
             self.assertEqual(self.request(path)[0], 404, path)
+        self.assertFalse(self.backend.calls)
+
+    def test_voice_multipart_preserves_bytes_and_session_authorization(self):
+        body = (b'--voice\r\nContent-Disposition: form-data; name="audio"; filename="question.wav"\r\n'
+                b'Content-Type: audio/wav\r\n\r\n' + WAV + b"\x00" * MAX_JSON + b'\r\n--voice--\r\n')
+        status, _, _ = self.request(f"/api/v1/sessions/{JOB}/interrupts", method="POST", body=body, headers={
+            "Content-Type": "multipart/form-data; boundary=voice", "X-UPRAISE-Session-JWT": "voice-session",
+        })
+        self.assertEqual(status, 200)
+        _, path, headers, received = self.backend.calls[-1]
+        self.assertEqual(path, f"/v1/sessions/{JOB}/interrupts")
+        self.assertEqual(received, body)
+        lower = {key.lower(): value for key, value in headers.items()}
+        self.assertEqual(lower["content-type"], "multipart/form-data; boundary=voice")
+        self.assertEqual(lower["x-upraise-session-jwt"], "voice-session")
+        self.assertEqual(lower["authorization"], "Bearer test-service-token")
+
+    def test_voice_upload_limits_do_not_relax_other_routes_or_json_limits(self):
+        path = f"/api/v1/sessions/{JOB}/interrupts"
+        headers = {"Content-Type": "multipart/form-data; boundary=voice"}
+        self.assertEqual(self.request(path, method="POST", body=b"x", headers={
+            **headers, "Content-Length": str(MAX_VOICE_UPLOAD + 1),
+        })[0], 413)
+        self.assertEqual(self.request(path, method="POST", body=b"x", headers={
+            "Content-Type": "application/json", "Content-Length": str(MAX_JSON + 1),
+        })[0], 413)
+        self.assertEqual(self.request("/api/v1/sessions", method="POST", body=b"x", headers=headers)[0], 415)
+        self.assertEqual(self.request(f"/api/v1/sessions/{JOB}/end", method="POST", body=b"x", headers=headers)[0], 415)
+        self.assertEqual(self.request(path, method="POST", body=b"x", headers={"Content-Type": "audio/wav"})[0], 415)
+        self.assertEqual(self.request(path, method="POST", body=b"x", headers=headers, nonce=False)[0], 403)
         self.assertFalse(self.backend.calls)
 
     def test_limits_and_content_types(self):

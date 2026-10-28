@@ -17,7 +17,7 @@ from urllib.parse import parse_qsl, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
-ASSETS = {"/", "/index.html", "/styles.css", "/app.js", "/api.js", "/ui.js", "/favicon.svg"}
+ASSETS = {"/", "/index.html", "/styles.css", "/app.js", "/api.js", "/ui.js", "/voice.js", "/voice-capture-worklet.js", "/favicon.svg"}
 UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 ROUTES = [
     ("GET", r"/health", set()),
@@ -40,6 +40,7 @@ ROUTES = [
 ]
 MAX_UPLOAD = 100 * 1024 * 1024 + 256 * 1024
 MAX_JSON = 128 * 1024
+MAX_VOICE_UPLOAD = 6_000_000 + 65536  # B4 audio bytes plus bounded multipart metadata.
 MAX_RESPONSE = 128 * 1024 * 1024
 DEFAULT_LEVELS = ["beginner", "intermediate", "advanced"]
 
@@ -185,8 +186,11 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = -1
+        media_type = content_type.split(";", 1)[0].strip().lower()
         is_upload = self.command == "POST" and path == "/v1/documents"
-        limit = MAX_UPLOAD if is_upload else MAX_JSON
+        is_voice = (self.command == "POST" and re.fullmatch(rf"/v1/sessions/{UUID}/interrupts", path)
+                    and media_type == "multipart/form-data")
+        limit = MAX_UPLOAD if is_upload else MAX_VOICE_UPLOAD if is_voice else MAX_JSON
         if length < 0 or length > limit:
             self.json_response(413, {"detail": "REQUEST_TOO_LARGE"})
             self.close_connection = True
@@ -195,8 +199,8 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
             if not length:
                 self.json_response(411, {"detail": "CONTENT_LENGTH_REQUIRED"})
                 return
-            expected_type = "multipart/form-data" if is_upload else "application/json"
-            if content_type.split(";", 1)[0].strip().lower() != expected_type:
+            expected_type = "multipart/form-data" if is_upload or is_voice else "application/json"
+            if media_type != expected_type:
                 self.json_response(415, {"detail": "UNSUPPORTED_CONTENT_TYPE"})
                 self.close_connection = True
                 return

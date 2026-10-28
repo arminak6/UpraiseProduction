@@ -5,5 +5,7 @@
 !styles.css
 !api.js
 !ui.js
+!voice.js
+!voice-capture-worklet.js
 !app.js
 !favicon.svg

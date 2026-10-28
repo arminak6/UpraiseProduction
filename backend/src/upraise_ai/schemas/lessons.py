@@ -32,7 +32,7 @@ class LessonInput(BaseModel):
     document_ids: list[UUID] = Field(min_length=1, max_length=50)
     language: str = Field(min_length=2, max_length=35, pattern=r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
     voice: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z]+$")
-    teaching_version: Literal["v1", "v2", "v2.9", "v3"] = "v1"
+    teaching_version: Literal["v1", "v2", "v2.9", "v3", "v3.1"] = "v1"
     options: LessonOptions = Field(default_factory=LessonOptions)
     callback_url: str | None = Field(None, max_length=2048)
 

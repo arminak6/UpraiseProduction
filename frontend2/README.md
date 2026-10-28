@@ -48,6 +48,11 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   and lets teachers listen to verified audio for each part. Revisions inherit the
   course's version. V2 uses extra AI calls; human listening/approval is still needed.
   See [V2 behavior and rollback](../backend/docs/teaching-v2.md).
+- **Version 3.1:** the version selector also offers source-aware teaching and
+  level review. It preserves source subjects, uses evidence-linked citations,
+  repairs affected paragraphs and flags incomplete difficulty adaptation.
+  Course cards and teacher review retain V3.1 provenance and spoken scripts.
+  See [V3.1 behavior and validation](../backend/docs/teaching-v31.md).
 - **Material:** PDF/Word/UTF-8 CSV upload through A1; browser SHA-256; real A2
   document library and progress; confirmed source deletion, including its
   dependent generated courses. Course name/reference maps to the backend's
@@ -97,7 +102,19 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   selected session; A5 text, result hash and checksum-verified WAV are checked
   before explicit playback actions. B4 captures the exact browser playback
   position, displays real teacher text/audio and any bounded playback instruction,
-  and resumes the same part. Answer audio exposes Listen/Pause/Resume, Stop and
+  and resumes the same part. Questions accept typed text or **Record a voice question**.
+  Recording requires microphone permission in a supported browser on localhost or HTTPS.
+  Speak in the course language, stop recording (automatic at 60 seconds), listen to
+  the preview, then **Send voice question**, or discard it and type instead.
+  AudioWorklet captures mono audio and the browser encodes 16 kHz, 16-bit PCM WAV;
+  B4 receives it as multipart through the same authenticated bridge. No new backend
+  endpoint is needed. The backend's existing Amazon Transcribe configuration and
+  `transcribe:StartStreamTranscription` permission are required for voice input.
+  Voice retry keeps the same request ID, WAV bytes, part and paused position.
+  Recordings stay in tab memory and are released after success or discard; active
+  microphone capture stops on cancellation, navigation, tab hiding, session expiry
+  or lesson end. The conversation labels these turns as voice questions; B4 does
+  not expose the recognized question transcript. Answer audio exposes Listen/Pause/Resume, Stop and
   Replay controls. **Ask another question** stops the previous answer, focuses an
   empty question box and keeps the same session, part and paused position. The
   conversation displays all questions and answers from the current interruption

@@ -212,6 +212,9 @@ class LessonWorker:
                     elif job["metadata"].get("teaching_version") == "v3":
                         from upraise_ai.services.teaching_v3 import TeachingModelsV3, TeachingSpeechV3
                         models_class, speech_class = TeachingModelsV3, TeachingSpeechV3
+                    elif job["metadata"].get("teaching_version") == "v3.1":
+                        from upraise_ai.services.teaching_v31 import TeachingModelsV31, TeachingSpeechV31
+                        models_class, speech_class = TeachingModelsV31, TeachingSpeechV31
                     pipeline.models = self.models or models_class(
                         self.settings, diagnostic_dir=self.staging.job_dir(job_id) / "model-diagnostics")
                     if hasattr(pipeline.models, "draft_review_recovery"):

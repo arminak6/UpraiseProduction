@@ -26,5 +26,5 @@ class ReadyLesson(BaseModel):
     revision: LessonRevision | None = None
     generation_version: Literal['a3-v2'] | None = None
     chunk_plan_id: str | None = None
-    teaching_version: Literal['v1', 'v2', 'v2.9', 'v3'] | None = None
+    teaching_version: Literal['v1', 'v2', 'v2.9', 'v3', 'v3.1'] | None = None
     teaching_policy: str | None = None

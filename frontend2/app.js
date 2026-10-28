@@ -25,6 +25,7 @@
     jobs: new Map(), bundles: new Map(), generatedId: null, resultLevel: "", resultPart: 0,
     search: "", courseSearch: "", page: "materials", player: null, playerBusy: false,
     question: "", questionOpen: false, questionPending: false, questionOffset: 0, questionHistory: [], turn: null,
+    voice: null, voiceError: "",
     startAttempt: null, startPending: null, sessionToken: "", questionsConsent: true,
     deletion: null, revision: null, revisionUncertain: new Set(),
     reviewCourses: [], reviewError: "", reviewMore: false, reviewSearch: "", reviewEditor: null,
@@ -57,7 +58,7 @@
     const records = Object.values(course.variants || {});
     if (!records.length) records.push(course);
     const version = records[0].teaching_version;
-    if (!["v1", "v2", "v2.9", "v3"].includes(version) || records.some(item => item.teaching_version !== version)) return "Version unknown";
+    if (!["v1", "v2", "v2.9", "v3", "v3.1"].includes(version) || records.some(item => item.teaching_version !== version)) return "Version unknown";
     const policy = records[0].teaching_policy;
     const revision = records.every(item => item.teaching_policy === policy) && /^teaching-narration-v(2\.\d+)$/.exec(policy || "");
     return `Generation ${version === "v2" && revision ? `V${revision[1]}` : version.toUpperCase()}`;
@@ -122,7 +123,7 @@
     releaseReviewAudio();
     const page = location.hash.slice(1);
     state.page = ["materials", "generate", "review", "learn"].includes(page) ? page : "materials";
-    if (state.page !== "learn") pausePlayback();
+    if (state.page !== "learn") { pausePlayback(); cancelActiveVoice(); }
     for (const link of document.querySelectorAll("[data-nav]")) {
       const active = link.dataset.nav === state.page;
       link.classList.toggle("active", active);
@@ -390,7 +391,7 @@
   function generationForm(ready) {
     return `<form id="generation-form"><fieldset class="plain-fieldset" ${state.generationBusy ? "disabled" : ""}><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.filename)}</strong><small>${escape(item.course_id)} · ${escape(languageLabel(item.language))}</small></span><input type="radio" name="source" value="${escape(item.document_id)}" ${item.document_id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>
       <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div><div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
-      <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2.8 · First draft with review flags</option><option value="v2.9" ${state.draft.teachingVersion === "v2.9" ? "selected" : ""}>Version 2.9 · Writer, reviewer and judge</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option></select><p class="small-copy" id="teaching-version-help">Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2.9 adds one judge edit and a fresh final review; unresolved findings keep the judge’s text with human-review flags. Version 2.8 keeps the first draft with review flags. Each generation creates a new course; earlier versions remain available.</p></div></div>
+      <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2.8 · First draft with review flags</option><option value="v2.9" ${state.draft.teachingVersion === "v2.9" ? "selected" : ""}>Version 2.9 · Writer, reviewer and judge</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option><option value="v3.1" ${state.draft.teachingVersion === "v3.1" ? "selected" : ""}>Version 3.1 · Source-aware teaching and level review</option></select><p class="small-copy" id="teaching-version-help">Version 3.1 preserves source identities, checks evidence-linked references and reviews difficulty adaptation. Unresolved material remains flagged for teacher editing. Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2.9 adds one judge edit and a fresh final review; unresolved findings keep the judge’s text with human-review flags. Version 2.8 keeps the first draft with review flags. Each generation creates a new course; earlier versions remain available.</p></div></div>
       <div class="form-section"><fieldset class="plain-fieldset" aria-describedby="generation-level-help"><legend class="step-label"><span>3</span>Choose difficulty levels</legend><div class="generation-level-options">${configuredLevels().map(level => `<label class="level-option"><input type="checkbox" name="levels" value="${escape(level)}" ${selectedGenerationLevels().includes(level) ? "checked" : ""}><span><strong>${escape(levelLabel(level))}</strong>${levelDescriptions[level] ? `<small>${escape(levelDescriptions[level])}</small>` : ""}</span></label>`).join("")}</div><p class="small-copy" id="generation-level-help">Choose one or more levels. We’ll create text and narration only for your selection.</p><p class="inline-error" id="generation-level-error" ${selectedGenerationLevels().length ? "hidden" : ""}>Select at least one difficulty level.</p></fieldset></div>
       <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
       <button class="button button-wide generate-submit" type="submit" ${selectedGenerationLevels().length ? "" : "disabled"}>${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
@@ -418,7 +419,7 @@
     if (words > maximum) { state.generationError = "Target words must be at or below the maximum words per part."; renderGenerate(); return; }
     state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize, levels, teachingVersion: form.elements.teachingVersion.value };
     const body = { lesson_id: title, course_id: material.course_id, activity_id: material.activity_id, document_ids: [material.document_id], language: state.draft.language, voice: state.draft.voice, levels, options: { source_window_pages: windowSize, target_chunk_words: words, max_chunk_words: maximum } };
-    if (["v2", "v2.9", "v3"].includes(state.draft.teachingVersion)) body.teaching_version = state.draft.teachingVersion;
+    if (["v2", "v2.9", "v3", "v3.1"].includes(state.draft.teachingVersion)) body.teaching_version = state.draft.teachingVersion;
     const signature = JSON.stringify(body);
     if (state.generationAttempt?.signature !== signature) state.generationAttempt = { signature, key: crypto.randomUUID() };
     state.generationBusy = true; state.generationError = ""; renderGenerate();
@@ -578,7 +579,7 @@
     return `<section class="card review-course-picker" aria-label="Choose a course to review"><div class="field"><label for="review-course-select">Course to review</label><select id="review-course-select" ${editor?.busy || !courses.size ? "disabled" : ""}><option value="">Choose a course…</option>${[...courses.values()].map(course => {
       const created = new Date(course.created_at);
       const date = Number.isFinite(created.getTime()) ? created.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-      const version = ["v1", "v2", "v2.9", "v3"].includes(course.teaching_version) ? course.teaching_version.toUpperCase() : "Version unknown";
+      const version = ["v1", "v2", "v2.9", "v3", "v3.1"].includes(course.teaching_version) ? course.teaching_version.toUpperCase() : "Version unknown";
       return `<option value="${escape(course.job_id)}" ${editor?.id === course.job_id ? "selected" : ""}>${escape([course.lesson_id, version, course.course_id, date].filter(Boolean).join(" · "))}</option>`;
     }).join("")}</select><small>Open the saved text, review findings and source references for a course.</small></div>${editor && state.reviewMore ? '<button class="button button-secondary button-sm" data-action="load-more-reviews">Load more courses</button>' : ""}</section>`;
   }
@@ -627,9 +628,9 @@
   }
 
   function reviewNarration(chunk, bundle, playable) {
-    const scripted = ["v2", "v2.9", "v3"].includes(bundle.teaching_version) && Boolean(chunk.narration_text);
+    const scripted = ["v2", "v2.9", "v3", "v3.1"].includes(bundle.teaching_version) && Boolean(chunk.narration_text);
     if (!scripted && !playable) return "";
-    return `<details class="advanced review-narration"><summary>${scripted ? `Spoken explanation · Version ${bundle.teaching_version === "v3" ? "3" : bundle.teaching_version === "v2.9" ? "2.9" : "2"}` : "Generated narration"}</summary>${scripted ? `<div class="review-narration-text result-text">${textParagraphs(chunk.narration_text, "lesson-paragraph")}</div>` : ""}<p class="small-copy">Listen while checking the teaching text and its source references.</p>${playable ? `<div class="answer-audio-controls"><button class="button button-secondary button-sm" data-action="review-listen">${icon("headphones")}Listen to this part</button><button class="button button-secondary button-sm" data-action="review-stop" disabled>${icon("stop")}Stop narration</button></div><audio id="review-audio" controls preload="none" aria-label="Narration for this course part" style="display:block;width:100%;margin-top:14px"></audio>` : ""}</details>`;
+    return `<details class="advanced review-narration"><summary>${scripted ? `Spoken explanation · Version ${bundle.teaching_version === "v3.1" ? "3.1" : bundle.teaching_version === "v3" ? "3" : bundle.teaching_version === "v2.9" ? "2.9" : "2"}` : "Generated narration"}</summary>${scripted ? `<div class="review-narration-text result-text">${textParagraphs(chunk.narration_text, "lesson-paragraph")}</div>` : ""}<p class="small-copy">Listen while checking the teaching text and its source references.</p>${playable ? `<div class="answer-audio-controls"><button class="button button-secondary button-sm" data-action="review-listen">${icon("headphones")}Listen to this part</button><button class="button button-secondary button-sm" data-action="review-stop" disabled>${icon("stop")}Stop narration</button></div><audio id="review-audio" controls preload="none" aria-label="Narration for this course part" style="display:block;width:100%;margin-top:14px"></audio>` : ""}</details>`;
   }
   function releaseReviewAudio() {
     ++reviewAudioEpoch;
@@ -746,7 +747,11 @@
     }
   }
   function pauseReply() { ++replyPlaybackEpoch; replyAudio.pause(); }
-  function pausePlayback() { lectureAudio.pause(); pauseReply(); updatePlayback(); }
+  function pauseVoicePreview() {
+    const preview = document.querySelector("#voice-preview");
+    if (preview && !preview.paused) preview.pause();
+  }
+  function pausePlayback() { lectureAudio.pause(); pauseReply(); pauseVoicePreview(); updatePlayback(); }
   function releasePlayerMedia() {
     ++playerEpoch; pausePlayback(); clearTimeout(expiryTimer);
     lectureAudio.removeAttribute("src"); lectureAudio.load();
@@ -760,7 +765,7 @@
     if (replyUrl) URL.revokeObjectURL(replyUrl); replyUrl = null;
   }
   function clearQuestion() {
-    questionController?.abort(); questionController = null; releaseReply();
+    questionController?.abort(); questionController = null; releaseReply(); clearVoice();
     state.question = ""; state.questionOpen = false; state.questionPending = false; state.questionHistory = []; state.turn = null;
   }
   function scheduleExpiry() {
@@ -783,6 +788,7 @@
   async function loadPart(index, { autoplay = false, offset = 0 } = {}) {
     const player = state.player;
     if (!player || player.busy || player.closed || player.invalid || player.endPending) return false;
+    cancelActiveVoice();
     const epoch = ++playerEpoch;
     player.busy = true; pausePlayback();
     if (state.page === "learn") renderPlayer();
@@ -886,7 +892,8 @@
   async function playAnswer(restart = false) {
     const player = state.player, url = replyUrl;
     if (!url || !state.turn?.response || !state.questionOpen || state.page !== "learn" || !player || player.closed || player.invalid) return;
-    lectureAudio.pause();
+    if (state.voice && state.voice.phase !== "ready") return;
+    lectureAudio.pause(); pauseVoicePreview();
     const epoch = ++replyPlaybackEpoch;
     try {
       if (restart || replyAudio.ended) { replyAudio.pause(); replyAudio.currentTime = 0; }
@@ -897,7 +904,7 @@
   }
   function askAnotherQuestion() {
     if (!state.player || state.questionPending) return;
-    pausePlayback(); releaseReply(); state.question = ""; if (state.turn?.error) state.turn = null;
+    pausePlayback(); releaseReply(); clearVoice(); state.question = ""; if (state.turn?.error) state.turn = null;
     // Keep questionOffset: every new request refers to the same paused moment.
     state.questionOpen = true; updateQuestionPanel();
     document.querySelector("#question-input")?.focus();
@@ -910,10 +917,72 @@
   }
   function questionContent() {
     const turn = state.turn;
+    const voice = state.voice, busy = state.questionPending || Boolean(voice && voice.phase !== "ready");
+    const textDisabled = state.questionPending || Boolean(voice);
     const history = state.questionHistory.map(exchange => questionBubble(exchange.question) + answerBubble(exchange.response)).join("");
-    return `<div class="question-history" role="log" aria-label="This interruption's conversation" aria-live="polite" aria-relevant="additions text" tabindex="0">${history}${turn && !turn.response ? questionBubble(turn.body.text) : ""}${state.questionPending ? `<p class="small-copy" role="status">Your teacher is thinking…</p>` : ""}</div>
-      <form class="question-form" id="question-form"><label for="question-input">What would you like to understand?</label><textarea id="question-input" maxlength="6000" placeholder="Ask a question about this part…" required ${state.questionPending ? "disabled" : ""}>${escape(state.question)}</textarea><div class="question-suggestions"><button type="button" data-action="suggest-question" data-question="Explain this more simply" ${state.questionPending ? "disabled" : ""}>Explain this more simply</button><button type="button" data-action="suggest-question" data-question="Give me an example" ${state.questionPending ? "disabled" : ""}>Give me an example</button><button type="button" data-action="suggest-question" data-question="What is the key takeaway?" ${state.questionPending ? "disabled" : ""}>What is the key takeaway?</button></div><div class="form-bottom"><span>${icon("info")}Your lesson is paused at ${time(state.questionOffset)}</span><div class="question-actions">${turn?.error ? `<button class="button button-secondary button-sm" type="button" data-action="retry-question" ${state.questionPending ? "disabled" : ""}>Retry question</button>` : ""}<button class="button button-sm" type="submit" ${state.questionPending ? "disabled" : ""}>${icon(state.questionPending ? "loader" : "send", state.questionPending ? "spinner" : "")}${state.questionPending ? "Your teacher is thinking…" : "Send question"}</button></div></div>${turn?.error ? errorBox(turn.error) : ""}</form>
+    return `<div class="question-history" role="log" aria-label="This interruption's conversation" aria-live="polite" aria-relevant="additions text" tabindex="0">${history}${turn && !turn.response ? questionBubble(turn.label || turn.body.text) : ""}${state.questionPending ? `<p class="small-copy" role="status">Your teacher is thinking…</p>` : ""}</div>
+      <form class="question-form" id="question-form"><label for="question-input">What would you like to understand?</label><textarea id="question-input" maxlength="6000" placeholder="Type a question, or record your voice below…" ${voice ? "" : "required"} ${textDisabled ? "disabled" : ""}>${escape(state.question)}</textarea><div class="question-suggestions">${["Explain this more simply", "Give me an example", "What is the key takeaway?"].map(question => `<button type="button" data-action="suggest-question" data-question="${question}" ${textDisabled ? "disabled" : ""}>${question}</button>`).join("")}</div>${voiceControls()}<div class="form-bottom"><span>${icon("info")}Your lesson is paused at ${time(state.questionOffset)}</span><div class="question-actions">${turn?.error ? `<button class="button button-secondary button-sm" type="button" data-action="retry-question" ${busy ? "disabled" : ""}>Retry question</button>` : ""}<button class="button button-sm" type="submit" ${busy ? "disabled" : ""}>${icon(state.questionPending ? "loader" : "send", state.questionPending ? "spinner" : "")}${state.questionPending ? "Your teacher is thinking…" : voice ? "Send voice question" : "Send question"}</button></div></div>${turn?.error ? errorBox(turn.error) : ""}</form>
       ${state.questionHistory.length ? `<div class="answer-actions"><button class="button button-secondary button-sm" type="button" data-action="ask-another-question" ${state.questionPending ? "disabled" : ""}>${icon("chat")}Ask another question</button><button class="button button-secondary button-sm" type="button" data-action="resume-learning">${icon("play")}Continue learning</button></div>` : ""}`;
+  }
+  function clearVoice() {
+    pauseVoicePreview();
+    state.voice?.recorder?.cancel();
+    if (state.voice?.url) URL.revokeObjectURL(state.voice.url);
+    state.voice = null; state.voiceError = "";
+  }
+  function cancelActiveVoice() {
+    if (state.voice && state.voice.phase !== "ready") { clearVoice(); if (state.page === "learn") updateQuestionPanel(); }
+  }
+  function voiceStatus(voice) {
+    return voice.phase === "opening" ? "Waiting for microphone access…" : voice.phase === "saving" ? "Preparing your recording…"
+      : voice.phase === "ready" ? `Voice question ready · ${time(voice.seconds)}` : `Recording · ${time(voice.seconds)} / 1:00`;
+  }
+  function voiceControls() {
+    const voice = state.voice;
+    return `<div class="voice-question" role="group" aria-label="Voice question">${voice
+      ? `<p id="voice-status" class="small-copy" role="status">${escape(voiceStatus(voice))}</p><div class="voice-actions">${voice.phase === "recording" ? `<button type="button" class="button button-secondary button-sm" data-action="stop-recording">${icon("stop")}Stop recording</button>` : ""}<button type="button" class="button button-secondary button-sm" data-action="discard-recording" ${state.questionPending ? "disabled" : ""}>${icon("close")}${voice.phase === "ready" ? "Discard recording" : "Cancel recording"}</button></div>${voice.url ? `<audio id="voice-preview" controls preload="metadata" src="${escape(voice.url)}" aria-label="Listen to your recorded question"></audio>` : ""}`
+      : `<button type="button" class="button button-secondary button-sm" data-action="record-question" ${state.questionPending ? "disabled" : ""}>${icon("microphone")}Record a voice question</button><p class="small-copy">Up to 60 seconds. Speak in the course language and listen before sending. You can also type above.</p>`}${state.voiceError ? errorBox(state.voiceError) : ""}</div>`;
+  }
+  async function recordQuestion() {
+    const player = state.player;
+    if (!player || player.busy || player.closed || player.invalid || player.endPending || !player.questionsEnabled || state.questionPending || state.voice) return;
+    if (expired(player.session.expires_at)) { await invalidatePlayer("This learning session has expired.", "TIMEOUT"); return; }
+    pausePlayback(); releaseReply(); state.voiceError = "";
+    if (state.turn?.error) state.turn = null;
+    const voice = { phase: "opening", seconds: 0, recorder: null, blob: null, url: null };
+    state.voice = voice;
+    const fail = message => {
+      if (state.voice !== voice) return;
+      clearVoice(); state.voiceError = message; updateQuestionPanel();
+    };
+    voice.recorder = new window.UpraiseVoice.Recorder({
+      onProgress: seconds => {
+        if (state.voice !== voice) return;
+        const changed = Math.floor(seconds) !== Math.floor(voice.seconds); voice.seconds = seconds;
+        const status = document.querySelector("#voice-status"); if (changed && status) status.textContent = voiceStatus(voice);
+      },
+      onLimit: () => { if (state.voice === voice) void stopRecording(); }, onError: fail,
+    });
+    updateQuestionPanel();
+    try {
+      await voice.recorder.start();
+      if (state.voice !== voice) return;
+      voice.phase = "recording"; updateQuestionPanel();
+    } catch (error) { fail(window.UpraiseVoice.errorMessage(error)); }
+  }
+  async function stopRecording() {
+    const voice = state.voice;
+    if (!voice || voice.phase !== "recording") return;
+    voice.phase = "saving"; updateQuestionPanel();
+    try {
+      const recording = await voice.recorder.finish();
+      if (state.voice !== voice) return;
+      voice.recorder = null; voice.blob = recording.blob; voice.seconds = recording.seconds;
+      voice.url = URL.createObjectURL(voice.blob); voice.phase = "ready"; updateQuestionPanel();
+    } catch (error) {
+      if (state.voice !== voice) return;
+      clearVoice(); state.voiceError = window.UpraiseVoice.errorMessage(error); updateQuestionPanel();
+    }
   }
   function updateQuestionPanel() {
     const panel = document.querySelector("#question-content"); if (panel) { panel.hidden = !state.questionOpen; panel.innerHTML = questionContent(); }
@@ -929,25 +998,32 @@
   }
   async function sendQuestion(retry = false) {
     const player = state.player;
-    if (!player || state.questionPending || player.closed || player.invalid || player.busy) return;
+    if (!player || state.questionPending || player.closed || player.invalid || player.busy || player.endPending || !player.questionsEnabled) return;
     if (expired(player.session.expires_at)) { await invalidatePlayer("This learning session has expired.", "TIMEOUT"); return; }
-    const question = state.question.trim();
-    if (!question) { toast("Write a question or choose one of the suggestions."); return; }
+    const question = state.question.trim(), voice = state.voice;
+    if (voice && voice.phase !== "ready") return;
+    if (!question && !voice?.blob && !(retry && state.turn)) { toast("Write or record a question, or choose one of the suggestions."); return; }
     if (!retry || !state.turn) {
       releaseReply();
-      state.turn = { body: { request_id: crypto.randomUUID(), chunk_id: player.lesson.chunks[player.index].chunk_id, text: question, playback_offset_ms: Math.round(state.questionOffset * 1000) }, error: "", response: null };
+      state.turn = { body: { request_id: crypto.randomUUID(), chunk_id: player.lesson.chunks[player.index].chunk_id, ...(voice ? {} : { text: question }), playback_offset_ms: Math.round(state.questionOffset * 1000) }, audio: voice?.blob || null, label: voice ? `Voice question (${time(voice.seconds)})` : question, error: "", response: null };
     }
     const turn = state.turn;
     state.questionPending = true; turn.error = ""; pausePlayback(); updateQuestionPanel();
     questionController = new AbortController();
     try {
-      const reply = await api.request(`/v1/sessions/${player.session.session_id}/interrupts`, { method: "POST", json: turn.body, headers: sessionHeaders(player), timeout: 610000, signal: questionController.signal });
+      let input = { json: turn.body };
+      if (turn.audio) {
+        const form = new FormData();
+        for (const [key, value] of Object.entries(turn.body)) form.append(key, String(value));
+        form.append("audio", turn.audio, "question.wav"); input = { body: form };
+      }
+      const reply = await api.request(`/v1/sessions/${player.session.session_id}/interrupts`, { method: "POST", ...input, headers: sessionHeaders(player), timeout: 610000, signal: questionController.signal });
       if (state.player !== player || state.turn !== turn || player.closed || player.endPending) return;
       if (reply.request_id !== turn.body.request_id || reply.chunk_id !== turn.body.chunk_id) throw new Error("The teacher reply did not match this question. Retry the same question.");
       // Only the newest answer keeps audio; the visible transcript retains text/metadata.
       turn.response = { ...reply, audio: null, ssml: null, visemes: [] };
-      state.questionHistory.push({ question: turn.body.text, response: turn.response });
-      state.question = "";
+      state.questionHistory.push({ question: turn.label || turn.body.text, response: turn.response });
+      state.question = ""; clearVoice(); turn.audio = null;
       if (reply.audio?.encoding === "base64" && reply.audio.media_type === "audio/wav") {
         try {
           const bytes = Uint8Array.from(atob(reply.audio.data), character => character.charCodeAt(0));
@@ -1112,7 +1188,10 @@
     if (action === "replay") { clearQuestion(); await loadPart(player.index, { autoplay: true }); return; }
     if (action === "playback-speed") { const speeds = [1, 1.25, 1.5, 2]; player.speed = speeds[(speeds.indexOf(player.speed) + 1) % speeds.length]; lectureAudio.playbackRate = player.speed; control.textContent = `${player.speed}×`; control.setAttribute("aria-label", `Playback speed ${player.speed} times`); return; }
     if (action === "toggle-question") { if (state.questionOpen) { clearQuestion(); updateQuestionPanel(); } else openQuestions(); return; }
-    if (action === "suggest-question" && !state.questionPending) { state.question = control.dataset.question; if (state.turn?.error) state.turn = null; pauseReply(); updateQuestionPanel(); document.querySelector("#question-input").focus(); return; }
+    if (action === "record-question") { await recordQuestion(); return; }
+    if (action === "stop-recording") { await stopRecording(); return; }
+    if (action === "discard-recording" && !state.questionPending) { clearVoice(); if (state.turn?.audio) state.turn = null; updateQuestionPanel(); document.querySelector("#question-input")?.focus(); return; }
+    if (action === "suggest-question" && !state.questionPending && !state.voice) { state.question = control.dataset.question; if (state.turn?.error) state.turn = null; pauseReply(); updateQuestionPanel(); document.querySelector("#question-input").focus(); return; }
     if (action === "retry-question") { await sendQuestion(true); return; }
     if (action === "resume-learning") { await resumeLearning(); return; }
     if (action === "ask-another-question") { askAnotherQuestion(); return; }
@@ -1145,7 +1224,7 @@
     if (target.id === "max-words") state.draft.maximum = Number(target.value);
     if (target.id === "session-jwt") state.sessionToken = target.value;
     if (target.id === "revision-text" && state.revision) state.revision.text = target.value;
-    if (target.id === "question-input" && !state.questionPending) { state.question = target.value; if (state.turn?.error && state.question.trim() !== state.turn.body.text) state.turn = null; pauseReply(); }
+    if (target.id === "question-input" && !state.questionPending && !state.voice) { state.question = target.value; if (state.turn?.error && state.question.trim() !== state.turn.body.text) state.turn = null; pauseReply(); }
     if (target.id === "playback-position" && state.player) {
       const player = state.player;
       if (player.seekPlaying === undefined) player.seekPlaying = !lectureAudio.paused;
@@ -1208,7 +1287,8 @@
   for (const event of ["play", "pause", "ended", "timeupdate", "loadedmetadata"]) replyAudio.addEventListener(event, updateReplyPlayback);
   window.addEventListener("hashchange", () => { render(); main.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "instant" }); });
   window.addEventListener("upraise-auth-mode", event => { state.local = event.detail === "local-test"; updateConnection(); });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) pausePlayback(); });
+  document.addEventListener("play", event => { if (event.target.id === "voice-preview") { lectureAudio.pause(); pauseReply(); } }, true);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { pausePlayback(); cancelActiveVoice(); } });
   window.addEventListener("pagehide", () => {
     releaseReviewAudio();
     pausePlayback(); questionController?.abort();
