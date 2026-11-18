@@ -11,6 +11,7 @@ from pptx import Presentation
 from pptx.util import Inches
 from reportlab.pdfgen.canvas import Canvas
 from test_a1 import FakeEmbedder
+from test_source_verifier import PASSING, Client, response, verifier
 
 from upraise_ai.core.config import Settings
 from upraise_ai.core.errors import IngestionError
@@ -139,20 +140,18 @@ def test_visual_description_requires_a_passing_comparison_against_the_rendered_s
     source = tmp_path / 'source.pptx'
     source.write_bytes(powerpoint_bytes(visual=True))
     class Describer:
-        def describe(self, path, **kwargs):
-            return SimpleNamespace(description='The group contains a visible group label.')
-    calls = []
-    class Verifier:
-        def verify_source(self, paths, **kwargs):
-            assert paths[0].is_file() and kwargs['page_numbers'][0] in {1, 3}
-            calls.append(kwargs)
-            return SimpleNamespace(passed=passed)
+        def transcribe_slide(self, paths, **kwargs):
+            return SimpleNamespace(description=kwargs['native_text'] + '\nThe group contains a visible group label.')
+    client = Client(response({**PASSING, 'complete': passed}))
     document, _ = PowerPointProcessor(Settings(), embedder=FakeEmbedder(1024), renderer=fake_powerpoint_renderer,
-        describer=Describer(), verifier=Verifier()).prepare(source, powerpoint_metadata(), 'document', tmp_path,
+        describer=Describer(), verifier=verifier(tmp_path, client)).prepare(source, powerpoint_metadata(), 'document', tmp_path,
                                                            uuid4(), lambda *_: None)
     text = '\n'.join(c.text for c in document.chunks)
     assert ('group contains a visible group label' in text) == passed
-    assert any(c['content_type'] == 'figure' and c['source_references'] == ['slide:1:visual'] for c in calls)
+    contexts = [json.loads(c['messages'][0]['content'][-1]['text']) for c in client.calls]
+    assert any(c['content_type'] == 'slide' and c['ordered_slide_references'] == ['slide:1'] for c in contexts)
+    assert all(c['ordered_source_pages'] == [] for c in contexts)
+    assert document.ingestion_readiness.status == ('COMPLETE' if passed else 'INCOMPLETE')
     assert 'Each potential edge' in text
     if not passed:
         assert 'POWERPOINT_VISUAL_REQUIRES_REVIEW' in document.warnings
@@ -211,16 +210,11 @@ def test_real_chart_deck_renders_and_uses_a_source_checked_visual_description(tm
     slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(2), Inches(7), Inches(4), data)
     source = tmp_path / 'chart.pptx'
     presentation.save(source)
-    checked = []
-    class Verifier:
-        def verify_source(self, images, **kwargs):
-            assert images[0].is_file()
-            checked.append(kwargs['content_type'])
-            return SimpleNamespace(passed=True)
-    describer = SimpleNamespace(describe=lambda *args, **kwargs:
-        SimpleNamespace(description='The Count chart shows low: 10 and high: 20.'))
+    client = Client()
+    describer = SimpleNamespace(transcribe_slide=lambda *args, **kwargs:
+        SimpleNamespace(description=kwargs['native_text'] + '\nThe Count chart shows low: 10 and high: 20.'))
     result, _ = PowerPointProcessor(Settings(), embedder=FakeEmbedder(1024), describer=describer,
-        verifier=Verifier()).prepare(source, powerpoint_metadata(), 'document', tmp_path, uuid4(), lambda *_: None)
-    assert result.slide_count == 1 and 'figure' in checked
+        verifier=verifier(tmp_path, client)).prepare(source, powerpoint_metadata(), 'document', tmp_path, uuid4(), lambda *_: None)
+    assert result.slide_count == 1 and client.calls and result.ingestion_readiness.status == 'COMPLETE'
     assert any('low: 10 and high: 20' in c.text for c in result.chunks)
     assert (tmp_path / 'powerpoint-artifacts/slide-1.png').read_bytes().startswith(b'\x89PNG')

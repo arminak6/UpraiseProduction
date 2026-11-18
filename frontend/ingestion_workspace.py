@@ -145,6 +145,7 @@ def new_generation(state):
         state.pop(key, None)
     st.session_state["iw_field_lesson"] = "test-lesson-" + suggested_number()
     st.session_state["iw_field_a3_key"] = str(uuid4())
+    st.session_state['iw_field_allow_incomplete_source'] = False
 
 
 def navigate(stage):
@@ -263,6 +264,8 @@ def material_table(rows):
         "Material": row.get("filename"), "Course": row.get("course_id"),
         "Status": row.get("status"), "Progress": progress_percentage(row.get("progress")),
         "Chunks": row.get("chunk_count", 0), "Document ID": row["document_id"],
+        "Content coverage": (row.get('ingestion_readiness') or {}).get('status', '—'),
+        "Slides needing review": ', '.join(map(str, (row.get('ingestion_readiness') or {}).get('blocking_slides', []))),
     } for row in rows], hide_index=True, width="stretch")
 
 
@@ -359,6 +362,11 @@ def render_generation(connection, state, show_response, *, refresh_on_open=False
         material_table(rows)
     if result and not result.successful:
         show_response(result)
+    def incomplete_powerpoint(row):
+        return (str(row.get('filename', '')).lower().endswith('.pptx') and row.get('status') == 'DONE'
+                and (row.get('ingestion_readiness') or {}).get('status') != 'COMPLETE')
+    if any(incomplete_powerpoint(row) for row in rows):
+        st.warning('Some source content needs review. You can choose to generate a draft from the available content; missing details remain flagged.')
     available = {row["document_id"]: row for row in rows if row.get("status") in {"DONE", "QUEUED", "RUNNING"}}
     choices = list(available)
     if st.session_state.get("iw_field_source_document") not in choices:
@@ -392,6 +400,12 @@ def render_generation(connection, state, show_response, *, refresh_on_open=False
         language, voice = render_language_voice("Output language", language_key="iw_field_output_language",
                                                voice_key="iw_field_voice")
         with st.form("iw_generation"):
+            allow_incomplete = False
+            if material and incomplete_powerpoint(material):
+                affected = (material.get('ingestion_readiness') or {}).get('blocking_slides', [])
+                st.caption('Source coverage needs review' + (f' on slides {", ".join(map(str, affected))}.' if affected else '.'))
+                allow_incomplete = st.checkbox('Generate from the available content; some details may be missing',
+                    key='iw_field_allow_incomplete_source')
             lesson = st.text_input("Lesson ID", key="iw_field_lesson", max_chars=120)
             left, right = st.columns(2)
             left.text_input("Course ID", key="iw_field_draft_course", disabled=True)
@@ -411,10 +425,14 @@ def render_generation(connection, state, show_response, *, refresh_on_open=False
             submit = st.form_submit_button("Generate lesson · A3", type="primary", disabled=not material)
     if submit:
         try:
+            if incomplete_powerpoint(material) and not allow_incomplete:
+                raise ValueError('Choose Generate from the available content before continuing with this source.')
             payload = {"course_id": material["course_id"], "activity_id": material["activity_id"],
                        "lesson_id": lesson.strip(), "document_ids": [str(UUID(selected))],
                        "language": language.strip(), "voice": voice.strip(),
                        "options": {"source_window_pages": window, "target_chunk_words": words, "max_chunk_words": maximum}}
+            if allow_incomplete:
+                payload['allow_incomplete_source'] = True
             if not all(payload[name] for name in ("course_id", "activity_id", "lesson_id", "language", "voice")):
                 raise ValueError("Fill the course, activity, lesson, output language and voice.")
             if words > maximum:

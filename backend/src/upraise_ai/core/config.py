@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     powerpoint_conversion_timeout_seconds: int = Field(180, ge=10, le=900)
     chunk_max_tokens: int = Field(600, ge=100, le=2000)
     chunk_overlap_tokens: int = Field(60, ge=0)
-    pipeline_version: str = "document-ingestion-v1.7"
+    pipeline_version: str = "document-ingestion-v1.8"
     max_attempts: int = Field(3, ge=1, le=10)
     lease_seconds: int = Field(120, ge=30)
     worker_poll_seconds: float = Field(2, ge=0.1)

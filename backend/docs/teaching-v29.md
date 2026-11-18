@@ -5,6 +5,20 @@ Select **Version 2.9 · Writer, reviewer and judge**, or submit
 the default. `"v2"` still selects the existing V2.8 first-draft policy, and V3
 remains independent. Stored courses are not relabelled or regenerated.
 
+**Version 2.9 Light · Lower-cost voice (Polly Standard)** selects the same
+teaching, narration and review workflow using `"teaching_version": "v2.9-light"`.
+Only this selection overrides the configured speech engine to `standard` for
+both audio and viseme speech marks. The shared Polly setting remains unchanged.
+Joanna supports both engines, but other voices must support Standard in the
+requested language; unsupported choices fail normal voice validation. Standard
+speech may sound less natural than Neural. For identical billed text, current
+Standard audio plus speech-mark rates are 75% lower; model costs are unchanged
+([AWS Polly pricing](https://aws.amazon.com/polly/pricing/), checked 2026-11-02).
+Teacher updates and spoken Q&A for a Light course also use Standard. Catalog,
+review and result provenance retain the distinct `v2.9-light` selection and actual
+speech engine. The teaching policy remains `teaching-narration-v2.9` because the
+teaching agents and prompts are shared. Existing V2.9 retains its configured engine.
+
 For each source section, difficulty adaptation, requested teacher update, and
 spoken script, V2.9 runs:
 
@@ -42,5 +56,6 @@ unresolved review; the historical multi-correction alignment loop is bypassed.
 All courses remain DRAFT and still require external human approval.
 
 Implementation: `services/teaching_v29/{models,workflow,prompts,speech}.py`.
+The Light selection is implemented in `services/teaching_v29/light.py`.
 Coverage: `tests/test_teaching_v29.py`, `tests/test_teaching_v29_integration.py`,
 and frontend version-selection/review tests.

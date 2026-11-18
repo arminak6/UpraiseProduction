@@ -310,7 +310,7 @@ def test_prepared_checkpoint_is_rebuilt_when_actual_source_bytes_change(tmp_path
 def test_source_comparison_model_changes_pipeline_and_checkpoint_identity():
     original = Settings()
     changed = Settings(fidelity_vision_model_id="different-source-comparison-model")
-    assert original.pipeline_version == "document-ingestion-v1.7"
+    assert original.pipeline_version == "document-ingestion-v1.8"
     assert changed.pipeline_signature != original.pipeline_signature
 
 

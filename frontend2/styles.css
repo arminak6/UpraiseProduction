@@ -568,3 +568,4 @@ dialog::backdrop { background: #17323965; backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
+.source-coverage-note { max-width: 38rem; white-space: normal; color: var(--text-muted, #657572); }

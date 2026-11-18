@@ -146,6 +146,21 @@ def run(r, data=None, **kwargs):
     return r.service.handle(r.session_id, data or r.data, r.principal, **kwargs)
 
 
+@pytest.mark.parametrize("version,engine", [(None, "neural"), ("v2.9", "neural"), ("v2.9-light", "standard")])
+def test_b4_spoken_answer_uses_course_speech_engine_without_mutating_shared_settings(runtime, version, engine):
+    r = runtime
+    r.job_row["metadata"] = {"teaching_version": version} if version else {}
+    engines = []
+
+    def speech_factory(settings, teacher):
+        engines.append(settings.polly_engine)
+        return Speech(settings, teacher)
+
+    r.service.speech_factory = speech_factory
+    assert run(r).audio
+    assert engines == [engine] and r.settings.polly_engine == "neural"
+
+
 def test_b4_reexplanation_gets_exact_postgres_context_and_original_source(runtime):
     r = runtime
     value = run(r)

@@ -3,6 +3,7 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.documents import DocumentSummary
+from upraise_ai.services.source_readiness import powerpoint_readiness
 from upraise_ai.storage.courses import CourseRepository
 from upraise_ai.storage.lessons import LessonRepository
 
@@ -41,6 +42,7 @@ class DocumentService:
                 **{key: metadata[key] for key in ("course_id", "activity_id", "language", "source_ref", "content_hash")},
                 version=metadata.get("version"), filename=metadata["source_filename"],
                 status=row["status"], progress=row["progress"], chunk_count=count,
+                ingestion_readiness=powerpoint_readiness(row),
                 created_at=row["created_at"], updated_at=row["updated_at"],
             ))
         return summaries

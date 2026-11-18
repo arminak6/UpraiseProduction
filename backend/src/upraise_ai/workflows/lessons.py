@@ -20,6 +20,7 @@ from upraise_ai.services.lesson_replacement import (
     cleanup_replacements,
     current_manifest,
 )
+from upraise_ai.services.source_readiness import require_complete_powerpoint
 from upraise_ai.storage.lesson_archive import output_expired, persistent_output
 
 
@@ -44,7 +45,11 @@ class LessonService:
                     raise HTTPException(404, "DOCUMENT_NOT_FOUND")
                 if row["status"] in {"FAILED", "CANCELLED"}:
                     raise IngestionError("DOCUMENT_INGESTION_FAILED", status=409)
+                require_complete_powerpoint(row, allow_incomplete_source=data.allow_incomplete_source)
         metadata = data.model_dump(mode="json")
+        # Preserve legacy request/retry identity when no override was selected.
+        if not data.allow_incomplete_source:
+            metadata.pop('allow_incomplete_source', None)
         # Preserve existing V1 request fingerprints; V2 is an explicit opt-in.
         if data.teaching_version == "v1":
             metadata.pop("teaching_version", None)

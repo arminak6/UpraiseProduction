@@ -46,6 +46,28 @@ class IngestionWorkspaceTests(unittest.TestCase):
         self.result_overrides = {}
         self.status_body = {"job_id": self.lesson, "lesson_id": "test", "status": "DONE", "step": "DONE", "progress": 1}
 
+    def test_incomplete_source_generation_requires_explicit_choice_and_sends_it(self):
+        original = self.response
+        def respond(connection, method, path, **kwargs):
+            if method == 'GET' and path == '/v1/documents':
+                return api_client.Result(method, path, 200, 1, [{'document_id': self.document,
+                    'course_id': '123456', 'activity_id': '654321', 'language': 'it',
+                    'filename': 'available.pptx', 'status': 'DONE', 'progress': 1, 'chunk_count': 14,
+                    'ingestion_readiness': {'status': 'INCOMPLETE', 'blocking_slides': [12]}}], True)
+            return original(connection, method, path, **kwargs)
+        with patch('api_client.request', side_effect=respond) as send:
+            app = self.app()
+            self.stage(app, 2)
+            app.selectbox(key='iw_field_source_document').set_value(self.document).run()
+            button(app, 'Generate lesson · A3').click().run()
+            self.assertFalse(any(call.args[1] == 'POST' for call in send.call_args_list))
+            self.assertTrue(any('available content' in item.value for item in app.error))
+            app.checkbox(key='iw_field_allow_incomplete_source').check()
+            button(app, 'Generate lesson · A3').click().run()
+            self.assertEqual(send.call_args.args[1:3], ('POST', '/v2/lesson-jobs'))
+            self.assertIs(send.call_args.kwargs['json_body']['allow_incomplete_source'], True)
+            self.assertFalse(app.exception)
+
     def response(self, connection, method, path, **kwargs):
         if method == "POST":
             job = self.ingestion if path == "/v1/documents" else self.revision if path == "/v1/audio:regenerate" else self.lesson

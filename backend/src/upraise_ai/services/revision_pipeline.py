@@ -24,6 +24,7 @@ from upraise_ai.services.revision_models import (
     validate_revision_text,
 )
 from upraise_ai.services.revision_validation import MAX_ALIGNMENT_CORRECTIONS, validate_aligned_revision
+from upraise_ai.services.source_readiness import add_source_readiness
 from upraise_ai.services.source_references import (
     citation_chunks,
     display_citations,
@@ -116,6 +117,7 @@ class RevisionPipeline(LessonPipeline):
         if blocks:
             section.update(source_format=source.source_format, reference_kind=source.source_format + '_source_block',
                            page_count=document["result"]["source_block_count"])
+        add_source_readiness(section, document)
         if revision.aligned_unit:
             section.update(alignment_unit=revision.aligned_unit, level_profiles=data.level_profiles)
         version_refs = VersionCatalog(self.settings).references("revision_")

@@ -4,6 +4,7 @@ import re
 
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.schemas.lessons import LessonSource
+from upraise_ai.services.source_readiness import AVAILABLE_CONTENT_POLICY
 
 CSV_CITATION_POLICY = """
 This source is CSV. Its numeric page fields are internal CSV SOURCE BLOCK identifiers,
@@ -32,9 +33,12 @@ facts or relationships. Unverified visual content remains uncertain.
 
 
 def citation_policy(section):
-    return (POWERPOINT_CITATION_POLICY if section.get('source_format') == 'pptx' else
+    policy = (POWERPOINT_CITATION_POLICY if section.get('source_format') == 'pptx' else
             WORD_CITATION_POLICY if section.get('source_format') in {'doc', 'docx'} else
             CSV_CITATION_POLICY if section.get('source_format') == 'csv' else '')
+    if (section.get('ingestion_readiness') or {}).get('status') == 'INCOMPLETE':
+        policy += '\n' + AVAILABLE_CONTENT_POLICY
+    return policy
 
 
 def citation_chunks(chunks):

@@ -132,6 +132,11 @@ class VersionCatalog:
         for role, constant in (("figure_description", "PROMPT_VERSION"), ("formula_transcription", "FORMULA_PROMPT_VERSION"),
                                ("inline_math", "INLINE_MATH_PROMPT_VERSION"), ("source_verification", "VERIFICATION_PROMPT_VERSION")):
             prompts[role] = prompt_version(source_constant("services/pdf/vision.py", constant), ("services/pdf/vision.py",))
+        prompts['powerpoint_transcription'] = prompt_version(
+            source_constant('services/powerpoint_vision.py', 'SLIDE_TRANSCRIPTION_PROMPT_VERSION'),
+            ('services/powerpoint_vision.py', 'services/powerpoint_layout.py', 'services/powerpoint_processor.py'))
+        prompts['powerpoint_verification'] = prompt_version(
+            source_constant('services/pdf/vision.py', 'SLIDE_VERIFICATION_PROMPT_VERSION'), ('services/pdf/vision.py',))
         models = {role: ModelVersion(provider="AWS Bedrock", model_id=getattr(settings, field)) for role, field in (
             ("embeddings", "embedding_model_id"), ("figure_description", "vision_model_id"),
             ("formula_transcription", "math_vision_model_id"), ("source_verification", "fidelity_vision_model_id"),

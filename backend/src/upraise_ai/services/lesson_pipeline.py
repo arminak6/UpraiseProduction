@@ -26,6 +26,11 @@ from upraise_ai.services.lesson_models import (
 from upraise_ai.services.lesson_prompts import LEARNER_LEVEL_PROMPT_VERSION
 from upraise_ai.services.lesson_speech import split_words
 from upraise_ai.services.lesson_translation import TRANSLATION_PROMPT_VERSION, needs_translation
+from upraise_ai.services.source_readiness import (
+    add_source_readiness,
+    powerpoint_readiness,
+    require_complete_powerpoint,
+)
 from upraise_ai.services.source_references import (
     citation_chunks,
     display_citations,
@@ -92,6 +97,7 @@ def plan_sections(documents, window_pages):
             elif blocks:
                 sections[-1].update(source_format=source_format,
                                     reference_kind='powerpoint_slide' if source_format == 'pptx' else 'word_source_block')
+            add_source_readiness(sections[-1], row)
         if len(seen) != len(chunks):
             raise IngestionError("LESSON_SOURCE_COVERAGE_INVALID")
     return sections
@@ -108,6 +114,16 @@ def validate_draft(draft, pages):
 
 def source_issues(section):
     issues = []
+    readiness = section.get('ingestion_readiness') or {}
+    if readiness.get('status') == 'INCOMPLETE':
+        blocked = readiness.get('blocking_slides', [])
+        affected = sorted(set(blocked).intersection(section['pages'])) if blocked else section['pages']
+        if affected:
+            issues.append(ReviewIssue(category='source', pages=affected,
+                message='Human review required: this draft uses the available ingested content. '
+                        + (f'Source coverage is incomplete on slides {", ".join(map(str, affected))}. ' if blocked else
+                           'Source coverage has not been fully checked. ')
+                        + 'Some details may be missing; check the original source before teaching.'))
     for chunk in section["chunks"]:
         quality = chunk.get("quality", {})
         if quality.get("status", "UNVERIFIED") != "AUTO_CHECKED":
@@ -152,6 +168,10 @@ class LessonPipeline:
                     raise IngestionError("LESSON_DOCUMENT_INGESTION_FAILED")
                 if row["status"] != "DONE" or not row["active_attempt"]:
                     waiting = True
+                require_complete_powerpoint(row, allow_incomplete_source=data.allow_incomplete_source)
+                readiness = powerpoint_readiness(row)
+                if data.allow_incomplete_source and readiness and readiness.status == 'INCOMPLETE':
+                    row = {**row, 'generation_source_readiness': readiness.model_dump(mode='json')}
                 rows.append(row)
         if waiting:
             return None

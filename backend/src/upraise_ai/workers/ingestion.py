@@ -219,7 +219,9 @@ class IngestionWorker:
                     result.update(source_format=metadata.source_format, source_block_count=processed.source_block_count)
                 elif metadata.source_format == "pptx":
                     result.update(source_format="pptx", slide_count=processed.slide_count,
-                                  source_block_count=processed.source_block_count)
+                                  source_block_count=processed.source_block_count,
+                                  ingestion_readiness=processed.ingestion_readiness.model_dump(mode='json')
+                                  if processed.ingestion_readiness else None)
                 self.audit.record(job, "INDEX_VERIFIED", result, attempt=True)
                 self.jobs.done(conn, job_id, token, result)
             # A DONE job + active_attempt is the authoritative activation boundary.

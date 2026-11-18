@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
 from upraise_ai.core.errors import IngestionError
+from upraise_ai.core.teaching import speech_settings
 from upraise_ai.guards.operations import feature_enabled, require_feature
 from upraise_ai.schemas.interrupts import InlineAudio, InterruptResponse, LearnerIntent
 from upraise_ai.schemas.lessons import LessonSource
@@ -170,7 +171,7 @@ class InterruptService:
             (check.in_language, "ANSWER_LANGUAGE_REJECTED"),
         ) if not passed]
 
-    def _run_graph(self, session, data, audio, context, chunk, versions, documents):
+    def _run_graph(self, session, data, audio, context, chunk, versions, documents, *, teaching_version=None):
         teacher = self.teacher_factory(self.settings, session.binding)
         # Four previous completed Q&A pairs, across all interruptions in this lesson.
         history = [{"role": item["role"], "text": item["text"][:2000]} for item in session.chat_cache[-8:]]
@@ -252,7 +253,7 @@ class InterruptService:
                 value.warnings.append("AUDIO_DISABLED")
                 return {"response": value}
             try:
-                speech = self.speech_factory(self.settings, teacher)
+                speech = self.speech_factory(speech_settings(self.settings, teaching_version), teacher)
                 language_code = speech.validate_voice(session.response.voice, session.binding.language)
                 ssml, parts, issues = speech.prepare(value.text, session.binding.language)
                 self.store.ensure_current(session)
@@ -304,7 +305,8 @@ class InterruptService:
                 raise HTTPException(503, "INTERRUPT_CAPACITY_REACHED", headers={"Retry-After": "2"})
             try:
                 documents = self._documents(session)
-                state = self._run_graph(session, data, audio, context, chunk, versions, documents)
+                state = self._run_graph(session, data, audio, context, chunk, versions, documents,
+                    teaching_version=row.get("metadata", {}).get("teaching_version"))
                 value = state["response"]
                 # Recheck revocation/expiry after provider calls, immediately before delivery.
                 with self.lessons.staging.artifact_lock(session.binding.lesson_job_id, shared=True), ExitStack() as locks:

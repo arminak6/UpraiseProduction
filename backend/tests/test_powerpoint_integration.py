@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from psycopg.types.json import Jsonb
 from test_a1 import FakeEmbedder
 from test_a3 import request_data
 from test_a3_integration import api, process
@@ -11,6 +12,7 @@ from test_b1_integration import b1_api
 from test_b4 import Speech, Teacher
 from test_csv_integration import upload_api
 from test_powerpoint_processor import fake_powerpoint_renderer, powerpoint_bytes, powerpoint_metadata
+from test_source_verifier import Client, verifier
 
 from upraise_ai.main import app
 from upraise_ai.schemas.aligned_lessons import AlignedReview, AlignedTexts
@@ -22,7 +24,8 @@ pytest_plugins = ['test_a1_integration', 'test_a3_integration', 'test_b1']
 
 
 @pytest.mark.parametrize('aligned', [False, True])
-def test_powerpoint_upload_preview_generation_revision_and_delete(integration, lesson, monkeypatch, aligned):
+@pytest.mark.parametrize('partial', [False, True])
+def test_powerpoint_upload_preview_generation_revision_and_delete(integration, lesson, monkeypatch, aligned, partial):
     raw = powerpoint_bytes()
     fields = powerpoint_metadata(include_speaker_notes=True).model_dump(
         exclude={'source_filename', 'source_format', 'include_speaker_notes', 'include_hidden_slides'}, exclude_none=True)
@@ -41,12 +44,13 @@ def test_powerpoint_upload_preview_generation_revision_and_delete(integration, l
     worker.processor = None
     monkeypatch.setattr('upraise_ai.workers.ingestion.get_processor', lambda mime, cfg:
         PowerPointProcessor(cfg, embedder=FakeEmbedder(cfg.embedding_dimension), renderer=fake_powerpoint_renderer,
-            describer=SimpleNamespace(describe=lambda *args, **kwargs: SimpleNamespace(description=None)),
-            verifier=SimpleNamespace(verify_source=lambda *args, **kwargs: SimpleNamespace(passed=True))))
+            describer=SimpleNamespace(transcribe_slide=lambda *args, **kwargs: SimpleNamespace(description=kwargs['native_text'])),
+            verifier=verifier(settings.data_dir, Client())))
     worker.process(jobs.claim(settings.lease_seconds, settings.pipeline_signature))
     source = jobs.get(doc['job_id'])
     assert source['status'] == 'DONE', source['error_code']
     assert source['result']['slide_count'] == 3 and source['result']['page_count'] == 0
+    assert source['result']['ingestion_readiness']['status'] == 'COMPLETE'
     indexed = vectors.document_sections(doc['document_id'], 'course-1', source['active_attempt'])
     assert indexed and {n for c in indexed for n in c['slide_numbers']} == {1, 3}
     version = indexed[0]['document_version_id']
@@ -57,22 +61,52 @@ def test_powerpoint_upload_preview_generation_revision_and_delete(integration, l
         assert preview.headers['content-type'] == 'image/png' and preview.content.startswith(b'\x89PNG')
         assert client.get(path.replace('/slides/1', '/slides/2')).status_code == 404
         assert client.get(path.replace(version, str(uuid4()))).status_code == 404
+        listing = client.get('/v1/documents').json()
+        assert next(d for d in listing if d['document_id'] == doc['document_id'])['ingestion_readiness']['status'] == 'COMPLETE'
+
+    # Admission must reject incomplete and legacy source results for both APIs.
+    for readiness in (None, {'status': 'INCOMPLETE', 'blocking_slides': [3], 'issues': ['POWERPOINT_SOURCE_REQUIRES_REVIEW']}):
+        changed = {**source['result'], 'ingestion_readiness': readiness}
+        with jobs.connect() as conn:
+            conn.execute('UPDATE ingestion_jobs SET result=%s WHERE job_id=%s', (Jsonb(changed), doc['job_id']))
+        with api(integration, lesson) as client:
+            rejected = client.post('/v2/lesson-jobs' if aligned else '/v1/lesson-jobs',
+                                   json=request_data(document_ids=[doc['document_id']]))
+            assert rejected.status_code == 409 and rejected.json()['detail'] == 'POWERPOINT_INGESTION_REVIEW_REQUIRED'
+    generation_source = {**source['result']}
+    if partial:
+        generation_source['ingestion_readiness'] = {'status': 'INCOMPLETE', 'blocking_slides': [1], 'issues': []}
+    with jobs.connect() as conn:
+        conn.execute('UPDATE ingestion_jobs SET result=%s WHERE job_id=%s', (Jsonb(generation_source), doc['job_id']))
 
     def generate(section, language, *args, **kwargs):
         assert section['source_format'] == 'pptx' and section['pages'] == [1, 3]
+        assert bool(section.get('ingestion_readiness')) == partial
         return SectionDraft(paragraphs=[{'text': 'Each potential edge is present independently. [p. 1]', 'pages': [1]}]), ReviewReport(approved=True, summary='Checked.'), 0
     monkeypatch.setattr(lesson[5], 'generate_section', generate)
     monkeypatch.setattr(lesson[5], 'adapt_units', lambda section, units, language, **kwargs:
         (AlignedTexts(units=[{'content_unit_id': u.content_unit_id, 'text': u.material_text} for u in units]),
          {str(u.content_unit_id): ReviewReport(approved=True, summary='Checked.') for u in units}), raising=False)
     with api(integration, lesson) as client:
+        body = request_data(document_ids=[doc['document_id']])
+        if partial:
+            body['allow_incomplete_source'] = True
+        generation_path = '/v2/lesson-jobs' if aligned else '/v1/lesson-jobs'
         response = client.post('/v2/lesson-jobs' if aligned else '/v1/lesson-jobs',
-                               json=request_data(document_ids=[doc['document_id']]))
+                               json=body, headers={'Idempotency-Key': 'pptx-generate'})
         assert response.status_code == 202, response.text
+        retry = client.post(generation_path, json={**body, 'allow_incomplete_source': partial},
+                            headers={'Idempotency-Key': 'pptx-generate'})
+        assert retry.status_code == 202 and retry.json() == response.json()
+        if not partial:
+            changed = client.post(generation_path, json={**body, 'allow_incomplete_source': True},
+                                  headers={'Idempotency-Key': 'pptx-generate'})
+            assert changed.status_code == 409 and changed.json()['detail'] == 'IDEMPOTENCY_KEY_CONFLICT'
     generation = lesson[1].claim(settings.lease_seconds, [lesson[0].lesson_signature, lesson[0].lesson_v2_signature])
     lesson[2].process(generation)
     root = lesson[1].get(generation['job_id'])
     assert root['status'] == 'DONE', root['error_code']
+    assert root['metadata'].get('allow_incomplete_source', False) == partial
     result = lesson[3].result(root)
     variants = result.variants if aligned else {'intermediate': result}
     for variant in variants.values():
@@ -80,6 +114,10 @@ def test_powerpoint_upload_preview_generation_revision_and_delete(integration, l
         assert '[Slide 1]' in chunk.text and '[p.' not in chunk.text
         assert chunk.sources[0].pages == [] and chunk.sources[0].slide_numbers == [1]
         assert chunk.sources[0].slide_references and '[Slide' not in chunk.ssml
+        if partial:
+            assert not chunk.reviewer_report.approved
+            assert any(i.category == 'source' and 'available ingested content' in i.message
+                       for i in chunk.reviewer_report.issues)
     teacher = Teacher()
     teacher.answer = 'An explanation supported by the slide. [Slide 1]'
     first = variants['intermediate']
@@ -118,6 +156,9 @@ def test_powerpoint_upload_preview_generation_revision_and_delete(integration, l
     for variant in (current.variants.values() if aligned else [current]):
         assert variant.chunks[0].text == 'A clearer slide explanation. [Slide 1]'
         assert variant.chunks[0].sources[0].slide_numbers == [1]
+        if partial:
+            assert any(i.category == 'source' and 'available ingested content' in i.message
+                       for i in variant.chunks[0].reviewer_report.issues)
     with upload_api(integration, lesson) as client:
         assert client.delete('/v1/documents/' + doc['document_id']).status_code == 204
         assert client.get(path).status_code == 404

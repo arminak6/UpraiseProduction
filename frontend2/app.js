@@ -56,14 +56,15 @@
   function getMaterial(id = state.selectedMaterial) { return state.materials.find(item => item.document_id === id); }
   function getCourse(id) { return state.courses.find(item => item.id === id) || (state.bundles.has(id) ? summaryFromBundle(state.bundles.get(id)) : null); }
   function levelsFor(course) { return Object.keys(course?.variants || {}); }
+  function teachingVersionName(version) { return version === "v2.9-light" ? "V2.9 Light" : String(version).toUpperCase(); }
   function teachingVersionLabel(course) {
     const records = Object.values(course.variants || {});
     if (!records.length) records.push(course);
     const version = records[0].teaching_version;
-    if (!["v1", "v2", "v2.9", "v3", "v3.1"].includes(version) || records.some(item => item.teaching_version !== version)) return "Version unknown";
+    if (!["v1", "v2", "v2.9", "v2.9-light", "v3", "v3.1"].includes(version) || records.some(item => item.teaching_version !== version)) return "Version unknown";
     const policy = records[0].teaching_policy;
     const revision = records.every(item => item.teaching_policy === policy) && /^teaching-narration-v(2\.\d+)$/.exec(policy || "");
-    return `Generation ${version === "v2" && revision ? `V${revision[1]}` : version.toUpperCase()}`;
+    return `Generation ${version === "v2" && revision ? `V${revision[1]}` : teachingVersionName(version)}`;
   }
   function variantsOf(bundle) { return bundle?.variants || (bundle?.learner_level ? { [bundle.learner_level]: bundle } : {}); }
   function configuredLevels() { return state.config?.levels || []; }
@@ -73,6 +74,23 @@
     const choices = { ...languages };
     if (selected && !choices[selected]) choices[selected] = languageLabel(selected);
     return Object.entries(choices).map(([value, label]) => `<option value="${escape(value)}" ${value === selected ? "selected" : ""}>${escape(label)}</option>`).join("");
+  }
+  function isPowerPoint(material) { return /\.pptx$/i.test(material?.filename || ""); }
+  function materialReady(material) {
+    return material?.status === "DONE" && (!isPowerPoint(material) || material.ingestion_readiness?.status === "COMPLETE");
+  }
+  function canGenerateMaterial(material) { return material?.status === "DONE" && Number(material.chunk_count) > 0; }
+  function generationSourceNotice() {
+    const material = getMaterial();
+    if (!canGenerateMaterial(material) || materialReady(material)) return "";
+    return `<div class="form-section" role="note"><strong>Some source content needs review</strong><p class="small-copy">${escape(materialCoverageNote(material))}</p><label class="checkbox-label"><input id="allow-incomplete-source" name="allowIncompleteSource" type="checkbox" required ${state.draft.allowIncompleteSource ? "checked" : ""}>Generate from the available content. I understand that some details may be missing and the draft will need review.</label></div>`;
+  }
+  function materialCoverageNote(material) {
+    if (!isPowerPoint(material) || material.status !== "DONE" || materialReady(material)) return "";
+    const readiness = material.ingestion_readiness;
+    if (!readiness || readiness.issues?.includes("POWERPOINT_REINGESTION_REQUIRED")) return "This PowerPoint has not had the updated content checks. You can generate a draft from the available content or upload it again for fresh checks.";
+    const slides = readiness.blocking_slides || [];
+    return `Content coverage could not be verified${slides.length ? ` on slides ${slides.join(", ")}` : ""}. You can generate a draft from the available content; missing details will remain flagged for review.`;
   }
   function fileIcon(material) {
     const format = String(material.filename || "").split(".").pop().toUpperCase();
@@ -109,6 +127,7 @@
     if (!material) return;
     if (state.selectedMaterial !== id) {
       state.selectedMaterial = id;
+      state.draft.allowIncompleteSource = false;
       state.draft.title = material.filename.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").slice(0, 120);
       const language = material.language.split("-")[0];
       state.draft.language = language in languages ? language : "en";
@@ -145,7 +164,7 @@
       if (!Array.isArray(data)) throw new Error("The material list could not be read.");
       state.materials = data; state.materialError = "";
       if (!getMaterial() && !state.activeJobId) {
-        const ready = data.find(item => item.status === "DONE");
+        const ready = data.find(canGenerateMaterial);
         if (ready) selectedSource(ready.document_id); else state.selectedMaterial = null;
       }
       return true;
@@ -297,10 +316,10 @@
     const materials = state.materials.filter(item => `${item.filename} ${item.course_id}`.toLowerCase().includes(state.search.toLowerCase()));
     if (!materials.length) return `${alert}${deletion}<div class="card empty-state">${icon("document")}<h3>${state.search ? "No matching material" : "A fresh start for your next course"}</h3><p>${state.search ? "Try another filename or course name." : "Upload a document above to add your first piece of material."}</p></div>`;
     return `${alert}${deletion}<div class="table-shell"><table><thead><tr><th scope="col">Document</th><th class="table-course" scope="col">Course</th><th class="table-language" scope="col">Language</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${materials.map(item => {
-      const ready = item.status === "DONE";
+      const ready = materialReady(item);
       const pending = ["QUEUED", "RUNNING"].includes(item.status);
-      const status = ready ? "Ready to use" : pending ? `Processing · ${percent(item.progress).toFixed(2)}%` : item.status === "FAILED" ? "Couldn’t process" : "Cancelled";
-      return `<tr><td><div class="material-name">${fileIcon(item)}<div><strong>${escape(item.filename)}</strong><small>${Number(item.chunk_count || 0)} source sections${state.uploadJobs.has(item.document_id) ? " · Recently uploaded" : ""}</small></div></div></td><td class="muted table-course">${escape(item.course_id)}</td><td class="muted table-language">${escape(languageLabel(item.language))}</td><td>${badge(status, ready ? "" : "badge-amber", ready ? "check" : "clock")}</td><td><div class="row-actions"><button class="text-button" data-action="create-from-material" data-id="${escape(item.document_id)}" ${ready ? "" : "disabled"} aria-label="Create course from ${escape(item.filename)}">Create course ${icon("arrow")}</button><button class="icon-button" data-action="remove-material" data-id="${escape(item.document_id)}" aria-label="Remove ${escape(item.filename)}">${icon("trash")}</button></div></td></tr>`;
+      const status = ready ? "Ready to use" : pending ? `Processing · ${percent(item.progress).toFixed(2)}%` : item.status === "DONE" ? "Needs source review" : item.status === "FAILED" ? "Couldn’t process" : "Cancelled";
+      return `<tr><td><div class="material-name">${fileIcon(item)}<div><strong>${escape(item.filename)}</strong><small>${Number(item.chunk_count || 0)} source sections${state.uploadJobs.has(item.document_id) ? " · Recently uploaded" : ""}</small>${materialCoverageNote(item) ? `<small class="source-coverage-note">${escape(materialCoverageNote(item))}</small>` : ""}</div></div></td><td class="muted table-course">${escape(item.course_id)}</td><td class="muted table-language">${escape(languageLabel(item.language))}</td><td>${badge(status, ready ? "" : "badge-amber", ready ? "check" : "clock")}</td><td><div class="row-actions"><button class="text-button" data-action="create-from-material" data-id="${escape(item.document_id)}" ${canGenerateMaterial(item) ? "" : "disabled"} aria-label="Create course from ${escape(item.filename)}">Create course ${icon("arrow")}</button><button class="icon-button" data-action="remove-material" data-id="${escape(item.document_id)}" aria-label="Remove ${escape(item.filename)}">${icon("trash")}</button></div></td></tr>`;
     }).join("")}</tbody></table></div>`;
   }
   function updateMaterialList() {
@@ -425,8 +444,8 @@
     return `${flagged ? `<div class="review-flag-banner" role="note"><strong>This part needs human review</strong><div class="review-tags" aria-label="Review tags">${reviewTagMarkup(reviewTags(report, true))}</div><p>Generation continued with unresolved automated checks. Review the text, source and audio before teaching.</p></div>` : ""}<details class="advanced review-evidence" ${flagged || expanded ? "open" : ""}><summary>Automated review and source evidence</summary><p class="small-copy">${escape(report.summary || "Automated checks are supporting evidence; human review remains required.")}</p>${report.issues?.length ? `<ul class="review-findings">${report.issues.map(issue => `<li>${escape(issue.message)}</li>`).join("")}</ul>` : ""}<p class="small-copy">AI checks do not constitute human approval.</p></details>`;
   }
   function renderGenerate() {
-    const ready = state.materials.filter(item => item.status === "DONE");
-    if (!getMaterial() && ready.length) selectedSource(ready[0].document_id);
+    const ready = state.materials.filter(canGenerateMaterial);
+    if (!canGenerateMaterial(getMaterial()) && ready.length) selectedSource(ready[0].document_id);
     const job = state.jobs.get(state.activeJobId);
     const generated = getCourse(state.generatedId);
     main.innerHTML = `${intro("02", "CREATE SOMETHING WORTH LEARNING", "Your knowledge.<br><em>A whole new learning experience.</em>", "Choose your material and a few preferences. We’ll take it from there.")}
@@ -435,9 +454,9 @@
       <section class="library" id="recent-jobs">${recentJobs()}</section>`;
   }
   function generationForm(ready) {
-    return `<form id="generation-form"><fieldset class="plain-fieldset" ${state.generationBusy ? "disabled" : ""}><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.filename)}</strong><small>${escape(item.course_id)} · ${escape(languageLabel(item.language))}</small></span><input type="radio" name="source" value="${escape(item.document_id)}" ${item.document_id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>
+    return `<form id="generation-form"><fieldset class="plain-fieldset" ${state.generationBusy ? "disabled" : ""}><div class="form-section"><div class="step-label"><span>1</span>Choose your source</div><div class="source-options">${ready.map(item => `<label class="source-option">${fileIcon(item)}<span><strong>${escape(item.filename)}</strong><small>${escape(item.course_id)} · ${escape(languageLabel(item.language))}${materialReady(item) ? "" : " · Needs source review"}</small></span><input type="radio" name="source" value="${escape(item.document_id)}" ${item.document_id === state.selectedMaterial ? "checked" : ""} required></label>`).join("")}</div></div>${generationSourceNotice()}
       <div class="form-section"><div class="step-label"><span>2</span>Make it yours</div><div class="field"><label for="course-title">Course title</label><input id="course-title" name="title" maxlength="120" value="${escape(state.draft.title)}" required></div><div class="form-grid"><div class="field"><label for="course-language">Output language</label><select id="course-language" name="language">${languageOptions(state.draft.language)}</select></div><div class="field"><label for="course-voice">Narration voice</label><select id="course-voice" name="voice">${voiceOptions(state.draft.language)}</select></div></div></div>
-      <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2.8 · First draft with review flags</option><option value="v2.9" ${state.draft.teachingVersion === "v2.9" ? "selected" : ""}>Version 2.9 · Writer, reviewer and judge</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option><option value="v3.1" ${state.draft.teachingVersion === "v3.1" ? "selected" : ""}>Version 3.1 · Source-aware teaching and level review</option></select><p class="small-copy" id="teaching-version-help">Version 3.1 preserves source identities, checks evidence-linked references and reviews difficulty adaptation. Unresolved material remains flagged for teacher editing. Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2.9 adds one judge edit and a fresh final review; unresolved findings keep the judge’s text with human-review flags. Version 2.8 keeps the first draft with review flags. Each generation creates a new course; earlier versions remain available.</p></div></div>
+      <div class="form-section"><div class="field"><label for="teaching-version">Teaching and narration version</label><select id="teaching-version" name="teachingVersion" aria-describedby="teaching-version-help"><option value="v1" ${state.draft.teachingVersion === "v1" ? "selected" : ""}>Version 1 · Current</option><option value="v2" ${state.draft.teachingVersion === "v2" ? "selected" : ""}>Version 2.8 · First draft with review flags</option><option value="v2.9" ${state.draft.teachingVersion === "v2.9" ? "selected" : ""}>Version 2.9 · Writer, reviewer and judge</option><option value="v2.9-light" ${state.draft.teachingVersion === "v2.9-light" ? "selected" : ""}>Version 2.9 Light · Lower-cost voice (Polly Standard)</option><option value="v3" ${state.draft.teachingVersion === "v3" ? "selected" : ""}>Version 3 · Continuous course teaching</option><option value="v3.1" ${state.draft.teachingVersion === "v3.1" ? "selected" : ""}>Version 3.1 · Source-aware teaching and level review</option></select><p class="small-copy" id="teaching-version-help">Version 2.9 Light keeps the Version 2.9 teaching workflow with a lower-cost voice that may sound less natural. Version 3.1 preserves source identities, checks evidence-linked references and reviews difficulty adaptation. Unresolved material remains flagged for teacher editing. Version 3 plans a connected course in document order, shares context between parts and reviews text and narration together. Version 2.9 adds one judge edit and a fresh final review; unresolved findings keep the judge’s text with human-review flags. Version 2.8 keeps the first draft with review flags. Each generation creates a new course; earlier versions remain available.</p></div></div>
       <div class="form-section"><fieldset class="plain-fieldset" aria-describedby="generation-level-help"><legend class="step-label"><span>3</span>Choose difficulty levels</legend><div class="generation-level-options">${configuredLevels().map(level => `<label class="level-option"><input type="checkbox" name="levels" value="${escape(level)}" ${selectedGenerationLevels().includes(level) ? "checked" : ""}><span><strong>${escape(levelLabel(level))}</strong>${levelDescriptions[level] ? `<small>${escape(levelDescriptions[level])}</small>` : ""}</span></label>`).join("")}</div><p class="small-copy" id="generation-level-help">Choose one or more levels. We’ll create text and narration only for your selection.</p><p class="inline-error" id="generation-level-error" ${selectedGenerationLevels().length ? "hidden" : ""}>Select at least one difficulty level.</p></fieldset></div>
       <details class="advanced"><summary>Advanced options</summary><div class="form-grid"><div class="field"><label for="target-words">Target words per part</label><input id="target-words" name="words" type="number" min="30" max="1000" value="${state.draft.words}" required></div><div class="field"><label for="source-window">Source window size</label><input id="source-window" name="window" type="number" min="1" max="50" value="${state.draft.window}" required><small>PDF pages, PowerPoint slides, CSV row groups or Word blocks</small></div></div><div class="field" style="margin-top:16px"><label for="max-words">Maximum words per part</label><input id="max-words" name="maximum" type="number" min="50" max="2000" value="${state.draft.maximum}" required></div></details>
       <button class="button button-wide generate-submit" type="submit" ${selectedGenerationLevels().length ? "" : "disabled"}>${icon(state.generationBusy ? "loader" : "sparkles", state.generationBusy ? "spinner" : "")}${state.generationBusy ? "Submitting course…" : state.generationAttempt?.failed ? "Retry generation request" : "Generate course"}${icon("arrow")}</button></fieldset><p class="preview-note">${icon("info")}Generation uses your selected material and creates real text and narration. Processing continues if you change sections.</p><p class="inline-error" id="generation-error" role="alert" ${state.generationError ? "" : "hidden"}>${escape(state.generationError)}</p></form>`;
@@ -460,12 +479,15 @@
     const title = form.elements.title.value.trim();
     const words = Number(form.elements.words.value), maximum = Number(form.elements.maximum.value), windowSize = Number(form.elements.window.value);
     const levels = [...form.querySelectorAll('input[name="levels"]:checked')].map(input => input.value);
-    if (!material || material.status !== "DONE" || !title) { state.generationError = "Choose ready material and enter a course title."; renderGenerate(); return; }
+    if (!canGenerateMaterial(material) || !title) { state.generationError = "Choose processed material with available content and enter a course title."; renderGenerate(); return; }
+    const allowIncompleteSource = Boolean(form.elements.allowIncompleteSource?.checked);
+    if (!materialReady(material) && !allowIncompleteSource) { state.generationError = "Choose whether to generate from the available content before continuing."; renderGenerate(); return; }
     if (!levels.length) { state.generationError = "Select at least one difficulty level."; renderGenerate(); return; }
     if (words > maximum) { state.generationError = "Target words must be at or below the maximum words per part."; renderGenerate(); return; }
-    state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize, levels, teachingVersion: form.elements.teachingVersion.value };
+    state.draft = { title, language: form.elements.language.value, voice: form.elements.voice.value, words, maximum, window: windowSize, levels, teachingVersion: form.elements.teachingVersion.value, allowIncompleteSource };
     const body = { lesson_id: title, course_id: material.course_id, activity_id: material.activity_id, document_ids: [material.document_id], language: state.draft.language, voice: state.draft.voice, levels, options: { source_window_pages: windowSize, target_chunk_words: words, max_chunk_words: maximum } };
-    if (["v2", "v2.9", "v3", "v3.1"].includes(state.draft.teachingVersion)) body.teaching_version = state.draft.teachingVersion;
+    if (["v2", "v2.9", "v2.9-light", "v3", "v3.1"].includes(state.draft.teachingVersion)) body.teaching_version = state.draft.teachingVersion;
+    if (!materialReady(material) && allowIncompleteSource) body.allow_incomplete_source = true;
     const signature = JSON.stringify(body);
     if (state.generationAttempt?.signature !== signature) state.generationAttempt = { signature, key: crypto.randomUUID() };
     state.generationBusy = true; state.generationError = ""; renderGenerate();
@@ -625,7 +647,7 @@
     return `<section class="card review-course-picker" aria-label="Choose a course to review"><div class="field"><label for="review-course-select">Course to review</label><select id="review-course-select" ${editor?.busy || !courses.size ? "disabled" : ""}><option value="">Choose a course…</option>${[...courses.values()].map(course => {
       const created = new Date(course.created_at);
       const date = Number.isFinite(created.getTime()) ? created.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-      const version = ["v1", "v2", "v2.9", "v3", "v3.1"].includes(course.teaching_version) ? course.teaching_version.toUpperCase() : "Version unknown";
+      const version = ["v1", "v2", "v2.9", "v2.9-light", "v3", "v3.1"].includes(course.teaching_version) ? teachingVersionName(course.teaching_version) : "Version unknown";
       return `<option value="${escape(course.job_id)}" ${editor?.id === course.job_id ? "selected" : ""}>${escape([course.lesson_id, version, course.course_id, date].filter(Boolean).join(" · "))}</option>`;
     }).join("")}</select><small>Open the saved text, review findings and source references for a course.</small></div>${editor && state.reviewMore ? '<button class="button button-secondary button-sm" data-action="load-more-reviews">Load more courses</button>' : ""}</section>`;
   }
@@ -664,7 +686,7 @@
     const pending = jobs.some(item => !terminal.has(item.status));
     const available = bundle.revision_available && !expired(bundle.audio_expires_at);
     const disabled = editor.busy || pending || !available;
-    main.innerHTML = `${heading}${back}<div class="review-course-heading"><div><h2>${escape(bundle.lesson_id)}</h2><p class="small-copy">${escape(bundle.course_id)} · ${escape(languageLabel(bundle.language))} · ${escape(bundle.voice)} · Teaching ${escape((bundle.teaching_version || "v1").toUpperCase())}</p></div>${badge("AI-generated draft · Human review required", "badge-amber")}</div>
+    main.innerHTML = `${heading}${back}<div class="review-course-heading"><div><h2>${escape(bundle.lesson_id)}</h2><p class="small-copy">${escape(bundle.course_id)} · ${escape(languageLabel(bundle.language))} · ${escape(bundle.voice)} · Teaching ${escape(teachingVersionName(bundle.teaching_version || "v1"))}</p></div>${badge("AI-generated draft · Human review required", "badge-amber")}</div>
       ${job ? `<div class="review-progress" aria-live="polite">${generationView(job)}</div>` : ""}
       ${!available ? `<div class="learning-note">${icon("info")}<div><strong>Teaching text remains available</strong><p>${escape(reviewUnavailable(bundle))}</p><a class="text-button" href="#generate">Go to Generate course ${icon("arrow")}</a></div></div>` : ""}
       <div class="form-grid review-selectors"><div class="field"><label for="review-level">Learning level</label><select id="review-level" ${editor.busy ? "disabled" : ""}>${bundle.levels.map(level => `<option value="${escape(level)}" ${editor.level === level ? "selected" : ""}>${escape(levelLabel(level))} · ${bundle.variants[level].chunks.filter(part => needsReview(part.reviewer_report)).length} to check</option>`).join("")}</select></div><div class="field"><label for="review-part">Course part</label><select id="review-part" ${editor.busy ? "disabled" : ""}>${lesson.chunks.map((part, index) => `<option value="${index}" ${editor.index === index ? "selected" : ""}>Part ${index + 1}${needsReview(part.reviewer_report) ? " · Needs review" : ""} — ${escape(partTitle(part))}</option>`).join("")}</select></div></div>
@@ -674,9 +696,9 @@
   }
 
   function reviewNarration(chunk, bundle, playable) {
-    const scripted = ["v2", "v2.9", "v3", "v3.1"].includes(bundle.teaching_version) && Boolean(chunk.narration_text);
+    const scripted = ["v2", "v2.9", "v2.9-light", "v3", "v3.1"].includes(bundle.teaching_version) && Boolean(chunk.narration_text);
     if (!scripted && !playable) return "";
-    return `<details class="advanced review-narration"><summary>${scripted ? `Spoken explanation · Version ${bundle.teaching_version === "v3.1" ? "3.1" : bundle.teaching_version === "v3" ? "3" : bundle.teaching_version === "v2.9" ? "2.9" : "2"}` : "Generated narration"}</summary>${scripted ? `<div class="review-narration-text result-text">${textParagraphs(chunk.narration_text, "lesson-paragraph")}</div>` : ""}<p class="small-copy">Listen while checking the teaching text and its source references.</p>${playable ? `<div class="answer-audio-controls"><button class="button button-secondary button-sm" data-action="review-listen">${icon("headphones")}Listen to this part</button><button class="button button-secondary button-sm" data-action="review-stop" disabled>${icon("stop")}Stop narration</button></div><audio id="review-audio" controls preload="none" aria-label="Narration for this course part" style="display:block;width:100%;margin-top:14px"></audio>` : ""}</details>`;
+    return `<details class="advanced review-narration"><summary>${scripted ? `Spoken explanation · Version ${teachingVersionName(bundle.teaching_version).slice(1)}` : "Generated narration"}</summary>${scripted ? `<div class="review-narration-text result-text">${textParagraphs(chunk.narration_text, "lesson-paragraph")}</div>` : ""}<p class="small-copy">Listen while checking the teaching text and its source references.</p>${playable ? `<div class="answer-audio-controls"><button class="button button-secondary button-sm" data-action="review-listen">${icon("headphones")}Listen to this part</button><button class="button button-secondary button-sm" data-action="review-stop" disabled>${icon("stop")}Stop narration</button></div><audio id="review-audio" controls preload="none" aria-label="Narration for this course part" style="display:block;width:100%;margin-top:14px"></audio>` : ""}</details>`;
   }
   function releaseReviewAudio() {
     ++reviewAudioEpoch;
@@ -1196,10 +1218,10 @@
       if (Number.isInteger(index)) { selectReviewPart(editor, editor.level, index); renderReview(); }
       return;
     }
-    if (action === "create-from-material") { selectedSource(id); state.activeJobId = null; state.generatedId = null; navigate("generate"); return; }
+    if (action === "create-from-material") { selectedSource(id); state.draft.allowIncompleteSource = false; state.activeJobId = null; state.generatedId = null; navigate("generate"); return; }
     if (action === "remove-material") { removeMaterialDialog(id); return; }
     if (action === "confirm-remove" || action === "retry-removal") { await confirmRemove(); return; }
-    if (action === "new-generation") { state.activeJobId = null; state.generatedId = null; state.generationAttempt = null; state.generationError = ""; navigate("generate"); return; }
+    if (action === "new-generation") { state.activeJobId = null; state.generatedId = null; state.draft.allowIncompleteSource = false; state.generationAttempt = null; state.generationError = ""; navigate("generate"); return; }
     if (action === "cancel-generation") { await cancelGeneration(id); return; }
     if (action === "open-tracking") { state.activeJobId = id; state.generatedId = null; navigate("generate"); return; }
     if (action === "retry-tracking") {
@@ -1281,6 +1303,7 @@
   document.addEventListener("change", event => {
     const target = event.target;
     if (target.name === "source") { selectedSource(target.value); renderGenerate(); document.querySelector(`input[name="source"][value="${state.selectedMaterial}"]`)?.focus(); }
+    if (target.id === "allow-incomplete-source") state.draft.allowIncompleteSource = target.checked;
     if (target.id === "include-speaker-notes") state.includeSpeakerNotes = target.checked;
     if (target.id === "include-hidden-slides") state.includeHiddenSlides = target.checked;
     if (target.id === "upload-language") state.uploadLanguage = target.value;

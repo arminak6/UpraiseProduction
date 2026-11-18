@@ -11,6 +11,10 @@ the judge's output with human-review tags and continue generation. Version 2.8
 remains separately selectable; existing courses keep their recorded versions.
 See [V2.9 behavior and API selection](../backend/docs/teaching-v29.md).
 
+**Version 2.9 Light** uses that same teaching workflow with a lower-cost
+Polly Standard voice for lessons, teacher updates and spoken questions/answers.
+Select it separately from Version 2.9; Standard may sound less natural than Neural.
+
 ## Run
 
 With the backend running, from the repository root:
@@ -69,6 +73,11 @@ opening `index.html` is no longer supported: the HTTP bridge is required.
   checkboxes default to all configured levels and require at least one; only the
   selected levels are requested as `levels` and receive text/audio. Choices
   survive section navigation and unchanged retries reuse the request key.
+  Material marked **Needs source review** can also be selected: explicitly check
+  **Generate from the available content** to create a draft using what was ingested.
+  Missing/rejected visual details remain excluded, and source-coverage warnings
+  stay visible in teacher review. The choice resets for a different source/new
+  course and is recorded as `allow_incomplete_source: true` in the generation request.
   A4 reports actual
   progress every five seconds, pausing on errors. A5 displays real generated
   text, sources and automated review evidence. A7 revises a selected part/level,

@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from upraise_ai.core.teaching import TeachingVersion
 from upraise_ai.schemas.revisions import LessonRevision
 
 
@@ -26,5 +27,5 @@ class ReadyLesson(BaseModel):
     revision: LessonRevision | None = None
     generation_version: Literal['a3-v2'] | None = None
     chunk_plan_id: str | None = None
-    teaching_version: Literal['v1', 'v2', 'v2.9', 'v3', 'v3.1'] | None = None
+    teaching_version: TeachingVersion | None = None
     teaching_policy: str | None = None

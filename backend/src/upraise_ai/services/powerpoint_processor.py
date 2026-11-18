@@ -13,23 +13,27 @@ from xml.etree import ElementTree
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.core.utils import deterministic_uuid, sha256_file
 from upraise_ai.schemas.documents import (
+    BoundingBox,
     ContentQuality,
     DocumentElement,
     ElementType,
     ProcessedDocument,
     QualityStatus,
+    SourceReadiness,
 )
 from upraise_ai.services.aws import aws_session
 from upraise_ai.services.chunking import StructureAwareChunker
 from upraise_ai.services.embeddings import BedrockTitanEmbeddingProvider
 from upraise_ai.services.lesson_pipeline import write_json
 from upraise_ai.services.pdf.parser import LABEL_MAP, DoclingPdfParser
-from upraise_ai.services.pdf.vision import BedrockImageDescriber
+from upraise_ai.services.pdf.vision import SLIDE_VERIFICATION_PROMPT_VERSION, BedrockImageDescriber
+from upraise_ai.services.powerpoint_layout import number_tokens, slide_inventory, text_tokens
+from upraise_ai.services.powerpoint_vision import PowerPointImageDescriber
 from upraise_ai.services.quality import aggregate_quality, quality_summary
 from upraise_ai.services.versions import VersionCatalog
 from upraise_ai.workers.budgets import notify_workload
 
-POWERPOINT_PARSER_VERSION = 'docling-powerpoint-slides-v1'
+POWERPOINT_PARSER_VERSION = 'powerpoint-layout-and-complete-slides-v2'
 PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 
 
@@ -95,31 +99,37 @@ def render_powerpoint(source, destination, settings):
     return rendered
 
 
-def slide_inventory(source):
-    from pptx import Presentation
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
+def native_elements(slide, digest):
+    """Text boxes/groups in geometric order, with native table merges retained."""
+    elements, number = [], slide['slide_number']
+    for region in slide['regions']:
+        paragraphs = region.get('paragraphs', [{'text': region['text'], 'level': 0}])
+        for index, paragraph in enumerate(paragraphs):
+            ref = region['reference'] + f':paragraph:{index}'
+            kind = ElementType.TABLE if region['kind'] == 'table' else (
+                ElementType.TITLE if paragraph['text'] == slide['title'] else
+                ElementType.LIST_ITEM if paragraph['level'] or paragraph.get('bullet') else ElementType.TEXT)
+            box = region['box']
+            element = DocumentElement(element_id=deterministic_uuid(f'{digest}:pptx:{ref}'),
+                element_index=0, element_type=kind, original_text=paragraph['text'], source_text=paragraph['text'],
+                source_reference=ref, heading_path=[f'Slide {number}', slide['title']],
+                bounding_box=BoundingBox(left=box[0], top=box[1], right=box[2], bottom=box[3], coordinate_origin='TOPLEFT'),
+                metadata={'source_format': 'pptx', 'slide_number': number, 'content_layer': 'slide',
+                          'native_level': paragraph['level'], 'coordinate_units': 'normalized_slide',
+                          'shape_reference': region['reference']},
+                quality=ContentQuality(checks=['native_powerpoint_structure', 'geometric_reading_order']))
+            if kind is ElementType.TABLE:
+                element.structured_content = element.source_structured_content = region['html']
+            elements.append(element)
+    return elements
 
-    def has_visual(shapes):
-        for shape in shapes:
-            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                return True
-            if (shape.has_chart or shape.shape_type in {MSO_SHAPE_TYPE.PICTURE, MSO_SHAPE_TYPE.DIAGRAM,
-                    MSO_SHAPE_TYPE.MEDIA, MSO_SHAPE_TYPE.EMBEDDED_OLE_OBJECT}
-                    or (shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE and not shape.has_text_frame)):
-                return True
-            if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE and not shape.text.strip():
-                return True
-        return False
 
-    presentation = Presentation(source)
-    slides = []
-    for number, slide in enumerate(presentation.slides, 1):
-        notes = slide.notes_slide.notes_text_frame if slide.has_notes_slide else None
-        slides.append({'slide_number': number, 'title': slide.shapes.title.text if slide.shapes.title else '',
-                       'hidden': slide._element.get('show', '1') in {'0', 'false'},
-                       'notes': notes.text.strip() if notes is not None else '',
-                       'has_visual': has_visual(slide.shapes)})
-    return slides
+def checked(elements, model_id):
+    for element in elements:
+        element.quality = ContentQuality(status=QualityStatus.AUTO_CHECKED,
+            checks=[*element.quality.checks, 'complete_slide_source_comparison', 'native_text_coverage'],
+            evidence_complete=True, verification_model_id=model_id,
+            verification_prompt_version=SLIDE_VERIFICATION_PROMPT_VERSION)
 
 
 def flag(elements, message):
@@ -154,22 +164,31 @@ class PowerPointProcessor:
                     return document, saved['vectors']
             except (ValueError, KeyError, OSError):
                 pass
-        slides = slide_inventory(source)
+        artifacts = job_dir / 'powerpoint-artifacts'
+        artifacts.mkdir(parents=True, exist_ok=True)
+        slides = slide_inventory(source, artifacts)
         included = {s['slide_number']: s for s in slides if metadata.include_hidden_slides or not s['hidden']}
         if not included:
             raise IngestionError('NO_RETRIEVABLE_CONTENT')
-        artifacts = job_dir / 'powerpoint-artifacts'
-        artifacts.mkdir(parents=True, exist_ok=True)
         notify_workload(progress, 'parse', len(slides))
         progress('parse', .08, 'Reading native PowerPoint slides.')
-        converted = (self.converter or DocumentConverter(allowed_formats=[InputFormat.PPTX])).convert(source)
-        if str(getattr(converted.status, 'value', converted.status)) != 'success':
-            raise IngestionError('POWERPOINT_CONVERSION_INCOMPLETE', status=422)
-        native = converted.document
-        write_json(artifacts / 'docling.json', native.model_dump(mode='json'))
-        by_slide = {n: [] for n in included}
         warnings = []
-        for item, level in native.iterate_items(included_content_layers={ContentLayer.BODY}):
+        native, docling_complete = None, False
+        try:
+            converted = (self.converter or DocumentConverter(allowed_formats=[InputFormat.PPTX])).convert(source)
+            docling_complete = str(getattr(converted.status, 'value', converted.status)) == 'success'
+            native = converted.document
+            write_json(artifacts / 'docling.json', native.model_dump(mode='json'))
+        except Exception:
+            # Docling is an independent extraction check, not the only way to
+            # read a valid deck. Native XML plus full visual comparison remains
+            # available; a failed comparison still blocks generation.
+            native = None
+        if not docling_complete:
+            warnings.append('POWERPOINT_DOCLING_FALLBACK')
+        docling_by_slide = {n: [] for n in included}
+        items = native.iterate_items(included_content_layers={ContentLayer.BODY}) if native is not None else []
+        for item, level in items:
             label = DoclingPdfParser._label_value(getattr(item, 'label', None))
             kind = LABEL_MAP.get(label, ElementType.OTHER)
             text = DoclingPdfParser._text_for_item(item, native, kind)
@@ -177,7 +196,9 @@ class PowerPointProcessor:
                 continue
             numbers = {p.page_no for p in getattr(item, 'prov', [])}
             if len(numbers) != 1:
-                raise IngestionError('POWERPOINT_SLIDE_PROVENANCE_MISSING')
+                docling_complete = False
+                warnings.append('POWERPOINT_DOCLING_PROVENANCE_INCOMPLETE')
+                continue
             number = numbers.pop()
             if number not in included:
                 continue
@@ -190,7 +211,10 @@ class PowerPointProcessor:
             if kind is ElementType.TABLE:
                 element.structured_content = DoclingPdfParser._table_html(item, native)
                 element.source_structured_content = element.structured_content
-            by_slide[number].append(element)
+            docling_by_slide[number].append(element)
+        by_slide = {n: native_elements(s, digest) for n, s in included.items()}
+        write_json(artifacts / 'native-elements.json', {
+            'source_hash': digest, 'slides': {n: [e.model_dump(mode='json') for e in es] for n, es in by_slide.items()}})
         progress('parse', .30, 'Rendering slides for source checks.')
         rendered = (self.renderer or render_powerpoint)(source, artifacts / 'rendered', settings)
         pdf = PdfReader(rendered)
@@ -200,11 +224,11 @@ class PowerPointProcessor:
         describer, verifier = self.describer, self.verifier
         if settings.describe_images and (describer is None or verifier is None):
             session = aws_session(settings)
-            describer = describer or BedrockImageDescriber(session=session, model_id=settings.vision_model_id,
+            describer = describer or PowerPointImageDescriber(session=session, model_id=settings.vision_model_id,
                                                           cache_dir=artifacts / 'cache')
             verifier = verifier or BedrockImageDescriber(session=session, model_id=settings.fidelity_vision_model_id,
                                                         cache_dir=artifacts / 'cache')
-        notify_workload(progress, 'enrich', len(included) * 3)
+        notify_workload(progress, 'enrich', len(included) * 4)
         rendered_doc = pdfium.PdfDocument(str(rendered))
         try:
             for number, slide in included.items():
@@ -218,51 +242,84 @@ class PowerPointProcessor:
                 image.close()
                 bitmap.close()
                 page.close()
-                body = '\n'.join(e.original_text for e in selected)
-                native_tokens = Counter(re.findall(r'\w+', body.casefold()))
+                body = '\n'.join(e.structured_content or e.original_text for e in selected)
+                native_tokens = text_tokens(slide['native_text'])
                 rendered_tokens = Counter(re.findall(r'\w+', (pdf.pages[number - 1].extract_text() or '').casefold()))
                 missing = sum((rendered_tokens - native_tokens).values()) / max(1, sum(rendered_tokens.values()))
-                audit = {'slide_number': number, 'missing_rendered_token_ratio': missing, 'text_source_comparison': None}
+                docling_extra = text_tokens('\n'.join(e.original_text for e in docling_by_slide[number])) - native_tokens
+                audit = {'slide_number': number, 'missing_rendered_token_ratio': missing,
+                         'text_source_comparison': None, 'visual_source_comparison': None,
+                         'native_editable_token_count': sum(native_tokens.values()), 'issues': list(slide['issues'])}
+                audit['evidence_warnings'] = slide['evidence_warnings']
+                warnings.extend(slide['evidence_warnings'])
                 if missing > .05:
-                    flag(selected, 'Native slide text differs from the rendering; inspect the original slide.')
                     warnings.append('POWERPOINT_RENDER_TEXT_MISMATCH')
-                if settings.describe_images and body.strip():
-                    check = verifier.verify_source([image_path], candidate=body,
-                        content_type='table' if any(e.element_type is ElementType.TABLE for e in selected) else 'text',
-                        page_numbers=[number], source_references=[f'slide:{number}'])
-                    audit['text_source_comparison'] = bool(check.passed)
-                    if not check.passed:
-                        flag(selected, 'Slide extraction lacks a passing visual source comparison.')
-                        warnings.append('POWERPOINT_TEXT_REQUIRES_REVIEW')
-                if slide['has_visual'] or not body.strip():
-                    visual = DocumentElement(element_id=deterministic_uuid(f'{digest}:pptx:{number}:visual'),
-                        element_index=0, element_type=ElementType.FIGURE, original_text='',
-                        asset_path=str(image_path), source_reference=f'slide:{number}:visual',
-                        heading_path=[f'Slide {number}', slide['title']],
-                        metadata={'source_format': 'pptx', 'slide_number': number, 'content_layer': 'visual'})
-                    if settings.describe_images:
-                        outcome = describer.describe(image_path, page_number=number, caption=None, heading_path=visual.heading_path)
-                        visual.candidate_description = outcome.description
-                        check = (verifier.verify_source([image_path], candidate=outcome.description, content_type='figure',
-                            page_numbers=[number], source_references=[visual.source_reference]) if outcome.description else None)
-                        if check and check.passed:
-                            visual.derived_description = outcome.description
-                            visual.quality.checks.append('model_source_comparison')
-                            visual.quality.evidence_complete = True
-                    if not visual.derived_description:
-                        flag([visual], 'Visual slide content needs review; no verified description enters retrieval.')
-                        warnings.append('POWERPOINT_VISUAL_REQUIRES_REVIEW')
-                        flag(selected, 'This slide contains visual content that has not been verified.')
-                    selected.append(visual)
+                paths = [image_path, *[p['path'] for p in slide['pictures']]]
+                refs = [f'slide:{number}', *[p['reference'] for p in slide['pictures']]]
+                complete, candidate = False, None
+                needs_visual = slide['has_visual'] or bool(docling_extra) or missing > .05 or not docling_complete
+                if settings.describe_images:
+                    def compare(candidate):
+                        return verifier.verify_source(paths, candidate=candidate, content_type='slide',
+                            page_numbers=[], source_references=refs, slide_numbers=[number] * len(paths))
+                    if body.strip() and not needs_visual:
+                        check = compare(body)
+                        audit['text_source_comparison'] = complete = bool(check.passed)
+                        audit['native_comparison_issues'] = list(getattr(check, 'issues', []))
+                    if not complete and (body.strip() or slide['has_visual']):
+                        outcome = describer.transcribe_slide(paths, slide_number=number, source_references=refs,
+                                                            native_text=body)
+                        candidate = outcome.description
+                        if candidate:
+                            absent = native_tokens - text_tokens(candidate)
+                            absent_numbers = number_tokens(slide['native_text']) - number_tokens(candidate)
+                            audit['missing_candidate_native_tokens'] = sum(absent.values())
+                            if not absent and not absent_numbers:
+                                check = compare(candidate)
+                                audit['visual_source_comparison'] = complete = bool(check.passed)
+                                audit['transcription_comparison_issues'] = list(getattr(check, 'issues', []))
+                                if complete:
+                                    selected = [DocumentElement(
+                                        element_id=deterministic_uuid(f'{digest}:pptx:{number}:verified-slide'),
+                                        element_index=0, element_type=ElementType.TEXT, original_text=candidate,
+                                        source_text=body, candidate_text=candidate, asset_path=str(image_path),
+                                        source_reference=f'slide:{number}:verified-slide',
+                                        heading_path=[f'Slide {number}', slide['title']],
+                                        metadata={'source_format': 'pptx', 'slide_number': number,
+                                                  'content_layer': 'verified_slide', 'native_references': [
+                                                      e.source_reference for e in by_slide[number]]})]
+                            else:
+                                audit['issues'].append('POWERPOINT_TRANSCRIPTION_NATIVE_TEXT_MISSING')
+                        else:
+                            audit['issues'].append(outcome.warning or 'POWERPOINT_TRANSCRIPTION_UNAVAILABLE')
+                else:
+                    audit['issues'].append('POWERPOINT_SOURCE_CHECK_DISABLED')
+                # A genuinely empty slide has no teaching content to verify.
+                if not body.strip() and not slide['has_visual']:
+                    complete = True
+                complete = complete and not slide['issues']
+                if complete:
+                    checked(selected, settings.fidelity_vision_model_id)
+                else:
+                    audit['issues'].append('POWERPOINT_SOURCE_REQUIRES_REVIEW')
+                    flag(selected, 'Complete slide content or layout could not be verified; source review is required.')
+                    if slide['has_visual']:
+                        visual = DocumentElement(element_id=deterministic_uuid(f'{digest}:pptx:{number}:visual'),
+                            element_index=0, element_type=ElementType.FIGURE, original_text='',
+                            candidate_description=candidate, asset_path=str(image_path),
+                            source_reference=f'slide:{number}:visual', heading_path=[f'Slide {number}', slide['title']],
+                            metadata={'source_format': 'pptx', 'slide_number': number, 'content_layer': 'visual'})
+                        flag([visual], 'No complete, verified slide transcription enters retrieval.')
+                        selected.append(visual)
+                        audit['issues'].append('POWERPOINT_VISUAL_REQUIRES_REVIEW')
+                audit['complete'] = complete
+                warnings.extend(audit['issues'])
                 if metadata.include_speaker_notes and slide['notes']:
                     selected.append(DocumentElement(element_id=deterministic_uuid(f'{digest}:pptx:{number}:notes'),
                         element_index=0, element_type=ElementType.TEXT, original_text=slide['notes'], source_text=slide['notes'],
                         source_reference=f'slide:{number}:speaker_notes', heading_path=[f'Slide {number}', slide['title'], 'Speaker notes'],
                         metadata={'source_format': 'pptx', 'slide_number': number, 'content_layer': 'speaker_notes'},
                         quality=ContentQuality(checks=['native_speaker_notes', 'teacher_opted_in'])))
-                if len(body.split()) < 10 and not any(e.derived_description for e in selected):
-                    flag(selected, 'Sparse slide content may not provide enough teaching context.')
-                    warnings.append('POWERPOINT_SPARSE_SLIDE')
                 elements.extend(selected)
                 audits.append(audit)
                 manifest.append({'slide_number': number, 'title': slide['title'], 'hidden': slide['hidden'],
@@ -297,6 +354,9 @@ class PowerPointProcessor:
                 chunk.slide_references = [{'slide_number': number, 'title': slide['title'], 'hidden': slide['hidden'],
                     'includes_speaker_notes': any(e.metadata['content_layer'] == 'speaker_notes'
                                                  for e in slide_elements if e.element_id in chunk.element_ids),
+                    'reading_direction': slide['reading_direction'],
+                    'native_regions': [{'source_reference': r['reference'], 'box': r['box']}
+                                       for r in slide['regions']],
                     'element_refs': [e.source_reference for e in slide_elements if e.element_id in chunk.element_ids]}]
                 chunk.page_numbers = []
                 # Keep a visible distinction between slide content and opted-in presenter notes.
@@ -320,6 +380,9 @@ class PowerPointProcessor:
             pipeline_version=settings.pipeline_signature, embedding_model_id=settings.embedding_model_id,
             embedding_dimension=settings.embedding_dimension, page_count=0, slide_count=len(slides),
             source_block_count=len(slides), elements=elements, chunks=chunks, warnings=list(dict.fromkeys(warnings)),
+            ingestion_readiness=SourceReadiness(status='COMPLETE' if all(a['complete'] for a in audits) else 'INCOMPLETE',
+                blocking_slides=[a['slide_number'] for a in audits if not a['complete']],
+                issues=list(dict.fromkeys(issue for a in audits for issue in a['issues']))),
             quality=aggregate_quality(elements), quality_summary=quality_summary(elements))
         write_json(checkpoint, {'document': document.model_dump(mode='json'), 'vectors': vectors, 'versions': versions})
         return document, vectors

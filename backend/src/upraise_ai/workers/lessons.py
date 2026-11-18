@@ -209,6 +209,12 @@ class LessonWorker:
                     elif job["metadata"].get("teaching_version") == "v2.9":
                         from upraise_ai.services.teaching_v29 import TeachingModelsV29, TeachingSpeechV29
                         models_class, speech_class = TeachingModelsV29, TeachingSpeechV29
+                    elif job["metadata"].get("teaching_version") == "v2.9-light":
+                        from upraise_ai.services.teaching_v29 import (
+                            TeachingModelsV29Light,
+                            TeachingSpeechV29Light,
+                        )
+                        models_class, speech_class = TeachingModelsV29Light, TeachingSpeechV29Light
                     elif job["metadata"].get("teaching_version") == "v3":
                         from upraise_ai.services.teaching_v3 import TeachingModelsV3, TeachingSpeechV3
                         models_class, speech_class = TeachingModelsV3, TeachingSpeechV3
@@ -218,7 +224,7 @@ class LessonWorker:
                     pipeline.models = self.models or models_class(
                         self.settings, diagnostic_dir=self.staging.job_dir(job_id) / "model-diagnostics")
                     if hasattr(pipeline.models, "draft_review_recovery"):
-                        pipeline.models.draft_review_recovery = (job["metadata"].get("teaching_version") in {"v2", "v2.9"}
+                        pipeline.models.draft_review_recovery = (job["metadata"].get("teaching_version") in {"v2", "v2.9", "v2.9-light"}
                             or not bool(job["metadata"].get("revision_request")))
                         if not pipeline.models.draft_review_recovery:
                             pipeline.models.teaching_versions["draft_review_recovery"] = "strict-teacher-revision-v1"

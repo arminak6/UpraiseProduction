@@ -24,6 +24,7 @@
     SLIDE_PREVIEW_UNAVAILABLE: "The original slide preview is unavailable. The retained course text is still readable.",
     POWERPOINT_CONVERSION_FAILED: "The PowerPoint could not be rendered. Check the file and try again.",
     POWERPOINT_INVALID_DOCUMENT: "This file is not a valid .pptx presentation.",
+    POWERPOINT_INGESTION_REVIEW_REQUIRED: "This PowerPoint has incomplete or unchecked content. Choose Generate from the available content to continue with a draft, or upload it again for fresh checks.",
     POWERPOINT_TOO_MANY_SLIDES: "This presentation exceeds the configured slide limit.",
     POWERPOINT_TOO_LARGE: "The presentation is too large. Upload a smaller PowerPoint file.",
     POWERPOINT_ENCRYPTED_UNSUPPORTED: "Password-protected presentations are not supported. Upload an unprotected .pptx copy.",

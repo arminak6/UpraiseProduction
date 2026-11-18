@@ -35,6 +35,7 @@ test('PowerPoint options are not sent for PDF uploads', async t => {
   h.chooseFile('lesson.pptx'); h.click('#include-speaker-notes'); h.chooseFile('lesson.pdf');
   assert.equal(h.find('#powerpoint-options').hidden, true);
   h.submit('#upload-form'); await h.settle();
+  await h.waitFor(() => h.backend.records('POST', '/v1/documents').length > 0);
   assert.equal(h.backend.records('POST', '/v1/documents')[0].rawBody.has('include_speaker_notes'), false);
 });
 
@@ -393,7 +394,32 @@ test("V2.9 learning cards preserve the version recorded in the catalog", async t
   assert.equal(h.find(".course-version").textContent, "Generation V2.9");
 });
 
-for (const version of ["v3", "v3.1"]) test(`${version} review identifies the version and displays its spoken script`, async t => {
+test("V2.9 Light is selectable, survives navigation and has a distinct request from regular V2.9", async t => {
+  const h = await harness(); t.after(h.close);
+  await h.navigate("generate");
+  assert.match(h.find('option[value="v2.9-light"]').textContent, /2\.9 Light.*Polly Standard/);
+  h.input("#teaching-version", "v2.9-light", "change");
+  await h.navigate("materials"); await h.navigate("generate");
+  assert.equal(h.find("#teaching-version").value, "v2.9-light");
+  h.backend.failNext("POST", "/v2/lesson-jobs"); h.submit("#generation-form"); await h.settle();
+  h.input("#teaching-version", "v2.9", "change"); h.submit("#generation-form"); await h.settle();
+  const calls = h.backend.records("POST", "/v2/lesson-jobs");
+  assert.equal(calls[0].body.teaching_version, "v2.9-light");
+  assert.equal(calls[1].body.teaching_version, "v2.9");
+  assert.notEqual(calls[0].headers.get("Idempotency-Key"), calls[1].headers.get("Idempotency-Key"));
+});
+
+test("V2.9 Light learning cards retain the distinct version alongside the shared V2.9 teaching policy", async t => {
+  const h = await harness(backend => {
+    for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
+      lesson.versions = { teaching_version: "v2.9-light", teaching_policy: "teaching-narration-v2.9", polly_engine: "standard" };
+    }
+  }); t.after(h.close);
+  await h.navigate("learn");
+  assert.equal(h.find(".course-version").textContent, "Generation V2.9 Light");
+});
+
+for (const version of ["v2.9-light", "v3", "v3.1"]) test(`${version} review identifies the version and displays its spoken script`, async t => {
   const h = await harness(backend => {
     for (const lesson of Object.values(backend.bundles.get(id(10)).variants)) {
       lesson.versions = { teaching_version: version };
@@ -401,8 +427,9 @@ for (const version of ["v3", "v3.1"]) test(`${version} review identifies the ver
     }
   }); t.after(h.close);
   await h.navigate("review"); h.click('[data-action="review-course"]'); await h.settle();
-  assert.ok(h.find("main").textContent.includes(`Teaching ${version.toUpperCase()}`));
-  assert.ok(h.find("main").textContent.includes(`Spoken explanation · Version ${version.slice(1)}`));
+  const name = version === "v2.9-light" ? "2.9 Light" : version.slice(1);
+  assert.ok(h.find("main").textContent.includes(`Teaching V${name}`));
+  assert.ok(h.find("main").textContent.includes(`Spoken explanation · Version ${name}`));
   assert.match(h.find("main").textContent, /We now continue the explanation/);
 });
 
@@ -1127,4 +1154,65 @@ test("a document restored after page exit cannot resume a closed B1 session", as
   assert.match(h.find("main").textContent, /session was closed/);
   assert.equal(h.document.querySelectorAll(".lesson-card").length, 0);
   assert.equal(h.backend.calls.filter(call => call.path.endsWith("/end")).length, 1);
+});
+test('incomplete PowerPoint can generate available content only after the explicit choice, with stable retries', async t => {
+  const h = await harness(backend => {
+    Object.assign(backend.documents[0], { filename: 'A general deck.pptx',
+      ingestion_readiness: { status: 'INCOMPLETE', blocking_slides: [2, 5], issues: [] } });
+  }); t.after(h.close);
+  assert.match(h.find('tbody tr').textContent, /Needs source review/);
+  assert.match(h.find('tbody tr').textContent, /slides 2, 5/);
+  assert.equal(h.find('[data-action="create-from-material"]').disabled, false);
+  h.click('[data-action="create-from-material"]'); await h.navigate('generate');
+  assert.equal(h.find('#allow-incomplete-source').checked, false);
+  h.submit('#generation-form'); await h.settle();
+  assert.equal(h.backend.records('POST', '/v2/lesson-jobs').length, 0);
+  assert.match(h.find('#generation-error').textContent, /available content/);
+  h.click('#allow-incomplete-source');
+  h.backend.failNext('POST', '/v2/lesson-jobs'); h.submit('#generation-form'); await h.settle();
+  await h.waitFor(() => h.find('#generation-error').textContent.includes('Retry unchanged'));
+  await h.navigate('learn'); await h.navigate('generate');
+  assert.equal(h.find('#allow-incomplete-source').checked, true);
+  h.submit('#generation-form'); await h.settle();
+  const calls = h.backend.records('POST', '/v2/lesson-jobs');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].body.allow_incomplete_source, true);
+  assert.equal(calls[1].body.allow_incomplete_source, true);
+  assert.equal(calls[0].headers.get('Idempotency-Key'), calls[1].headers.get('Idempotency-Key'));
+});
+
+test('legacy PowerPoint requests fresh checks while complete decks remain usable', async t => {
+  const h = await harness(backend => { backend.documents[0].filename = 'Legacy.pptx'; }); t.after(h.close);
+  assert.match(h.find('tbody tr').textContent, /has not had the updated content checks/);
+  assert.equal(h.find('[data-action="create-from-material"]').disabled, false);
+  h.backend.documents[0].ingestion_readiness = { status: 'COMPLETE', blocking_slides: [], issues: [] };
+  h.click('[data-action="refresh-workspace"]');
+  await h.waitFor(() => h.document.querySelector('tbody tr')?.textContent.includes('Ready to use'));
+  assert.match(h.find('tbody tr').textContent, /Ready to use/);
+  h.click('[data-action="create-from-material"]'); await h.navigate('generate');
+  assert.ok(h.find('#generation-form'));
+  assert.equal(h.document.querySelector('#allow-incomplete-source'), null);
+});
+
+test('available-content choice resets when switching sources', async t => {
+  const h = await harness(backend => {
+    Object.assign(backend.documents[0], { filename: 'First.pptx', ingestion_readiness: { status: 'INCOMPLETE', blocking_slides: [1] } });
+    backend.documents.push({ ...backend.documents[0], document_id: id(2), filename: 'Second.pptx' });
+  }); t.after(h.close);
+  await h.navigate('generate'); h.click('#allow-incomplete-source');
+  assert.equal(h.find('#allow-incomplete-source').checked, true);
+  h.click(`input[name="source"][value="${id(2)}"]`); await h.settle();
+  assert.equal(h.find('#allow-incomplete-source').checked, false);
+  h.submit('#generation-form'); await h.settle();
+  assert.equal(h.backend.records('POST', '/v2/lesson-jobs').length, 0);
+});
+
+test('failed, processing and empty sources cannot use available-content generation', async t => {
+  const h = await harness(backend => {
+    const original = backend.documents[0];
+    backend.documents = ['FAILED', 'RUNNING', 'DONE'].map((status, i) => ({ ...original, document_id: id(i + 1), status, chunk_count: 0 }));
+  }); t.after(h.close);
+  assert.ok([...h.document.querySelectorAll('[data-action="create-from-material"]')].every(button => button.disabled));
+  await h.navigate('generate');
+  assert.equal(h.document.querySelector('#generation-form'), null);
 });

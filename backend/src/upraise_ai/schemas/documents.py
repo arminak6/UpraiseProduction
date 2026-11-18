@@ -62,6 +62,14 @@ class AcceptedDocument(BaseModel):
     job_id: str
 
 
+class SourceReadiness(BaseModel):
+    """Content coverage, distinct from job completion or human approval."""
+
+    status: Literal['COMPLETE', 'INCOMPLETE']
+    blocking_slides: list[int] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+
+
 class DocumentSummary(BaseModel):
     document_id: str
     course_id: str
@@ -74,6 +82,7 @@ class DocumentSummary(BaseModel):
     status: str
     progress: float = Field(ge=0, le=1)
     chunk_count: int
+    ingestion_readiness: SourceReadiness | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -230,3 +239,4 @@ class ProcessedDocument(BaseModel):
     warnings: list[str]
     quality: ContentQuality = Field(default_factory=ContentQuality)
     quality_summary: dict[str, int] = Field(default_factory=dict)
+    ingestion_readiness: SourceReadiness | None = None
