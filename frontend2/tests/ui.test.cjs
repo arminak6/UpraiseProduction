@@ -268,7 +268,7 @@ test("uploads real multipart and SHA-256, preserving the retry key across naviga
   assert.match(h.find("tbody tr").textContent, /Processing/);
   h.backend.documents[0].status = "DONE"; h.backend.documents[0].progress = 1;
   await h.runTimers(5000);
-  assert.match(h.find("tbody tr").textContent, /Ready to use/);
+  assert.match(h.find("tbody tr").textContent, /Ready for draft generation/);
 });
 
 test("generation sends inherited source IDs and safely retries the same explicit request", async t => {
@@ -1141,7 +1141,7 @@ test("a late course response cannot replace a newer connection dialog", async t 
   await h.navigate("learn"); h.click('[data-action="preview-course"]'); await h.settle();
   h.click('#modal [data-action="close-modal"]'); h.click('[data-action="connection-info"]');
   resolveResult(h.backend.response(bundle())); await h.settle();
-  assert.equal(h.find("#modal-title").textContent, "Your UPRAISE connection");
+  assert.equal(h.find("#modal-title").textContent, "Demo connection");
 });
 
 test("a document restored after page exit cannot resume a closed B1 session", async t => {
@@ -1187,8 +1187,8 @@ test('legacy PowerPoint requests fresh checks while complete decks remain usable
   assert.equal(h.find('[data-action="create-from-material"]').disabled, false);
   h.backend.documents[0].ingestion_readiness = { status: 'COMPLETE', blocking_slides: [], issues: [] };
   h.click('[data-action="refresh-workspace"]');
-  await h.waitFor(() => h.document.querySelector('tbody tr')?.textContent.includes('Ready to use'));
-  assert.match(h.find('tbody tr').textContent, /Ready to use/);
+  await h.waitFor(() => h.document.querySelector('tbody tr')?.textContent.includes('Ready for draft generation'));
+  assert.match(h.find('tbody tr').textContent, /Ready for draft generation/);
   h.click('[data-action="create-from-material"]'); await h.navigate('generate');
   assert.ok(h.find('#generation-form'));
   assert.equal(h.document.querySelector('#allow-incomplete-source'), null);

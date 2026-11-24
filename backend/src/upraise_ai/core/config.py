@@ -34,17 +34,17 @@ class Settings(BaseSettings):
     enable_formula_enrichment: bool = True
     describe_images: bool = True
     max_pdf_size_mb: int = Field(100, ge=1, le=500)
-    max_pdf_pages: int = Field(500, ge=1, le=5000)
+    max_pdf_pages: int = Field(1000, ge=1, le=5000)
     max_csv_size_mb: int = Field(100, ge=1, le=500)
     max_csv_rows: int = Field(100000, ge=1, le=1000000)
     max_csv_columns: int = Field(256, ge=1, le=10000)
     max_word_size_mb: int = Field(100, ge=1, le=500)
-    max_word_uncompressed_mb: int = Field(500, ge=1, le=2000)
+    max_word_uncompressed_mb: int = Field(1000, ge=1, le=2000)
     word_conversion_timeout_seconds: int = Field(180, ge=10, le=900)
     word_visual_fallback: bool = True
     max_powerpoint_size_mb: int = Field(100, ge=1, le=500)
-    max_powerpoint_uncompressed_mb: int = Field(500, ge=1, le=2000)
-    max_powerpoint_slides: int = Field(500, ge=1, le=5000)
+    max_powerpoint_uncompressed_mb: int = Field(1000, ge=1, le=2000)
+    max_powerpoint_slides: int = Field(1000, ge=1, le=5000)
     powerpoint_conversion_timeout_seconds: int = Field(180, ge=10, le=900)
     chunk_max_tokens: int = Field(600, ge=100, le=2000)
     chunk_overlap_tokens: int = Field(60, ge=0)

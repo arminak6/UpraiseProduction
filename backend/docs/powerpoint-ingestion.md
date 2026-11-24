@@ -125,8 +125,8 @@ existing original-source retention policy. Existing PDF/CSV/Word flows remain.
 ## Limits and deployment
 
 - `UPRAISE_MAX_POWERPOINT_SIZE_MB=100`
-- `UPRAISE_MAX_POWERPOINT_UNCOMPRESSED_MB=500`
-- `UPRAISE_MAX_POWERPOINT_SLIDES=500`
+- `UPRAISE_MAX_POWERPOINT_UNCOMPRESSED_MB=1000`
+- `UPRAISE_MAX_POWERPOINT_SLIDES=1000`
 - `UPRAISE_POWERPOINT_CONVERSION_TIMEOUT_SECONDS=180`
 
 Validation bounds archives to 10,000 unique entries and rejects invalid/encrypted

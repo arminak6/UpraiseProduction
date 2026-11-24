@@ -6,8 +6,9 @@ UPRAISE WP7: A1-A8/A3v2,B1/B2/B4/B5/B7,C1/C2/C3/C5;B3/B6/C4 reserved.
 PG DRAFT text/plans and Qdrant sources persist; A5 staging TTL24h, completed packages
 saved in course_archive/. Moodle owns approval. No stage/commit without request.
 ../Uprise/v2 reference-only; semantic findings/evidence in codex_helper/.
-frontend2/ is the client UI on localhost:8502 via stdlib HTTP bridge; frontend/
-remains a separate Streamlit testbench/player. C3 schema exists.
+frontend2/ is the proof-of-concept UI on localhost:8502 via stdlib HTTP bridge.
+Its copy presents draft generation, review and playback. frontend/ remains a
+separate Streamlit testbench/player. C3 schema exists.
 
 ## Architecture and data flow
 
@@ -137,7 +138,7 @@ remains a separate Streamlit testbench/player. C3 schema exists.
 
 Python3.12/uv,Docling/OCR/CPU Torch,PG17/Qdrant,Streamlit/httpx,LangGraph/Transcribe;
 EU Bedrock GPTOSS/Qwen,Nova/Titan1024D,eu-central-1. Word/Impress LibreOffice/fonts180s;
-python-pptx1.0.2 locked. PPTX100MB/500slides/500MB expanded/10000ZIPentries.
+python-pptx1.0.2 locked. PPTX100MiB/1000slides/1000MiB expanded/10000ZIPentries.
 Polly default neural (V2.9 Light standard),16kHz mono16bit,PCM visemes,
 SSML2800billed/5800total. Local Python3.10
 cannot run backend: use Docker. PS5.1 JSON explicitly UTF8; pipe single-quoted here-strings.
@@ -147,7 +148,8 @@ cannot run backend: use Docker. PS5.1 JSON explicitly UTF8; pipe single-quoted h
 UPRAISE_LESSON_LEVEL_PROFILES ordered JSON1-8profiles; plan level must match,
 batch4/max8. Explicit level array survives PG JSONB ordering. Chunk identity
 (job_id,chunk_id), index0-based; content_unit_id links levels. Source content_hash
-opaque/source_hash realSHA256; PDF100MB/500pages, CSV100MB/100krows/256columns.
+opaque/source_hash realSHA256. Defaults: PDF100MiB/1000pages; Word100MiB/
+1000 rendered pages and DOCX1000MiB expanded; CSV100MiB/100krows/256columns.
 Sources untrusted; parsing does not establish accuracy.
 Logs/audit omit text/scores/audio/prompts/private provider errors; optional local
 diagnostics removed by A6/TTL or successful replacement. Ownership/source/leases/
@@ -176,6 +178,10 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 ## User notes (preserve verbatim)
 
 ## Last verified
+
+2026-11-18: Synced frontend2 proof-of-concept copy and sidebar changes. Checked
+frontend2/index.html, app.js and UI assertions against the transfer checkout.
+Verified ingestion defaults in compose.yaml, .env.example and core/config.py.
 
 2026-11-13: compose.yaml, Dockerfiles/.dockerignore for backend/frontend/frontend2,
 root README/.env.example/.gitignore, local-testing.md and AWS credential loader

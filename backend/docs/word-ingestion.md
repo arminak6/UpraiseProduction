@@ -46,8 +46,8 @@ Internal `[p. N]` fields are logical source slots; public text uses
 Speech removes these markers. B4 retains Word block/reference metadata. Mixed
 PDF/CSV/Word source requests use each format's own windows and citations.
 
-Limits: 100 MB upload, 500 MB total expanded DOCX data, 10,000 archive entries,
-180 seconds per conversion and the configured maximum rendered PDF pages.
+Defaults: 100 MiB upload, 1,000 MiB total expanded DOCX data, 10,000 archive entries,
+180 seconds per conversion and 1,000 rendered PDF pages (`UPRAISE_MAX_PDF_PAGES`).
 `UPRAISE_MAX_WORD_SIZE_MB`, `UPRAISE_MAX_WORD_UNCOMPRESSED_MB` and
 `UPRAISE_WORD_CONVERSION_TIMEOUT_SECONDS` are included in pipeline identity/C5.
 Encrypted archives, macro payloads and invalid OOXML are rejected. Archive
