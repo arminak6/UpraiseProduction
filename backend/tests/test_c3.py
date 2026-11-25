@@ -39,7 +39,7 @@ def test_c3_admin_scope_course_claim_and_local_opt_in_are_required():
     global_change = KillSwitchInput(scope="global", feature="all", enabled=True)
     course_change = KillSwitchInput(scope="course_id", course_id="foreign", feature="answers", enabled=True)
     for data, principal in (
-        (global_change, Principal("mw", (), frozenset({"jobs:write", "jobs:read"}))),
+        (global_change, Principal("mw", ())),
         (course_change, Principal("admin", ("allowed",), frozenset({"admin:operations"}))),
         (global_change, Principal("local", (), frozenset({"admin:operations"}), local_test=True)),
     ):
@@ -52,7 +52,7 @@ def test_c3_http_denies_normal_callers_and_local_admin_is_not_enabled_by_default
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_settings] = lambda: Settings(jobs_dsn="", audit_dsn="")
-    app.dependency_overrides[ingress] = lambda: Principal("mw", (), frozenset({"jobs:write"}))
+    app.dependency_overrides[ingress] = lambda: Principal("mw", ())
     with TestClient(app) as client:
         assert client.put("/v1/admin/kill-switch", json={"scope": "global", "feature": "all", "enabled": True}).status_code == 403
     assert not Settings().operations_local_admin

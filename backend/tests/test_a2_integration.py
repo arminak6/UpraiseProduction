@@ -25,8 +25,7 @@ pytest_plugins = ["test_a1_integration"]
 @contextmanager
 def api(integration):
     settings, jobs, audit, vectors, worker, original = integration
-    principal = Principal(original.client_id, ("course-1", "course-2"),
-                          frozenset({"documents:read", "documents:write", "jobs:read"}))
+    principal = Principal(original.client_id, ("course-1", "course-2"))
     app.dependency_overrides[ingress] = lambda: principal
     try:
         with TestClient(app) as client:
@@ -157,10 +156,6 @@ def test_delete_permissions_do_not_touch_other_clients_or_courses(integration):
                        Principal(principal.client_id, ("course-2",), principal.scopes)):
             app.dependency_overrides[ingress] = lambda denied=denied: denied
             assert client.delete(path).status_code == 404
-        app.dependency_overrides[ingress] = lambda: Principal(principal.client_id, principal.courses, frozenset())
-        assert client.delete(path).status_code == 403
-        assert client.get("/v1/documents", params={"course_id": "course-1"}).status_code == 403
-        assert client.get("/v1/documents").status_code == 403
     assert integration[1].get(target["job_id"])["deletion_requested_at"] is None
 
 

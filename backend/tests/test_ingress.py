@@ -19,7 +19,7 @@ def test_jwt_test_mode_requires_development_and_cannot_skip_authentication():
         Settings(environment="development", local_test_mode=True, local_jwt_test_mode=True)
 
 
-def test_oauth_signature_expiry_scope_and_mtls_gateway(monkeypatch):
+def test_oauth_signature_expiry_and_mtls_gateway_without_scopes(monkeypatch):
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     monkeypatch.setattr(
         "upraise_ai.guards.ingress.jwks_client",
@@ -41,7 +41,6 @@ def test_oauth_signature_expiry_scope_and_mtls_gateway(monkeypatch):
         "exp": int(time.time()) + 60,
         "client_id": "middleware",
         "upraise_courses": ["25"],
-        "scope": "documents:write jobs:read",
     }
 
     def request(token, peer="10.0.0.2", certificate="verified-cert"):
@@ -63,7 +62,7 @@ def test_oauth_signature_expiry_scope_and_mtls_gateway(monkeypatch):
     principal = ingress(request(token), settings)
     assert principal.client_id == "middleware"
     principal.require_course("25")
-    principal.require_scope("documents:write")
+    assert not principal.scopes
     jwt_test = Settings(
         environment="development", local_jwt_test_mode=True, local_test_mode=False,
         oauth_issuer=settings.oauth_issuer, oauth_audience=settings.oauth_audience,

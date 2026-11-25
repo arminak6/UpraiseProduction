@@ -71,8 +71,7 @@ def lesson(integration):
     speech = LessonSpeech(settings, models, client=Polly(), converter=lambda *a: "x plus one")
     worker = LessonWorker(settings, jobs=jobs, documents=documents, audit=audit, vectors=vectors,
                           models=models, speech=speech)
-    principal = Principal(original.client_id, ("course-1",),
-                          frozenset({"lessons:write", "jobs:read", "jobs:write", "documents:read", "documents:write"}))
+    principal = Principal(original.client_id, ("course-1",))
     service = LessonService(settings, jobs, documents, ingestion.staging, audit)
     try:
         yield settings, jobs, worker, service, principal, models

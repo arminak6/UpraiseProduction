@@ -56,7 +56,7 @@ def controls(integration):
     audit.migrate()
     repository = ControlsRepository(settings)
     service = ControlService(settings, repository=repository, catalog=VersionCatalog(settings))
-    principal = Principal("admin", ("course-1",), frozenset({"admin:operations", "jobs:read"}))
+    principal = Principal("admin", ("course-1",), frozenset({"admin:operations"}))
     try:
         yield SimpleNamespace(**locals())
     finally:

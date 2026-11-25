@@ -70,16 +70,18 @@ class WorkspaceHandler(BrowserLogin, UpraiseHandler):
     def proxy(self):
         if not self.trusted_request():
             return
-        self.account = self.user()
-        if not self.account:
+        account = self.user()
+        if not account:
             self.json_response(401, {"detail": "DEMO_LOGIN_REQUIRED"})
+            return
+        if account["read_only"] and self.command not in {"GET", "HEAD"}:
+            self.json_response(403, {"detail": "DEMO_ACCESS_DENIED"})
             return
         super().proxy()
 
     def bearer_token(self):
         try:
-            return issue_token(self.server.client, self.server.issuer, self.server.client_secret,
-                               self.account["scope"])
+            return issue_token(self.server.client, self.server.issuer, self.server.client_secret)
         except httpx.HTTPError as error:
             raise URLError("Demo token issuer unavailable") from error
 

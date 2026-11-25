@@ -47,7 +47,6 @@ def ready(request: Request, response: Response):
 def service_status(request: Request, response: Response,
                    course_id: str | None = Query(None, min_length=1, max_length=120),
                    principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
     if course_id is not None:
         if not course_id.strip() or course_id != course_id.strip():
             raise HTTPException(422, "INVALID_COURSE_ID")
@@ -56,9 +55,9 @@ def service_status(request: Request, response: Response,
     return monitor(request).status(course_id)
 
 
-@router.get("/v1/version", response_model=VersionStatus, summary="C5 - Deployed model, prompt and pipeline versions")
-def deployed_version(request: Request, response: Response, principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
+@router.get("/v1/version", response_model=VersionStatus, dependencies=[Depends(ingress)],
+            summary="C5 - Deployed model, prompt and pipeline versions")
+def deployed_version(request: Request, response: Response):
     catalog = getattr(request.app.state, "versions", None)
     if catalog is None:
         raise HTTPException(503, "VERSION_METADATA_NOT_CONFIGURED")

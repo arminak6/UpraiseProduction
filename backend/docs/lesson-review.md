@@ -2,7 +2,7 @@
 
 Frontend V2's **Review courses** section reads durable teaching text independently
 of A5's temporary JSON/WAV artifacts. It does not extend expiry or restore audio.
-Both endpoints use the existing ingress, `jobs:read` scope, client/course ownership
+Both endpoints use the existing ingress, client/course ownership
 checks, source activation checks and `Cache-Control: no-store`.
 
 `GET /v1/lesson-reviews?course_id=...&limit=100&offset=0` lists one entry per stable

@@ -34,7 +34,6 @@ def main():
         server.issuer = issuer.issuer
         server.signing_key = issuer.signing_key
         server.client_secret = issuer.client_secret
-        server.scopes = {"documents:read"}
 
         print(f"UPRAISE curl demo listening on {args.host}:{server.server_port}", flush=True)
         print(f"Test client ID: {CLIENT_ID}", flush=True)

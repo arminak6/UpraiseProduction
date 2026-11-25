@@ -210,8 +210,6 @@ def test_b7_permissions_unknown_level_and_invalid_input_do_not_mutate_lesson(int
         assert client.delete(f"/v1/lesson-jobs/{uuid4()}").status_code == 404
         assert client.delete(endpoint(row), params={"learner_level": "../../intermediate"}).status_code == 422
         assert client.delete(endpoint(row), params={"learner_level": "unknown"}).status_code == 404
-        app.dependency_overrides[ingress] = lambda: Principal(lesson[4].client_id, lesson[4].courses, frozenset({"jobs:read"}))
-        assert client.delete(endpoint(row)).status_code == 403
-        app.dependency_overrides[ingress] = lambda: Principal("another-owner", lesson[4].courses, frozenset({"lessons:write"}))
+        app.dependency_overrides[ingress] = lambda: Principal("another-owner", lesson[4].courses)
         assert client.delete(endpoint(row)).status_code == 404
     assert lesson[1].get(row["job_id"])["result"] == before and not lesson[1].pending_content_deletion(row["job_id"])

@@ -42,10 +42,9 @@ def test_opt_in_allows_local_testing_courses_and_limited_scopes(peer):
     principal = ingress(request(peer), settings)
     assert principal.client_id == "local-test-client" and principal.local_test
     principal.require_course("any-course-entered-in-the-testbench")
-    for scope in ("documents:read", "documents:write", "jobs:read", "jobs:write"):
-        principal.require_scope(scope)
+    assert not principal.scopes
     with pytest.raises(HTTPException):
-        principal.require_scope("admin:write")
+        principal.require_scope("admin:operations")
     real = Principal("middleware", ("allowed",), frozenset())
     assert not real.can_access_course("other")
     assert not Principal("middleware", ("*",), frozenset()).can_access_course("other")

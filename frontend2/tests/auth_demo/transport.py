@@ -132,10 +132,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if 0 < length <= 4096 else None
 
 
-def sign_access_token(key, issuer, scope, *, lifetime=TOKEN_TTL):
+def sign_access_token(key, issuer, *, lifetime=TOKEN_TTL):
     return jwt.encode({
         "iss": issuer, "aud": AUDIENCE, "client_id": CLIENT_ID,
-        "exp": int(time.time()) + lifetime, "scope": scope, "upraise_courses": [COURSE],
+        "exp": int(time.time()) + lifetime, "upraise_courses": [COURSE],
     }, key, algorithm="RS256", headers={"kid": KEY_ID})
 
 
@@ -164,11 +164,10 @@ class TokenIssuer(Handler):
         if form.get("grant_type") != ["client_credentials"]:
             self.json_response(400, {"error": "unsupported_grant_type"})
             return
-        scopes = form.get("scope", [])
-        if len(scopes) != 1 or not scopes[0].split() or not set(scopes[0].split()) <= self.server.scopes:
+        if "scope" in form:
             self.json_response(400, {"error": "invalid_scope"})
             return
-        token = sign_access_token(self.server.signing_key, self.server.issuer, scopes[0])
+        token = sign_access_token(self.server.signing_key, self.server.issuer)
         self.json_response(200, {"access_token": token, "token_type": "Bearer", "expires_in": TOKEN_TTL})
 
 

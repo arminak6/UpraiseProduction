@@ -96,13 +96,12 @@ def test_a5_expiry_revokes_both_endpoints_before_physical_cleanup(integration, l
     assert integration[3].document_count(doc["document_id"], "course-1") > 0
 
 
-def test_a5_requires_read_scope_and_hides_other_clients_jobs(integration, lesson):
+def test_a5_hides_other_clients_jobs(integration, lesson):
     target, _, result = completed(integration, lesson)
     paths = [f"/v1/jobs/{target['job_id']}/result", result.chunks[0].audio_url]
     principal = lesson[4]
     with api(integration, lesson) as client:
         for candidate, status in [
-            (Principal(principal.client_id, principal.courses, frozenset({"lessons:write"})), 403),
             (Principal("other-client", principal.courses, principal.scopes), 404),
             (Principal(principal.client_id, ("other-course",), principal.scopes), 404),
         ]:

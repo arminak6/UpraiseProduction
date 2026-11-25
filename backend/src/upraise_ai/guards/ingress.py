@@ -14,9 +14,6 @@ LOCAL_JWT_CLIENT_ID = "auth-demo-middleware"
 LOCAL_JWT_ISSUER = "urn:upraise:local-jwt-test"
 LOCAL_JWT_AUDIENCE = "upraise-local-api"
 LOCAL_JWT_LIFETIME = 3600
-LOCAL_TEST_SCOPES = frozenset({
-    "documents:read", "documents:write", "lessons:write", "jobs:read", "jobs:write", "sessions:write",
-})
 
 
 class LocalJWTIssuer:
@@ -24,13 +21,12 @@ class LocalJWTIssuer:
         self._signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         self.public_key = self._signing_key.public_key()
 
-    def issue(self, scopes: list[str]) -> str:
+    def issue(self) -> str:
         return jwt.encode({
             "iss": LOCAL_JWT_ISSUER,
             "aud": LOCAL_JWT_AUDIENCE,
             "client_id": LOCAL_JWT_CLIENT_ID,
             "exp": int(time.time()) + LOCAL_JWT_LIFETIME,
-            "scope": " ".join(scopes),
             "upraise_courses": ["demo-course"],
         }, self._signing_key, algorithm="RS256")
 
@@ -39,7 +35,7 @@ class LocalJWTIssuer:
 class Principal:
     client_id: str
     courses: tuple[str, ...]
-    scopes: frozenset[str]
+    scopes: frozenset[str] = frozenset()
     local_test: bool = False
 
     def can_access_course(self, course_id: str) -> bool:
@@ -100,9 +96,7 @@ def ingress(
         require_local_peer(request)
     if settings.local_test_mode:
         request.state.auth_mode = "local-test"
-        scopes = LOCAL_TEST_SCOPES
-        if settings.operations_local_admin:
-            scopes = scopes | {"admin:operations"}
+        scopes = frozenset({"admin:operations"}) if settings.operations_local_admin else frozenset()
         return Principal(
             "local-test-client", (), scopes,
             local_test=True,

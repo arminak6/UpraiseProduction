@@ -63,8 +63,7 @@ def documents(integration, lesson, sessions=None):
 
 @contextmanager
 def api(integration, lesson, sessions=None):
-    principal = Principal(lesson[4].client_id, ("course-1", "course-2"),
-                          frozenset({"documents:read", "documents:write", "jobs:read", "lessons:write"}))
+    principal = Principal(lesson[4].client_id, ("course-1", "course-2"))
     app.dependency_overrides[ingress] = lambda: principal
     try:
         with TestClient(app) as client:
@@ -194,8 +193,7 @@ def test_course_delete_permissions_unknown_and_malformed(integration, lesson):
     row = seed(lesson, [doc])
     with api(integration, lesson) as (client, principal):
         for denied, code in ((Principal("other", principal.courses, principal.scopes), 404),
-                             (Principal(principal.client_id, ("course-2",), principal.scopes), 403),
-                             (Principal(principal.client_id, principal.courses, frozenset()), 403)):
+                             (Principal(principal.client_id, ("course-2",), principal.scopes), 403)):
             app.dependency_overrides[ingress] = lambda denied=denied: denied
             assert client.delete("/v1/courses/course-1").status_code == code
         app.dependency_overrides[ingress] = lambda: principal

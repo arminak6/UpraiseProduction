@@ -30,9 +30,7 @@ Course/activity/source metadata and PDF support limits still
 apply. AWS/PDF extraction, PostgreSQL, Qdrant and audit run normally.
 
 The backend assigns the fixed `local-test-client` identity, allows any course ID
-entered for these tests, and grants only documents:read, documents:write,
-lessons:write, jobs:read, jobs:write and sessions:write. Client ownership remains enforced: local mode does not expose or
-delete documents belonging to another Middleware client. Requests must arrive
+entered for these tests, and enforces client ownership. Requests must arrive
 from a loopback/private network peer (including the Compose frontend container),
 using the actual socket address, not forwarded headers. The existing API and
 Streamlit port mappings bind to 127.0.0.1.
@@ -77,19 +75,20 @@ The client ID is `auth-demo-middleware`. When curl prompts for the password,
 enter the value of `UPRAISE_JWT_TEST_CLIENT_SECRET` from `.env`.
 
 ```powershell
-$jwt = (curl.exe -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8000/oauth/token | ConvertFrom-Json).access_token
+$jwt = (curl.exe -fsS -u auth-demo-middleware -d "grant_type=client_credentials" http://127.0.0.1:8000/oauth/token | ConvertFrom-Json).access_token
 curl.exe -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8000/v1/documents
 ```
 
 On Ubuntu, use `curl` and Python 3 to read the JSON response.
 
 ```sh
-jwt=$(curl -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8000/oauth/token | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
+jwt=$(curl -fsS -u auth-demo-middleware -d "grant_type=client_credentials" http://127.0.0.1:8000/oauth/token | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
 curl -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8000/v1/documents
 ```
 
 Each JWT lasts one hour, and a backend restart invalidates existing test
-tokens. Request the scopes needed by the [API route](api-reference.md#service-jwt).
+tokens. Send only `grant_type=client_credentials` in the form. Regular APIs
+use the authenticated client identity and course access.
 The test client can access its own resources in `demo-course`. Materials from
 JWT-free Streamlit testing belong to the separate `local-test-client` identity.
 The Streamlit test UI accepts a JWT in its **Bearer token** field.

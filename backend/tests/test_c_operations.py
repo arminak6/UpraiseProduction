@@ -203,13 +203,11 @@ def test_c1_public_c2_authenticated_scoped_and_returns_200_for_disabled_features
     app = FastAPI()
     app.include_router(router)
     app.state.operations = operational.monitor
-    denied = Principal("mw", ("allowed",), frozenset())
-    app.dependency_overrides[ingress] = lambda: denied
+    app.dependency_overrides[ingress] = lambda: Principal("mw", ("allowed",))
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "alive"}
         assert client.get("/ready").status_code == 200
-        assert client.get("/v1/status").status_code == 403
-        app.dependency_overrides[ingress] = lambda: Principal("mw", ("allowed",), frozenset({"jobs:read"}))
+        assert client.get("/v1/status").status_code == 200
         assert client.get("/v1/status?course_id=foreign").status_code == 403
         for course in ("", " ", "x"*121):
             assert client.get("/v1/status", params={"course_id": course}).status_code == 422

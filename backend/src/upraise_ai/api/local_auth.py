@@ -11,7 +11,6 @@ from upraise_ai.core.config import Settings, get_settings
 from upraise_ai.guards.ingress import (
     LOCAL_JWT_CLIENT_ID,
     LOCAL_JWT_LIFETIME,
-    LOCAL_TEST_SCOPES,
     require_local_peer,
 )
 
@@ -48,12 +47,11 @@ async def local_access_token(request: Request, settings: Settings = Depends(get_
         return JSONResponse({"error": "invalid_request"}, status_code=400, headers=NO_CACHE)
     if form.get("grant_type") != ["client_credentials"]:
         return JSONResponse({"error": "unsupported_grant_type"}, status_code=400, headers=NO_CACHE)
-    requested = form.get("scope", ["documents:read"])
-    scopes = requested[0].split()
-    if len(requested) != 1 or not scopes or not LOCAL_TEST_SCOPES.issuperset(scopes):
+    if "scope" in form:
         return JSONResponse({"error": "invalid_scope"}, status_code=400, headers=NO_CACHE)
 
-    token = request.app.state.local_jwt_issuer.issue(scopes)
+    token = request.app.state.local_jwt_issuer.issue()
     return JSONResponse(
-        {"access_token": token, "token_type": "Bearer", "expires_in": LOCAL_JWT_LIFETIME}, headers=NO_CACHE,
+        {"access_token": token, "token_type": "Bearer", "expires_in": LOCAL_JWT_LIFETIME},
+        headers=NO_CACHE,
     )

@@ -25,12 +25,11 @@ from transport import (
 )
 
 ACCESS_TOKEN = Path("/tmp/upraise-access-token")
-SCOPES = "documents:read documents:write jobs:read jobs:write lessons:write sessions:write"
 logger = logging.getLogger(__name__)
 
 
 def save_access_token(client, issuer):
-    token = issue_token(client, issuer.issuer, issuer.client_secret, SCOPES)
+    token = issue_token(client, issuer.issuer, issuer.client_secret)
     pending = ACCESS_TOKEN.with_suffix(".tmp")
     pending.write_text(token, encoding="ascii")
     pending.chmod(0o600)
@@ -55,10 +54,9 @@ def main():
         certificates(directory)
         issuer = DemoServer(("127.0.0.1", 0), TokenIssuer, server_tls(directory))
         issuer.issuer = f"https://127.0.0.1:{issuer.server_port}"
-        test_secret = os.environ.get("UPRAISE_JWT_TEST_CLIENT_SECRET", "")
+        test_secret = os.environ.pop("UPRAISE_JWT_TEST_CLIENT_SECRET", "")
         issuer.client_secret = test_secret or secrets.token_urlsafe(32)
         issuer.signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        issuer.scopes = set(SCOPES.split())
         serve(stack, issuer)
         if test_secret:
             # Compose publishes this HTTP listener to the host's loopback only.
@@ -66,7 +64,6 @@ def main():
             token_endpoint.issuer = issuer.issuer
             token_endpoint.client_secret = issuer.client_secret
             token_endpoint.signing_key = issuer.signing_key
-            token_endpoint.scopes = issuer.scopes
             serve(stack, token_endpoint)
         os.environ.update({
             "SSL_CERT_FILE": str(directory / "ca.crt"),

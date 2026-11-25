@@ -39,8 +39,7 @@ def completed(integration, lesson, **updates):
 def b1_api(integration, lesson, *, local=True, principal=None, **config):
     settings = lesson[0].model_copy(update={"environment": "development" if local else "production",
                                            "local_test_mode": local, **config})
-    principal = principal or replace(lesson[4], local_test=local,
-                                     scopes=lesson[4].scopes | {"sessions:write"})
+    principal = principal or replace(lesson[4], local_test=local)
     with api(integration, lesson) as client:
         app.dependency_overrides[ingress] = lambda: principal
         app.dependency_overrides[get_settings] = lambda: settings
@@ -171,12 +170,11 @@ def test_session_input_cannot_select_different_context(integration, lesson, upda
     assert not events(lesson, target["job_id"])
 
 
-def test_scope_client_and_course_isolation(integration, lesson):
+def test_session_client_and_course_isolation(integration, lesson):
     target, _, _, body = completed(integration, lesson)
     for principal, status in [
-        (replace(lesson[4], scopes=lesson[4].scopes), 403),
-        (replace(lesson[4], client_id="other", local_test=True, scopes=lesson[4].scopes | {"sessions:write"}), 404),
-        (replace(lesson[4], courses=("other",), scopes=lesson[4].scopes | {"sessions:write"}), 403),
+        (replace(lesson[4], client_id="other", local_test=True), 404),
+        (replace(lesson[4], courses=("other",)), 403),
     ]:
         with b1_api(integration, lesson, principal=principal) as client:
             response = client.post("/v1/sessions", json=body)

@@ -18,7 +18,6 @@ def start_session(data: SessionInput, request: Request, response: Response,
                   principal: Principal = Depends(ingress), settings=Depends(get_settings),
                   session_token: str | None = Header(None, alias="X-UPRAISE-Session-JWT",
                                                      description="Signed Middleware session assertion; optional only for local preview")):
-    principal.require_scope("sessions:write")
     lessons = getattr(request.app.state, "lessons", None)
     if lessons is None:
         raise HTTPException(503, "LESSON_STORAGE_NOT_CONFIGURED")
@@ -35,7 +34,6 @@ def start_session(data: SessionInput, request: Request, response: Response,
 def chunk_end(session_id: UUID, data: ChunkEndInput, request: Request, response: Response,
               principal: Principal = Depends(ingress), settings=Depends(get_settings),
               session_token: str | None = Header(None, alias="X-UPRAISE-Session-JWT")):
-    principal.require_scope("sessions:write")
     lessons = getattr(request.app.state, "lessons", None)
     if lessons is None:
         raise HTTPException(503, "LESSON_STORAGE_NOT_CONFIGURED")
@@ -51,7 +49,6 @@ def chunk_end(session_id: UUID, data: ChunkEndInput, request: Request, response:
 def end_session(session_id: UUID, data: EndSessionInput, request: Request,
                 principal: Principal = Depends(ingress), settings=Depends(get_settings),
                 session_token: str | None = Header(None, alias="X-UPRAISE-Session-JWT")):
-    principal.require_scope("sessions:write")
     lessons = getattr(request.app.state, "lessons", None)
     if lessons is None:
         raise HTTPException(503, "LESSON_STORAGE_NOT_CONFIGURED")

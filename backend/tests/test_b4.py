@@ -137,7 +137,7 @@ def runtime():
     stt = SimpleNamespace(transcribe=lambda *args: stt_calls.append(args) or "Spiegalo in altre parole")
     service = InterruptService(settings, lessons, store, vectors, teacher_factory=lambda *args: teacher,
         speech_factory=Speech, stt=stt, embeddings=SimpleNamespace(embed_query=lambda text: [1, 0]))
-    principal = Principal("client", (), frozenset({"sessions:write"}), local_test=True)
+    principal = Principal("client", (), local_test=True)
     data = InterruptInput(request_id=uuid4(), chunk_id=chunk_id, text="Can you explain in other words?")
     return SimpleNamespace(**locals())
 

@@ -49,7 +49,7 @@ def integration(tmp_path):
     audit = AuditRepository(settings.audit_dsn.get_secret_value())
     vectors = VectorStore(settings.qdrant_url, schema, 256)
     worker = IngestionWorker(settings, jobs, audit, vectors, processor(settings))
-    principal = Principal("test-middleware", ("course-1",), frozenset({"documents:write", "jobs:read"}))
+    principal = Principal("test-middleware", ("course-1",))
     try:
         yield settings, jobs, audit, vectors, worker, principal
     finally:

@@ -83,9 +83,9 @@ class Accounts:
             self.sessions.pop(token, None)
 
 
-def issue_token(client, issuer, secret, scope):
+def issue_token(client, issuer, secret):
     response = client.post(issuer + "/oauth/token", headers={"Authorization": basic_auth(secret)},
-                           data={"grant_type": "client_credentials", "scope": scope})
+                           data={"grant_type": "client_credentials"})
     response.raise_for_status()
     return response.json()["access_token"]
 
@@ -161,8 +161,11 @@ class BrowserMiddleware(BrowserLogin, Handler):
             if not user:
                 self.json_response(401, {"detail": "DEMO_LOGIN_REQUIRED"})
                 return
+            if self.path != user["standalone_route"]:
+                self.json_response(403, {"endpoint": f"GET {route}", "body": {"detail": "DEMO_ACCESS_DENIED"}})
+                return
             try:
-                token = issue_token(self.server.client, self.server.issuer, self.server.client_secret, user["scope"])
+                token = issue_token(self.server.client, self.server.issuer, self.server.client_secret)
                 result = self.server.client.get(self.server.gateway + route,
                                                 headers={"Authorization": f"Bearer {token}"})
             except httpx.HTTPError:
@@ -236,16 +239,12 @@ def demo(host, port, *, workspace=False):
         directory = Path(stack.enter_context(TemporaryDirectory(prefix="upraise-auth-demo-")))
         fingerprint = certificates(directory)
         users = json.loads((HERE / "users.json").read_text(encoding="utf-8"))
-        if workspace:
-            users["teacher"]["scope"] = "documents:read documents:write jobs:read jobs:write lessons:write sessions:write"
-            users["operator"]["scope"] = "documents:read jobs:read"
         passwords = {username: secrets.token_urlsafe(12) for username in users}
         secret = secrets.token_urlsafe(32)
         issuer = DemoServer(("127.0.0.1", 0), TokenIssuer, server_tls(directory))
         issuer.issuer = f"https://127.0.0.1:{issuer.server_port}"
         issuer.signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         issuer.client_secret = secret
-        issuer.scopes = {scope for user in users.values() for scope in user["scope"].split()}
         serve(stack, issuer)
 
         backend = backend_client(issuer.issuer, fingerprint, directory / "ca.crt", workspace=workspace)

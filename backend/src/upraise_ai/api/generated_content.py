@@ -17,7 +17,6 @@ router = APIRouter(tags=["B - Generated content"])
 def delete_generated_content(lesson_job_id: UUID, request: Request, principal: Principal = Depends(ingress),
                              learner_level: str | None = Query(None, min_length=1, max_length=40,
                                                                pattern=r"^[a-z][a-z0-9_]*$")):
-    principal.require_scope("lessons:write")
     lessons, job_id = service(request), str(lesson_job_id)
     pending = begin_generated_deletion(lessons, job_id, learner_level, principal)
     if pending:

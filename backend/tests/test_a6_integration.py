@@ -28,8 +28,7 @@ pytest_plugins = ["test_a1_integration"]
 @contextmanager
 def api(integration):
     settings, jobs, audit, vectors, worker, original = integration
-    principal = Principal(original.client_id, ("course-1",),
-                          frozenset({"documents:read", "documents:write", "jobs:read", "jobs:write"}))
+    principal = Principal(original.client_id, ("course-1",))
     app.dependency_overrides[ingress] = lambda: principal
     try:
         with TestClient(app) as client:
@@ -277,17 +276,13 @@ def test_authorization_validation_state_conflicts_and_a2_independence(integratio
     worker.process(jobs.claim(settings.lease_seconds))
     foreign = submit(integration, client_id="other-client")
     another_course = submit(integration, course="course-2")
-    with api(integration) as (client, principal):
+    with api(integration) as (client, _):
         path = "/v1/jobs/" + queued["job_id"]
         assert client.delete(path).status_code == 422
         assert client.delete(path, params={"reason": "invalid"}).status_code == 422
         assert client.delete("/v1/jobs/invalid", params={"reason": "CANCEL"}).status_code == 422
         for job_id in (str(uuid4()), foreign["job_id"], another_course["job_id"]):
             assert client.delete("/v1/jobs/" + job_id, params={"reason": "CANCEL"}).status_code == 404
-        app.dependency_overrides[ingress] = lambda: Principal(principal.client_id, principal.courses,
-                                                            frozenset({"jobs:read"}))
-        assert client.delete(path, params={"reason": "CANCEL"}).status_code == 403
-        app.dependency_overrides[ingress] = lambda: principal
         assert client.delete(path, params={"reason": "RECEIVED"}).status_code == 409
         assert client.delete("/v1/jobs/" + done["job_id"], params={"reason": "CANCEL"}).status_code == 409
         assert jobs.get(queued["job_id"])["cleanup_requested_at"] is None
@@ -301,7 +296,7 @@ def test_authorization_validation_state_conflicts_and_a2_independence(integratio
 def test_concurrent_cancel_audits_once_other_job_untouched(integration):
     settings, jobs, audit, vectors, worker, original = integration
     target, other = submit(integration), submit(integration)
-    principal = Principal(original.client_id, original.courses, frozenset({"jobs:write"}))
+    principal = Principal(original.client_id, original.courses)
 
     def cancel(_):
         try:

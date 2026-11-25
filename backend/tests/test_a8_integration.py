@@ -89,9 +89,8 @@ def test_a8_policy_is_scoped_to_the_listed_level_and_omits_mixed_revisions(integ
 @pytest.mark.parametrize("principal_change, expected", [
     ({"client_id": "another-client"}, 200),
     ({"courses": ()}, 200),
-    ({"scopes": frozenset({"lessons:write"})}, 403),
 ])
-def test_a8_enforces_client_course_and_read_scope(integration, lesson, principal_change, expected):
+def test_a8_enforces_client_and_course(integration, lesson, principal_change, expected):
     completed(integration, lesson)
     with api(integration, lesson) as client:
         app.dependency_overrides[ingress] = lambda: replace(lesson[4], **principal_change)

@@ -63,7 +63,7 @@ def render_learner_interrupt(connection, show_response):
                 st.markdown(chunks[chunk_id]["text"])
         else:
             chunk_id = st.text_input("Current chunk ID", key="b4_field_chunk", max_chars=36)
-            st.caption("Load chunks through A5, or paste an exact chunk ID. Loading requires jobs:read in production.")
+            st.caption("Load chunks through A5, or paste an exact chunk ID. Loading requires access to the lesson.")
     mode = st.radio("Message input", ["Text", "Audio WAV"], key="b4_field_input")
     message = st.text_area("Learner message", key="b4_field_text", max_chars=6000) if mode == "Text" else None
     upload = st.file_uploader("Learner recording", type=["wav"], max_upload_size=6,

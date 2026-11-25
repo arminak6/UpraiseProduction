@@ -281,7 +281,7 @@ levels is explicit. Confirm the displayed scope, then click Delete. Changing the
 target resets confirmation. Cleanup503 retains the same target for a manual Retry;
 no deletion is automatic. Success refreshes the list and clears cached text/audio.
 The A5 workspace and A7 pages link to B7 with their current lesson and level.
-Backend authorization requires `lessons:write`. See [B7](../backend/docs/b7.md).
+The backend checks the caller's client identity and course access. See [B7](../backend/docs/b7.md).
 
 Streamlit 1.64.0 and httpx 0.28.1 are pinned in requirements.txt. Docker uses
 Python 3.12.14; no host Python is required. The maintained interaction/client

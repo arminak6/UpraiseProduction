@@ -83,7 +83,7 @@ separate Streamlit testbench/player. C3 schema exists.
   B4 source-scoped PG/Qdrant LangGraph:text/WAV-STT->answer/SSML/WAV/visemes;
   TTS outage retains text,grounding=null/GROUNDING_NOT_VERIFIED. B5 late fences,
   RAM clear/idempotent content-free audit30min. Contracts:docs/b1-b5.
-- B7 DELETE /v1/lesson-jobs/{id}?learner_level;lessons:write; preserves sources.
+- B7 DELETE /v1/lesson-jobs/{id}?learner_level checks client/course access and preserves sources.
   Partial/whole deletion, tombstones/503 recovery/manual retry: docs/b7.md.
 - C1 health/ready; C2 cached evidence/no AWS polling. C3 admin:operations controls,
   enabled=true disables; fail-closed queued pause, audit outbox. docs/c3.md.
@@ -101,6 +101,7 @@ separate Streamlit testbench/player. C3 schema exists.
   Separate PG/Qdrant, demo-course, production JWT/mTLS; processing workers are absent.
   Standalone browser (8513) and curl (8514) demos use a sample document. See its README.
   Normal Compose serves one-hour test JWTs at POST /oauth/token alongside /v1 APIs on port 8000 in development JWT mode.
+  Local token requests use client credentials and grant_type only. Test JWTs cover demo-course.
   Production calls use the configured OAuth issuer and mTLS. See backend/docs/local-testing.md.
 - frontend/ Streamlit; frontend2/{app,api,ui,voice,voice-capture-worklet}.js,serve.py,index.html,styles.css,
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
@@ -159,9 +160,8 @@ Sources untrusted; parsing does not establish accuracy.
 Logs/audit omit text/scores/audio/prompts/private provider errors; optional local
 diagnostics removed by A6/TTL or successful replacement. Ownership/source/leases/
 artifact locks fence publishing; corrupt503/pending409/expired410. Attempts3/max12h,
-supervised killable children; progress does not reset deadline. Scopes documents:
-read/write, lessons:write, jobs:read/write, sessions:write; inaccessible404/conflict409/
-invalid422. C3 uses admin:operations;default local scopes exclude admin.
+supervised killable children; progress does not reset deadline. Regular APIs check
+authenticated client and course. C3 requires admin:operations.
 Missing production auth config closes ingress; no Redis/session renewal.
 
 ## Known limitations and next work
@@ -184,9 +184,9 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 
 ## Last verified
 
-2026-11-25: Rebuilt the normal backend and verified one-hour JWT expiry, documents 200/401 on
-port 8000, wrong scope 403, wrong secret 401, and production ingress tests. Local settings
-are in ignored .env. The standalone curl demo was verified in Docker and stopped on 8514.
+2026-11-25: Verified one-hour JWT issuance without a scope claim on port 8000, regular API
+access, foreign-course denial and the admin check. Both Docker auth demos passed, including
+a sample upload. Local settings are in ignored .env.
 
 2026-11-24: Local auth demo exercised login, OAuth issuance, HTTPS signing-key
 lookup, mTLS, JWT validation and API permissions in a disposable Compose container.

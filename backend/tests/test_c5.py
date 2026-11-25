@@ -106,11 +106,11 @@ def test_build_prompt_or_threshold_changes_change_fingerprint(monkeypatch):
         assert VersionCatalog(Settings()).snapshot().configuration_id != original
 
 
-def version_app(scopes=("jobs:read",)):
+def version_app():
     app = FastAPI()
     app.include_router(router)
     app.state.versions = VersionCatalog(Settings())
-    app.dependency_overrides[ingress] = lambda: Principal("operator", (), frozenset(scopes))
+    app.dependency_overrides[ingress] = lambda: Principal("operator", ())
     return app
 
 
@@ -126,9 +126,7 @@ def test_authorized_c5_needs_no_session_course_or_database_and_no_provider_calls
         assert "session_id" not in json.dumps(first.json())
 
 
-def test_scope_denied_and_unconfigured_ingress_fail_closed():
-    with TestClient(version_app(scopes=("sessions:write",))) as client:
-        assert client.get("/v1/version").status_code == 403
+def test_unconfigured_ingress_fails_closed():
     app = version_app()
     app.dependency_overrides.pop(ingress)
     app.dependency_overrides[get_settings] = lambda: Settings()

@@ -17,9 +17,9 @@ For production, use the deployment's HTTPS API gateway and the middleware's mTLS
 
 ### Service JWT
 
-Protected routes take `Authorization: Bearer <access_token>`. The issuer signs the JWT with `RS256` or `ES256`. The backend checks the configured `iss` and `aud`, expiry (`exp` in Unix seconds), allowed caller identity (`client_id`, with `azp` or `sub` as fallbacks), route permission (`scope`, a space-separated string), and course access (`upraise_courses`, an array of strings). `iat` is optional. `sub` can be omitted if `client_id` or `azp` identifies the caller.
+Protected routes take `Authorization: Bearer <access_token>`. The issuer signs the JWT with `RS256` or `ES256`. The backend checks the configured `iss` and `aud`, expiry (`exp` in Unix seconds), allowed caller identity (`client_id`, with `azp` or `sub` as fallbacks), and course access (`upraise_courses`, an array of strings). `iat` is optional. `sub` can be omitted if `client_id` or `azp` identifies the caller.
 
-The **scope** is the permission named in each entry below. For instance, `documents:read jobs:read` permits both document listing and job status calls for authorized resources. Resource IDs are also checked against the calling client and course. [Production ingress settings](a1.md#ingress-configuration)
+Regular operations use the authenticated client identity and its course access. `PUT /v1/admin/kill-switch` requires the `admin:operations` scope. [Production ingress settings](a1.md#ingress-configuration)
 
 Request an access token from the OAuth provider configured for the deployment. In the local JWT test mode, `POST /oauth/token` issues test JWTs on the backend port. [Calling the API with curl](local-testing.md#direct-curl-with-a-jwt)
 
@@ -38,7 +38,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A1 `POST /v1/documents`
 
-**Scope** `documents:write`. Upload teaching material or submit an HTTPS Moodle PDF URL. The caller needs access to the given course.
+Upload teaching material or submit an HTTPS Moodle PDF URL. The caller needs access to the given course.
 
 | Input | Location | Required | Type and meaning |
 | --- | --- | --- | --- |
@@ -58,7 +58,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A2 `GET /v1/documents`
 
-**Scope** `documents:read`. List the caller's material, including accepted jobs that are still processing.
+List the caller's material, including accepted jobs that are still processing.
 
 **Input** Optional query `course_id` (string, 1–120 characters). Omitting it lists material across the caller's allowed courses. No body.
 
@@ -66,7 +66,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A2 `DELETE /v1/documents/{document_id}`
 
-**Scope** `documents:write`. Remove one source and generated material that depends on it.
+Remove one source and generated material that depends on it.
 
 **Input** Required path `document_id` (UUID). No query or body.
 
@@ -74,7 +74,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### `GET /v1/documents/{document_id}/slides/{slide_number}`
 
-**Scope** `documents:read`. Fetch the retained original rendering of a PPTX slide.
+Fetch the retained original rendering of a PPTX slide.
 
 **Input** Required path `document_id` (UUID) and `slide_number` (one-based integer, 1–5,000). Required query `document_version_id` (UUID), which must match the retained source. No body.
 
@@ -82,7 +82,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A2 `DELETE /v1/courses/{course_id}`
 
-**Scope** `documents:write`. Remove the caller's source material and generated lessons for a course.
+Remove the caller's source material and generated lessons for a course.
 
 **Input** Required path `course_id` (string, 1–120 characters). No query or body.
 
@@ -92,7 +92,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A3 `POST /v1/lesson-jobs`
 
-**Scope** `lessons:write`. Queue a draft at one difficulty level.
+Queue a draft at one difficulty level.
 
 **Input** JSON [LessonInput](#lessoninput). Required fields are `lesson_id`, `course_id`, `activity_id`, `document_ids`, `language`, and `voice`. Use document IDs returned by A1 for the caller's sources in the requested course. Optional fields are `teaching_version`, `options`, `allow_incomplete_source`, and `callback_url`. Within [LessonOptions](#lessonoptions), `learner_level` defaults to `intermediate`. Optional `Idempotency-Key` header identifies an identical retry.
 
@@ -100,7 +100,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A3 v2 `POST /v2/lesson-jobs`
 
-**Scope** `lessons:write`. Queue a draft at one or more difficulty levels using a shared plan.
+Queue a draft at one or more difficulty levels using a shared plan.
 
 **Input** JSON [AlignedLessonInput](#alignedlessoninput). The six required fields and the optional `Idempotency-Key` header are the same as A3 v1. Select levels with the top-level `levels` array of 1–8 unique configured names. Omit it or send `null` to generate all configured levels. [AlignedOptions](#alignedoptions) controls chunk sizes and source windows. `target_chunk_words` must be at most `max_chunk_words`.
 
@@ -108,7 +108,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A4 `GET /v1/jobs/{job_id}`
 
-**Scope** `jobs:read`. Check an ingestion, generation, or revision job.
+Check an ingestion, generation, or revision job.
 
 **Input** Required path `job_id` (UUID), returned by A1, A3, or A7. No query or body.
 
@@ -116,7 +116,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A5 `GET /v1/jobs/{job_id}/result`
 
-**Scope** `jobs:read`. Fetch available draft output.
+Fetch available draft output.
 
 **Input** Required path `job_id` (UUID). Optional query `learner_level` (1–40 characters, a lowercase identifier that starts with a letter and may contain digits and underscores). No body.
 
@@ -124,7 +124,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A5 `GET /v1/jobs/{job_id}/audio/{chunk_id}`
 
-**Scope** `jobs:read`. Download one chunk's narration.
+Download one chunk's narration.
 
 **Input** Required paths `job_id` (UUID) and `chunk_id` (UUID) from the A5 result. No query or body.
 
@@ -132,7 +132,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A6 `DELETE /v1/jobs/{job_id}`
 
-**Scope** `jobs:write`. Cancel a job or acknowledge receipt and remove temporary output.
+Cancel a job or acknowledge receipt and remove temporary output.
 
 **Input** Required path `job_id` (UUID). Required query `reason` is `CANCEL` for a queued or running job, or `RECEIVED` for a done or failed job. No body.
 
@@ -140,7 +140,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A7 `POST /v1/audio:regenerate`
 
-**Scope** `lessons:write`. Queue a revision of one teaching chunk and its narration.
+Queue a revision of one teaching chunk and its narration.
 
 **Input** JSON [ChunkRevisionInput](#chunkrevisioninput). Send `lesson_job_id` and `chunk_id` as UUIDs, and `teacher_review` as nonblank feedback of up to 8,000 characters. Optional `apply_to_all_levels` defaults to `false`. Set it to `true` for a corresponding aligned edit across available levels. Each submission starts a new revision.
 
@@ -148,7 +148,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### A8 `GET /v1/lesson-jobs`
 
-**Scope** `jobs:read`. List available draft lessons and levels for the caller.
+List available draft lessons and levels for the caller.
 
 **Input** Optional query `course_id` (string, 1–120 characters), `limit` (integer 1–100, default 100), and `offset` (integer 0–1,000,000, default 0). No body.
 
@@ -156,7 +156,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### `GET /v1/lesson-reviews`
 
-**Scope** `jobs:read`. List lessons with retained teaching text for teacher review.
+List lessons with retained teaching text for teacher review.
 
 **Input** Optional query `course_id` (string, 1–120 characters), `limit` (integer 1–100, default 100), and `offset` (integer 0–1,000,000, default 0). No body.
 
@@ -164,7 +164,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### `GET /v1/lesson-reviews/{job_id}`
 
-**Scope** `jobs:read`. Fetch retained teaching text, including text whose audio has expired.
+Fetch retained teaching text, including text whose audio has expired.
 
 **Input** Required path `job_id` (UUID). No query or body.
 
@@ -172,7 +172,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ### B7 `DELETE /v1/lesson-jobs/{lesson_job_id}`
 
-**Scope** `lessons:write`. Remove generated teaching content while retaining the source material.
+Remove generated teaching content while retaining the source material.
 
 **Input** Required path `lesson_job_id` (UUID) from the generated lesson catalog. Optional query `learner_level` uses the same syntax as A5. Omit it to delete the whole generated lesson. No body.
 
@@ -180,7 +180,7 @@ B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from th
 
 ## Learning sessions
 
-Each route below requires `sessions:write` and the [learner-session JWT](#learner-session-jwt) when using signed sessions. Start with B1 and reuse the returned `session_id` for B2, B4, and B5.
+Each route below requires service authentication and the [learner-session JWT](#learner-session-jwt) when using signed sessions. Start with B1 and reuse the returned `session_id` for B2, B4, and B5.
 
 ### B1 `POST /v1/sessions`
 
@@ -230,7 +230,7 @@ Each route below requires `sessions:write` and the [learner-session JWT](#learne
 
 ### C2 `GET /v1/status`
 
-**Scope** `jobs:read`. Read cached AI feature availability and effective controls.
+Read cached AI feature availability and effective controls.
 
 **Input** Optional query `course_id` (authorized string, 1–120 characters, without leading or trailing spaces). Omitting it returns global status. No body.
 
@@ -246,7 +246,7 @@ Each route below requires `sessions:write` and the [learner-session JWT](#learne
 
 ### C5 `GET /v1/version`
 
-**Scope** `jobs:read`. Read deployed version metadata.
+Read deployed version metadata.
 
 **Input** No path arguments, query, or body.
 

@@ -26,7 +26,7 @@ def check(browser, issuer, directory, passwords):
         assert result.status_code == 200, result.text
         assert result.json()["body"][0]["course_id"] == COURSE
         result = client.get("/demo/version")
-        assert result.status_code == 403 and result.json()["body"]["detail"] == "INSUFFICIENT_SCOPE"
+        assert result.status_code == 403 and result.json()["body"]["detail"] == "DEMO_ACCESS_DENIED"
         cookie = client.cookies.get("upraise_auth_demo")
         assert client.post("/demo/logout", json={}).status_code == 200
         response = client.get("/demo/documents", headers={"Cookie": f"upraise_auth_demo={cookie}"})
@@ -35,13 +35,13 @@ def check(browser, issuer, directory, passwords):
         assert response.json() == {"user": "Operator"}
         assert client.get("/demo/version").status_code == 200
         result = client.get("/demo/documents")
-        assert result.status_code == 403 and result.json()["body"]["detail"] == "INSUFFICIENT_SCOPE"
+        assert result.status_code == 403 and result.json()["body"]["detail"] == "DEMO_ACCESS_DENIED"
     print("PASS: login, wrong password, same-origin check, logout and both users' API permissions", flush=True)
 
     with httpx.Client(verify=client_tls(directory), trust_env=False) as client:
         result = client.post(issuer.issuer + "/oauth/token", data={"grant_type": "client_credentials"})
         assert result.status_code == 401 and result.json()["error"] == "invalid_client"
-        token = issue_token(client, issuer.issuer, issuer.client_secret, "documents:read")
+        token = issue_token(client, issuer.issuer, issuer.client_secret)
         try:
             client.get(browser.gateway + "/v1/documents", headers={"Authorization": f"Bearer {token}"})
         except httpx.TransportError:
@@ -54,7 +54,7 @@ def check(browser, issuer, directory, passwords):
         endpoint = browser.gateway + "/v1/documents"
         missing = client.get(endpoint)
         assert missing.status_code == 401 and missing.json()["detail"] == "BEARER_TOKEN_REQUIRED"
-        expired = sign_access_token(issuer.signing_key, issuer.issuer, "documents:read", lifetime=-60)
+        expired = sign_access_token(issuer.signing_key, issuer.issuer, lifetime=-60)
         for invalid in (expired, "not-a-jwt"):
             result = client.get(endpoint, headers={"Authorization": f"Bearer {invalid}"})
             assert result.status_code == 401 and result.json()["detail"] == "INVALID_ACCESS_TOKEN"
@@ -103,5 +103,5 @@ def check_workspace(browser, passwords):
         assert client.get("/api/v1/documents", headers=headers).status_code == 401
         assert client.post("/demo/login", json={"username": "operator", "password": passwords["operator"]}).status_code == 200
         result = try_upload()
-        assert result.status_code == 403 and result.json()["detail"] == "INSUFFICIENT_SCOPE", result.text
+        assert result.status_code == 403 and result.json()["detail"] == "DEMO_ACCESS_DENIED", result.text
     print("PASS: same-port login, main workspace, production API routes, course permissions and sign-out", flush=True)

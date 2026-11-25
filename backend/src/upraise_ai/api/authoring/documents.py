@@ -53,7 +53,6 @@ def dispose_job(
     job_id: UUID, request: Request, reason: Literal["CANCEL", "RECEIVED"] = Query(),
     principal: Principal = Depends(ingress),
 ):
-    principal.require_scope("jobs:write")
     lessons = getattr(request.app.state, "lessons", None)
     if lessons is not None and lessons.jobs.get(str(job_id)):
         lessons.dispose(str(job_id), reason, principal)
@@ -70,13 +69,11 @@ def list_documents(
     request: Request, course_id: str | None = Query(None, min_length=1, max_length=120),
     principal: Principal = Depends(ingress),
 ):
-    principal.require_scope("documents:read")
     return document_service(request).list(course_id, principal)
 
 
 @router.delete("/v1/documents/{document_id}", status_code=204, summary="A2 – Remove ingested material")
 def delete_document(document_id: UUID, request: Request, principal: Principal = Depends(ingress)):
-    principal.require_scope("documents:write")
     document_service(request).delete(str(document_id), principal)
     return Response(status_code=204)
 
@@ -84,7 +81,6 @@ def delete_document(document_id: UUID, request: Request, principal: Principal = 
 @router.get('/v1/documents/{document_id}/slides/{slide_number}', summary='Read a retained PowerPoint source slide')
 def source_slide(document_id: UUID, slide_number: int, request: Request, document_version_id: UUID = Query(),
                  principal: Principal = Depends(ingress)):
-    principal.require_scope('documents:read')
     documents = document_service(request)
     row = documents.jobs.get_document(str(document_id))
     documents.authorize(row, principal)
@@ -115,7 +111,6 @@ def source_slide(document_id: UUID, slide_number: int, request: Request, documen
 @router.delete("/v1/courses/{course_id:path}", status_code=204, summary="A2 - Remove a course and its generated lessons")
 def delete_course(request: Request, course_id: str = PathParameter(min_length=1, max_length=120),
                   principal: Principal = Depends(ingress)):
-    principal.require_scope("documents:write")
     document_service(request).delete_course(course_id, principal)
     return Response(status_code=204)
 
@@ -136,7 +131,6 @@ def delete_course(request: Request, course_id: str = PathParameter(min_length=1,
     },
 )
 async def ingest_document(request: Request, response: Response, principal: Principal = Depends(ingress)):
-    principal.require_scope("documents:write")
     submission = service(request)
     key = request.headers.get("idempotency-key")
     content_type = request.headers.get("content-type", "").split(";")[0].lower()
@@ -187,7 +181,6 @@ async def ingest_document(request: Request, response: Response, principal: Princ
 
 @router.get("/v1/jobs/{job_id}", response_model=JobStatus, summary="A4 – Job status")
 def job_status(job_id: UUID, request: Request, principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
     lessons = getattr(request.app.state, "lessons", None)
     if lessons is not None and lessons.jobs.get(str(job_id)):
         row = lessons.authorized(job_id, principal)

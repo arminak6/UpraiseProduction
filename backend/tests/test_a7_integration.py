@@ -130,8 +130,6 @@ def test_a7_authorization_validation_and_no_idempotency(integration, lesson):
         assert client.post("/v1/audio:regenerate", json=body).status_code == 404
         app.dependency_overrides[ingress] = lambda: Principal(lesson[4].client_id, ("other-course",), lesson[4].scopes)
         assert client.post("/v1/audio:regenerate", json=body).status_code == 404
-        app.dependency_overrides[ingress] = lambda: Principal(lesson[4].client_id, ("course-1",), frozenset({"jobs:read"}))
-        assert client.post("/v1/audio:regenerate", json=body).status_code == 403
 
 
 def test_a7_expired_parent_rejected_but_accepted_snapshot_survives_expiry(integration, lesson):

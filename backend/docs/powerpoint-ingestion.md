@@ -111,7 +111,7 @@ speech. B4 retains slide references and distinguishes them from PDF pages.
 
 Teacher review explicitly loads original slide PNGs through
 `GET /v1/documents/{document_id}/slides/{slide_number}?document_version_id=UUID`.
-This requires `documents:read`, current document ownership/course access, a DONE
+This requires authentication, current document ownership/course access, a DONE
 source and no deletion request. Version, included-slide membership and image
 hash are checked under artifact/source locks. PNG responses use
 `Cache-Control: no-store`. The bridge preserves authentication; previews are

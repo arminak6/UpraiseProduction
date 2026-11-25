@@ -30,7 +30,6 @@ def ready_lessons(request: Request, response: Response,
                   course_id: str | None = Query(None, min_length=1, max_length=120),
                   limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
                   principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
     response.headers["Cache-Control"] = "no-store"
     return service(request).list_ready(principal, course_id=course_id, limit=limit, offset=offset)
 
@@ -41,7 +40,6 @@ def review_lessons(request: Request, response: Response,
                    course_id: str | None = Query(None, min_length=1, max_length=120),
                    limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
                    principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
     response.headers["Cache-Control"] = "no-store"
     return list_reviews(service(request), principal, course_id=course_id, limit=limit, offset=offset)
 
@@ -50,7 +48,6 @@ def review_lessons(request: Request, response: Response,
             summary="Read retained teaching text independently of audio expiry")
 def retained_lesson_text(job_id: UUID, request: Request, response: Response,
                          principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
     response.headers["Cache-Control"] = "no-store"
     return review_text(service(request), job_id, principal)
 
@@ -59,7 +56,6 @@ def retained_lesson_text(job_id: UUID, request: Request, response: Response,
              summary="A3 - Generate a draft lesson")
 def generate_lesson(data: LessonInput, request: Request, response: Response,
                     principal: Principal = Depends(ingress)):
-    principal.require_scope("lessons:write")
     result = service(request).submit(data, principal, request.headers.get("idempotency-key"))
     response.headers["Location"] = f"/v1/jobs/{result['job_id']}"
     return result
@@ -69,7 +65,6 @@ def generate_lesson(data: LessonInput, request: Request, response: Response,
              summary='A3 v2 - Generate selected levels using one shared chunk plan')
 def generate_aligned_lesson(data: AlignedLessonInput, request: Request, response: Response,
                             principal: Principal = Depends(ingress)):
-    principal.require_scope('lessons:write')
     result = service(request).submit(data, principal, request.headers.get('idempotency-key'))
     response.headers['Location'] = f"/v1/jobs/{result['job_id']}"
     return result
@@ -79,7 +74,6 @@ def generate_aligned_lesson(data: AlignedLessonInput, request: Request, response
             summary="A5 - Fetch a draft lesson")
 def lesson_result(job_id: UUID, request: Request, response: Response, principal: Principal = Depends(ingress),
                   learner_level: str | None = Query(None, min_length=1, max_length=40, pattern=r'^[a-z][a-z0-9_]*$')):
-    principal.require_scope("jobs:read")
     lessons = service(request)
     row, replacement_level = lessons.delivery_row(job_id, principal)
     learner_level = learner_level or replacement_level
@@ -94,7 +88,6 @@ def lesson_result(job_id: UUID, request: Request, response: Response, principal:
              summary="A7 - Revise one teaching chunk and regenerate its audio")
 def regenerate_audio(data: ChunkRevisionInput, request: Request, response: Response,
                      principal: Principal = Depends(ingress)):
-    principal.require_scope("lessons:write")
     # Request idempotency is explicitly deferred for A7. Every submission is new.
     result = submit_revision(service(request), data, principal)
     response.headers["Location"] = f"/v1/jobs/{result['job_id']}"
@@ -105,7 +98,6 @@ def regenerate_audio(data: ChunkRevisionInput, request: Request, response: Respo
 @router.get("/v1/jobs/{job_id}/audio/{chunk_id}", summary="A5 - Download chunk audio",
             responses={200: {"content": {"audio/wav": {}}}})
 def lesson_audio(job_id: UUID, chunk_id: UUID, request: Request, principal: Principal = Depends(ingress)):
-    principal.require_scope("jobs:read")
     lessons = service(request)
     row, _ = lessons.delivery_row(job_id, principal)
     # Open the descriptor while locked. POSIX retains an open file across unlink;

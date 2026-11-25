@@ -44,7 +44,7 @@ def setup_store(**kwargs):
 @contextmanager
 def http(store, *, principal=None, settings=None):
     configuration = settings or Settings(environment="development", local_test_mode=True)
-    principal = principal or Principal("client", (), frozenset({"sessions:write"}), local_test=True)
+    principal = principal or Principal("client", (), local_test=True)
     app.dependency_overrides[ingress] = lambda: principal
     app.dependency_overrides[get_settings] = lambda: configuration
     try:
@@ -85,11 +85,10 @@ def test_b5_invalid_input_does_not_close_session(body):
 
 
 @pytest.mark.parametrize("principal,status", [
-    (Principal("foreign", (), frozenset({"sessions:write"}), local_test=True), 404),
-    (Principal("client", ("other-course",), frozenset({"sessions:write"})), 403),
-    (Principal("client", (), frozenset(), local_test=True), 403),
+    (Principal("foreign", (), local_test=True), 404),
+    (Principal("client", ("other-course",)), 403),
 ])
-def test_b5_client_course_and_scope_isolation(principal, status):
+def test_b5_client_and_course_isolation(principal, status):
     store, session, audits = setup_store()
     with http(store, principal=principal) as client:
         result = client.post(f"/v1/sessions/{session.response.session_id}/end", json={"reason": "COMPLETED"})

@@ -119,10 +119,10 @@ def test_b2_rejects_wrong_lesson_or_chunk(change, status, detail):
 
 
 @pytest.mark.parametrize("principal,status", [
-    (Principal("foreign", (), frozenset({"sessions:write"}), local_test=True), 404),
-    (Principal("client", ("other-course",), frozenset({"sessions:write"})), 403),
-    (Principal("client", (), frozenset(), local_test=True), 403)])
-def test_b2_client_course_and_scope_isolation(principal, status):
+    (Principal("foreign", (), local_test=True), 404),
+    (Principal("client", ("other-course",)), 403),
+])
+def test_b2_client_and_course_isolation(principal, status):
     store, session, _, body = setup_b2()
     with b2_http(store, [], principal=principal) as client:
         result = client.post(f"/v1/sessions/{session.response.session_id}/chunk-end", json=body)
@@ -134,7 +134,7 @@ def test_b2_signed_session_uses_verified_consent_and_exact_binding(signing):
     session.binding = replace(session.binding, preview=False, subject="pseudonymous-learner")
     claims = assertion(session_id=str(session.response.session_id), client_id="client",
         lesson_job_id=session.binding.lesson_job_id, consent_scope=["telemetry"])
-    principal = Principal("client", ("course-1",), frozenset({"sessions:write"}))
+    principal = Principal("client", ("course-1",))
     with b2_http(store, [], principal=principal, settings=assertion_settings()) as client:
         path = f"/v1/sessions/{session.response.session_id}/chunk-end"
         assert client.post(path, json=body).status_code == 401

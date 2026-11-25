@@ -1,4 +1,4 @@
 {
-  "teacher": {"label": "Teacher", "scope": "documents:read"},
-  "operator": {"label": "Operator", "scope": "jobs:read"}
+  "teacher": {"label": "Teacher", "standalone_route": "/demo/documents", "read_only": false},
+  "operator": {"label": "Operator", "standalone_route": "/demo/version", "read_only": true}
 }

@@ -98,9 +98,9 @@ overrides for passwords that need URI encoding.
 - API docs: http://localhost:8000/docs
 - Liveness: http://localhost:8000/health
 - Readiness: http://localhost:8000/ready; feature status: http://localhost:8000/v1/status
-  (C2 uses INGRESS and jobs:read). See [C1/C2](backend/docs/c1-c2.md) for UNKNOWN
+  (C2 requires service authentication). See [C1/C2](backend/docs/c1-c2.md) for UNKNOWN
   provider evidence, partial outages and shared API/worker operator controls.
-- Deployed versions: http://localhost:8000/v1/version (INGRESS and jobs:read).
+- Deployed versions: http://localhost:8000/v1/version (service authentication required).
   [C5](backend/docs/c5.md) reports model IDs, prompt hashes, pipelines and B2 policy.
 - Runtime administration: `PUT /v1/admin/kill-switch` requires `admin:operations`;
   [C3](backend/docs/c3.md) documents shared controls, audit, B2 bypass and rollout.

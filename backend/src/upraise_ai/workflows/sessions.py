@@ -27,7 +27,6 @@ AI_NOTICES = {
 
 def authorize_session(settings, store, session_id, principal, token=None, *, include_ended=False, lessons=None):
     """Shared B2/B4/B5 authorization; feature consent is enforced separately."""
-    principal.require_scope("sessions:write")
     session = store.get(session_id, principal.client_id, include_ended=include_ended)
     binding = session.binding
     principal.require_course(binding.course_id)
@@ -71,7 +70,6 @@ class SessionService:
         self.store.end(session_id, principal.client_id, data.reason, audit=self.lessons.audit.session_ended)
 
     def start(self, data, principal, token=None):
-        principal.require_scope("sessions:write")
         principal.require_course(data.course_id)
         local = (principal.local_test and self.settings.environment == "development"
                  and self.settings.local_test_mode)

@@ -59,7 +59,7 @@ image is missing, build it from the root with `docker compose build backend`.
    call returns `200` and the documents call returns `403`.
 4. Sign out and try a wrong password to see the login error.
 
-The usernames and scopes are in [users.json](users.json). Each run generates
+The test accounts and their middleware permissions are in [users.json](users.json). Each run generates
 fresh passwords, stores salted password hashes in memory, and creates temporary
 certificates and signing keys. The browser receives only an HTTP-only demo
 session cookie. Stop the foreground process with Ctrl+C.
@@ -87,14 +87,14 @@ loopback address. For an Ubuntu server, run curl on the server or use SSH
 port forwarding to reach it from your own computer.
 
 ```powershell
-$jwt = (curl.exe -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8514/oauth/token | ConvertFrom-Json).access_token
+$jwt = (curl.exe -fsS -u auth-demo-middleware -d "grant_type=client_credentials" http://127.0.0.1:8514/oauth/token | ConvertFrom-Json).access_token
 curl.exe -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8514/v1/documents
 ```
 
 On Ubuntu, use `curl` and Python 3 to read the JSON response.
 
 ```sh
-jwt=$(curl -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8514/oauth/token | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
+jwt=$(curl -fsS -u auth-demo-middleware -d "grant_type=client_credentials" http://127.0.0.1:8514/oauth/token | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
 curl -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8514/v1/documents
 ```
 

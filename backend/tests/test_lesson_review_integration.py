@@ -64,7 +64,6 @@ def test_review_expired_text_is_readable_and_a7_still_requires_live_output(integ
 @pytest.mark.parametrize("change,list_status,text_status", [
     ({"client_id": "another-client"}, 200, 404),
     ({"courses": ()}, 200, 404),
-    ({"scopes": frozenset({"lessons:write"})}, 403, 403),
     ({"local_test": True, "courses": ()}, 200, 200),
     ({"local_test": True, "courses": (), "client_id": "another-local-client"}, 200, 404),
 ])
