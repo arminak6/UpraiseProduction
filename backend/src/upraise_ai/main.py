@@ -11,12 +11,14 @@ from pydantic import ValidationError
 
 from upraise_ai.api.authoring import router as authoring_router
 from upraise_ai.api.generated_content import router as generated_content_router
+from upraise_ai.api.local_auth import router as local_auth_router
 from upraise_ai.api.operations import router as operations_router
 from upraise_ai.api.runtime import router as runtime_router
 from upraise_ai.core.config import get_settings
 from upraise_ai.core.errors import IngestionError
 from upraise_ai.core.versions import APPLICATION_VERSION
 from upraise_ai.guards.body_limit import UploadLimitMiddleware
+from upraise_ai.guards.ingress import LocalJWTIssuer
 from upraise_ai.services.operations import OperationsMonitor
 from upraise_ai.services.versions import VersionCatalog
 from upraise_ai.storage.audit import AuditRepository
@@ -35,6 +37,8 @@ from upraise_ai.workflows.submission import SubmissionService
 @asynccontextmanager
 async def lifespan(app):
     settings = get_settings()
+    if settings.local_jwt_test_mode and settings.jwt_test_client_secret.get_secret_value():
+        app.state.local_jwt_issuer = LocalJWTIssuer()
     app.state.versions = VersionCatalog(settings)
     app.state.operations = OperationsMonitor(settings)
     app.state.submission = None
@@ -151,3 +155,4 @@ app.include_router(authoring_router)
 app.include_router(generated_content_router)
 app.include_router(runtime_router)
 app.include_router(operations_router)
+app.include_router(local_auth_router)

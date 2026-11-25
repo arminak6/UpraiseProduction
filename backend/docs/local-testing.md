@@ -4,13 +4,14 @@ On 2026-10-02 the user explicitly approved a local testing mode so the Streamlit
 interface can exercise A1/A2 before Moodle OAuth/mTLS integration is configured.
 This is a deployment setting, not a new API or a change to the document pipeline.
 
-## This workstation
+## Local Streamlit mode
 
-The ignored root `.env` now contains:
+For JWT-free Streamlit testing, set these values in the ignored root `.env`.
 
 ```dotenv
 UPRAISE_ENVIRONMENT=development
 UPRAISE_LOCAL_TEST_MODE=true
+UPRAISE_LOCAL_JWT_TEST_MODE=false
 ```
 
 Start/rebuild from the project root:
@@ -58,40 +59,43 @@ See [B4](b4.md).
 
 ## Direct curl with a JWT
 
-Create a test client secret from the project root before starting the JWT test
-stack. This generates a random secret if the file is absent. It prints the
-secret for the person setting up this local test.
+The normal Compose backend can issue and verify local test JWTs on port `8000`.
+Set these values in the ignored root `.env`.
 
-```powershell
-New-Item -ItemType Directory -Force codex_helper/jwt-test | Out-Null
-if (-not (Test-Path codex_helper/jwt-test/client.env)) {
-    "UPRAISE_JWT_TEST_CLIENT_SECRET=$([guid]::NewGuid().ToString('N'))" | Set-Content -Encoding Ascii codex_helper/jwt-test/client.env
-}
-Get-Content codex_helper/jwt-test/client.env
-docker compose -f compose.jwt.yaml up -d --wait
+```dotenv
+UPRAISE_ENVIRONMENT=development
+UPRAISE_LOCAL_TEST_MODE=false
+UPRAISE_LOCAL_JWT_TEST_MODE=true
+UPRAISE_JWT_TEST_CLIENT_SECRET=your-generated-local-test-secret
 ```
 
-Both Compose setups use port 8000. Stop the regular Compose backend before
-starting the JWT stack if it is already running. The optional file enables
-the local token endpoint on port 8001. `auth-demo-middleware` is the test client
-ID. Use the generated value after `=` as its secret.
+Replace the example secret with a random URL-safe secret of 32 to 256 characters.
+Rebuild the backend with `docker compose up --build -d --wait backend`. The usual
+Compose command starts the backend and its processing workers.
+
+The client ID is `auth-demo-middleware`. When curl prompts for the password,
+enter the value of `UPRAISE_JWT_TEST_CLIENT_SECRET` from `.env`.
 
 ```powershell
-$secret = Read-Host "Test client secret"
-$jwt = (curl.exe -fsS -u "auth-demo-middleware:$secret" -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8001/oauth/token | ConvertFrom-Json).access_token
+$jwt = (curl.exe -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8000/oauth/token | ConvertFrom-Json).access_token
 curl.exe -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8000/v1/documents
 ```
 
-These curl commands need only the URLs and test client credentials. The issuer
-returns a JWT valid for five minutes. For local administrators, the JWT stack
-also maintains a token inside the backend at `/tmp/upraise-access-token`.
+On Ubuntu, use `curl` and Python 3 to read the JSON response.
 
-A valid token returns `200`. A missing or invalid token returns `401`. Request a
-fresh token if the current one expires. Use `demo-course` for authoring requests.
-The stack has its own PostgreSQL and Qdrant databases and runs without processing
-workers. It publishes only to localhost. This test mode requires development and
-verifies the bearer JWT, scopes, and course access. It accepts curl directly over
-HTTP. Production calls continue to use the configured mTLS gateway.
+```sh
+jwt=$(curl -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8000/oauth/token | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
+curl -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8000/v1/documents
+```
+
+Each JWT lasts one hour, and a backend restart invalidates existing test
+tokens. Request the scopes needed by the [API route](api-reference.md#service-jwt).
+The test client can access its own resources in `demo-course`. Materials from
+JWT-free Streamlit testing belong to the separate `local-test-client` identity.
+The Streamlit test UI accepts a JWT in its **Bearer token** field.
+
+For production, use the deployment's OAuth provider and connect through the
+configured mTLS gateway. [Ingress configuration](a1.md#ingress-configuration)
 
 ## Production/default authentication
 
@@ -100,6 +104,7 @@ Both code and committed Compose/example defaults are:
 ```dotenv
 UPRAISE_ENVIRONMENT=production
 UPRAISE_LOCAL_TEST_MODE=false
+UPRAISE_LOCAL_JWT_TEST_MODE=false
 ```
 
 Local mode requires both explicit development values. Enabling it while leaving
@@ -108,7 +113,7 @@ disable authentication; missing production identity/gateway settings still retur
 503 INGRESS_NOT_CONFIGURED. Production JWT signature/expiry/scope/course checks
 and trusted mTLS-gateway enforcement are unchanged.
 
-To return this workstation to production authentication, set those two production
+To return this workstation to production authentication, set these production
 values in its ignored `.env`, configure actual OAuth/mTLS settings, and recreate
 backend/frontend. Local test documents keep their testing client identity; they
 are not silently reassigned to a real Moodle integration. Do not deploy this

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     environment: Literal["production", "development"] = "production"
     local_test_mode: bool = False
     local_jwt_test_mode: bool = False
+    jwt_test_client_secret: SecretStr = SecretStr("")
 
     @model_validator(mode="after")
     def local_mode_requires_development(self):
@@ -21,6 +22,9 @@ class Settings(BaseSettings):
             raise ValueError("local_jwt_test_mode requires environment=development")
         if self.local_test_mode and self.local_jwt_test_mode:
             raise ValueError("local_test_mode and local_jwt_test_mode are mutually exclusive")
+        secret = self.jwt_test_client_secret.get_secret_value()
+        if self.local_jwt_test_mode and secret and not 32 <= len(secret) <= 256:
+            raise ValueError("jwt_test_client_secret requires 32 to 256 characters")
         return self
 
     jobs_dsn: SecretStr = SecretStr("")

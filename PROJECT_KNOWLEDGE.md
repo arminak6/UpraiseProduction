@@ -99,16 +99,16 @@ separate Streamlit testbench/player. C3 schema exists.
   Other backend/docs/ files cover teaching versions, ingestion, lifecycle and operations.
 - frontend2/tests/auth_demo/ runs Frontend2 with sign-in on 8502 via workspace.compose.yaml.
   Separate PG/Qdrant, demo-course, production JWT/mTLS; processing workers are absent.
-  Standalone tester on 8513 uses an in-memory document fixture. Run steps in its README.
-  compose.jwt.yaml serves direct JWT curl on 8000 with isolated storage. Optional ignored client.env
-  enables loopback OAuth on 8001. Verified token/API curl 200, wrong secret/missing token 401.
+  Standalone browser (8513) and curl (8514) demos use a sample document. See its README.
+  Normal Compose serves one-hour test JWTs at POST /oauth/token alongside /v1 APIs on port 8000 in development JWT mode.
+  Production calls use the configured OAuth issuer and mTLS. See backend/docs/local-testing.md.
 - frontend/ Streamlit; frontend2/{app,api,ui,voice,voice-capture-worklet}.js,serve.py,index.html,styles.css,
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
 - Archive: storage/lesson_archive.py, services/lesson_replacement.py,
   workflows/archive_lessons.py. Matching integration tests cover erasure/TTL/A7.
-- codex_helper/ ignored helpers/evidence; FUTURE_UPDATES.md ignored backlog.
-  Assessment/rollout evidence is indexed in Last verified; fewer flags alone
-  never establishes higher teaching quality. No listening assessment performed.
+- .gitignore excludes dependency and tool caches, codex_helper/ evidence,
+  course_archive/ data and FUTURE_UPDATES.md. Assessment evidence is indexed below.
+  Fewer flags alone do not establish teaching quality. No listening assessment performed.
 - codex_helper/aws-cost-report/: measured API costs and PDF generators. Regular
   2.9/Light comparison: generate_light_comparison_report.py; latest report is
   output/pdf/upraise-55-page-aws-cost-report-2026-11-02-with-light-qa.pdf, with
@@ -184,12 +184,16 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 
 ## Last verified
 
+2026-11-25: Rebuilt the normal backend and verified one-hour JWT expiry, documents 200/401 on
+port 8000, wrong scope 403, wrong secret 401, and production ingress tests. Local settings
+are in ignored .env. The standalone curl demo was verified in Docker and stopped on 8514.
+
 2026-11-24: Local auth demo exercised login, OAuth issuance, HTTPS signing-key
 lookup, mTLS, JWT validation and API permissions in a disposable Compose container.
 Port 8502 workspace authenticated real read/upload routes in isolated storage;
 Chrome verified sign-in, all four sections and sign-out. 80 UI and 18 bridge tests passed.
 Service JWT `iat`/`sub` are optional with an allowlisted identity. Ingress unit and
-both Compose auth checks passed with the shorter token. Direct JWT Compose curl returned 200/401/403 as expected.
+auth demo checks passed with the shorter token.
 
 2026-11-18: Synced frontend2 proof-of-concept copy and sidebar changes. Checked
 frontend2/index.html, app.js and UI assertions against the transfer checkout.
@@ -197,9 +201,8 @@ Verified ingestion defaults in compose.yaml, .env.example and core/config.py.
 
 2026-11-13: compose.yaml, Dockerfiles/.dockerignore for backend/frontend/frontend2,
 root README/.env.example/.gitignore, local-testing.md and AWS credential loader
-checked for Ubuntu source transfer. Named volumes are outside a folder ZIP;
-course_archive and aws_credentials.json require existing bind-mount sources,
-and callback_tls must exist. Helper/source ZIP excludes credentials and live data.
+checked for Ubuntu source transfer. Named volumes, credentials and live data are outside
+the ZIP. Compose needs course_archive, aws_credentials.json and callback_tls bind sources.
 
 2026-11-10: Light report generator, saved rate data, AWS Polly pricing and
 report-data-2026-11-02-with-light-qa.json checked. Two-page *with-light-qa.pdf

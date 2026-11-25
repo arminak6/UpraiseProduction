@@ -13,7 +13,7 @@ A-series operations handle course material and lesson generation. B-series opera
 
 ## Calling the API
 
-Use `http://127.0.0.1:8000` in the local JWT Compose setup. For production, use the deployment's HTTPS API gateway and the middleware's mTLS client certificate. The backend publishes its OpenAPI JSON at `GET /openapi.json`, Swagger UI at `GET /docs`, and ReDoc at `GET /redoc`.
+For production, use the deployment's HTTPS API gateway and the middleware's mTLS client certificate. The backend publishes its OpenAPI JSON at `GET /openapi.json`, Swagger UI at `GET /docs`, and ReDoc at `GET /redoc`.
 
 ### Service JWT
 
@@ -21,29 +21,11 @@ Protected routes take `Authorization: Bearer <access_token>`. The issuer signs t
 
 The **scope** is the permission named in each entry below. For instance, `documents:read jobs:read` permits both document listing and job status calls for authorized resources. Resource IDs are also checked against the calling client and course. [Production ingress settings](a1.md#ingress-configuration)
 
-### Local token endpoint
-
-In the JWT Compose setup, `POST http://127.0.0.1:8001/oauth/token` exchanges test client credentials for a JWT. Enable the token listener with the local test client secret configuration. This token is scoped to `demo-course`. The production identity provider supplies its own token URL. [Local setup and curl commands](local-testing.md#direct-curl-with-a-jwt)
-
-| Input | Location | Required | Value |
-| --- | --- | --- | --- |
-| Client ID and secret | HTTP Basic auth | Yes | Local client ID `auth-demo-middleware` and its configured test secret |
-| `grant_type` | URL-encoded form | Yes | `client_credentials` |
-| `scope` | URL-encoded form | Yes | One or more assigned permissions, separated by spaces |
-
-**Output** `200 OK` with `access_token` (the signed JWT), `token_type` (`Bearer`) and `expires_in` (`300` seconds locally). A wrong client ID or secret returns `401` with `error: invalid_client`. An unsupported grant or scope returns `400` with `error: unsupported_grant_type` or `invalid_scope`. Use the `access_token` value in the backend's `Authorization` header.
-
-With the local JWT stack running, this PowerShell example gets a fresh token and lists documents for `demo-course`. Enter the value after `=` in `codex_helper/jwt-test/client.env` when prompted.
-
-```powershell
-$upraiseTestSecret = Read-Host "UPRAISE test client secret"
-$jwt = (curl.exe -fsS -u "auth-demo-middleware:$upraiseTestSecret" -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8001/oauth/token | ConvertFrom-Json).access_token
-curl.exe -i -H "Authorization: Bearer $jwt" "http://127.0.0.1:8000/v1/documents?course_id=demo-course"
-```
+Request an access token from the OAuth provider configured for the deployment. In the local JWT test mode, `POST /oauth/token` issues test JWTs on the backend port. [Calling the API with curl](local-testing.md#direct-curl-with-a-jwt)
 
 ### Learner-session JWT
 
-B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from the middleware. It binds the learner, exact generated lesson and result hash, and session approval and consent. Use the same session binding for follow-up calls. The standalone JWT Compose token endpoint issues service tokens. A separately configured signer supplies learner assertions. Explicit development draft previews opened in JWT-free local test mode can omit this header. [Learner assertion claims](b1.md#production-identity-consent-and-approval)
+B1, B2, B4, and B5 also take `X-UPRAISE-Session-JWT`, a signed assertion from the middleware. It binds the learner, exact generated lesson and result hash, and session approval and consent. Use the same session binding for follow-up calls. A separately configured signer supplies learner assertions. Explicit development draft previews opened in JWT-free local test mode can omit this header. [Learner assertion claims](b1.md#production-identity-consent-and-approval)
 
 ### Request and response conventions
 

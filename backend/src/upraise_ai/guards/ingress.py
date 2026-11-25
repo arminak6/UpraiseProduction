@@ -1,12 +1,38 @@
 import ipaddress
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
 import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer
 
 from upraise_ai.core.config import Settings, get_settings
+
+LOCAL_JWT_CLIENT_ID = "auth-demo-middleware"
+LOCAL_JWT_ISSUER = "urn:upraise:local-jwt-test"
+LOCAL_JWT_AUDIENCE = "upraise-local-api"
+LOCAL_JWT_LIFETIME = 3600
+LOCAL_TEST_SCOPES = frozenset({
+    "documents:read", "documents:write", "lessons:write", "jobs:read", "jobs:write", "sessions:write",
+})
+
+
+class LocalJWTIssuer:
+    def __init__(self):
+        self._signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.public_key = self._signing_key.public_key()
+
+    def issue(self, scopes: list[str]) -> str:
+        return jwt.encode({
+            "iss": LOCAL_JWT_ISSUER,
+            "aud": LOCAL_JWT_AUDIENCE,
+            "client_id": LOCAL_JWT_CLIENT_ID,
+            "exp": int(time.time()) + LOCAL_JWT_LIFETIME,
+            "scope": " ".join(scopes),
+            "upraise_courses": ["demo-course"],
+        }, self._signing_key, algorithm="RS256")
 
 
 @dataclass(frozen=True)
@@ -74,14 +100,19 @@ def ingress(
         require_local_peer(request)
     if settings.local_test_mode:
         request.state.auth_mode = "local-test"
-        scopes = {"documents:write", "documents:read", "lessons:write", "jobs:read", "jobs:write", "sessions:write"}
+        scopes = LOCAL_TEST_SCOPES
         if settings.operations_local_admin:
-            scopes.add("admin:operations")
+            scopes = scopes | {"admin:operations"}
         return Principal(
-            "local-test-client", (), frozenset(scopes),
+            "local-test-client", (), scopes,
             local_test=True,
         )
-    if not (
+    local_issuer = None
+    if settings.local_jwt_test_mode and settings.jwt_test_client_secret.get_secret_value():
+        local_issuer = getattr(request.app.state, "local_jwt_issuer", None)
+        if local_issuer is None:
+            raise HTTPException(503, "INGRESS_NOT_CONFIGURED")
+    if local_issuer is None and not (
         settings.oauth_issuer
         and settings.oauth_audience
         and settings.oauth_jwks_url.startswith("https://")
@@ -95,13 +126,22 @@ def ingress(
         raise HTTPException(401, "BEARER_TOKEN_REQUIRED", headers={"WWW-Authenticate": "Bearer"})
     token = authorization[7:]
     try:
-        key = jwks_client(settings.oauth_jwks_url).get_signing_key_from_jwt(token).key
+        if local_issuer is None:
+            key = jwks_client(settings.oauth_jwks_url).get_signing_key_from_jwt(token).key
+            issuer, audience = settings.oauth_issuer, settings.oauth_audience
+            algorithms = ["RS256", "ES256"]
+            clients = settings.oauth_clients
+        else:
+            key = local_issuer.public_key
+            issuer, audience = LOCAL_JWT_ISSUER, LOCAL_JWT_AUDIENCE
+            algorithms = ["RS256"]
+            clients = [LOCAL_JWT_CLIENT_ID]
         claims = jwt.decode(
             token,
             key,
-            algorithms=["RS256", "ES256"],
-            issuer=settings.oauth_issuer,
-            audience=settings.oauth_audience,
+            algorithms=algorithms,
+            issuer=issuer,
+            audience=audience,
             options={"require": ["exp", "iss", "aud"]},
         )
     except jwt.PyJWKClientConnectionError:
@@ -112,7 +152,7 @@ def ingress(
     courses = claims.get("upraise_courses")
     scope = claims.get("scope", "")
     if (
-        client_id not in settings.oauth_clients
+        client_id not in clients
         or not isinstance(courses, list)
         or not all(isinstance(c, str) for c in courses)
         or not isinstance(scope, str)

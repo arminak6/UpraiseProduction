@@ -3,13 +3,12 @@
 aws_credentials.json
 /callback_tls/*
 !/callback_tls/README.md
-backend/math_runtime/node_modules/
-/frontend2/node_modules/
+node_modules/
 .venv/
-**/.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
 /codex_helper/
 /course_archive/
 /FUTURE_UPDATES.md

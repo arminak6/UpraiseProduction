@@ -64,6 +64,44 @@ fresh passwords, stores salted password hashes in memory, and creates temporary
 certificates and signing keys. The browser receives only an HTTP-only demo
 session cookie. Stop the foreground process with Ctrl+C.
 
+## Test JWTs with curl on port 8514
+
+For the full Compose backend, [request a test JWT on port 8000](../../../backend/docs/local-testing.md#direct-curl-with-a-jwt).
+
+This demo uses one sample document. It sends the JWT through the demo's mTLS
+gateway to the real UPRAISE document route. It runs alongside the main
+Compose stack and generates fresh test credentials on every start.
+
+Run this from the root of a fresh clone. Skip the build if you already built
+the backend image.
+
+```sh
+docker compose build backend
+docker compose -f frontend2/tests/auth_demo/compose.yaml run --rm --publish 127.0.0.1:8514:8514 auth-demo python curl_demo.py --host 0.0.0.0
+```
+
+Keep that terminal open and use the test client secret it prints when curl
+prompts for the password. In a second terminal on the same machine, get the
+JWT and call the documents API. The demo is reachable on the Docker host's
+loopback address. For an Ubuntu server, run curl on the server or use SSH
+port forwarding to reach it from your own computer.
+
+```powershell
+$jwt = (curl.exe -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8514/oauth/token | ConvertFrom-Json).access_token
+curl.exe -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8514/v1/documents
+```
+
+On Ubuntu, use `curl` and Python 3 to read the JSON response.
+
+```sh
+jwt=$(curl -fsS -u auth-demo-middleware -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8514/oauth/token | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')
+curl -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8514/v1/documents
+```
+
+A valid JWT returns `200` with the sample document. An omitted or invalid JWT
+returns `401`. Each JWT lasts five minutes. Press Ctrl+C in the first terminal
+to stop the demo.
+
 ## Run the automated check
 
 ```powershell
