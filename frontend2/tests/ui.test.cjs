@@ -8,6 +8,21 @@ async function recordVoice(h, seconds = 1, channels) {
   h.click('[data-action="stop-recording"]'); await h.settle();
 }
 
+test("local JWT mode uploads into the authorized course", async t => {
+  const h = await harness(backend => {
+    backend.intercept = call => call.path === "/config" ? backend.response({
+      ui_nonce: "test-ui-nonce", activity_id: "client-activity", demo_course: "demo-course",
+    }) : undefined;
+  });
+  t.after(h.close);
+  assert.equal(h.find("#upload-course").readOnly, true);
+  assert.equal(h.find("#upload-course").value, "demo-course");
+  h.chooseFile("material.pdf");
+  h.submit("#upload-form");
+  await h.waitFor(() => h.backend.records("POST", "/v1/documents").length > 0);
+  assert.equal(h.backend.records("POST", "/v1/documents")[0].rawBody.get("course_id"), "demo-course");
+});
+
 test('PowerPoint upload exposes explicit notes/hidden choices and pins them in the retry identity', async t => {
   const h = await harness(); t.after(h.close);
   assert.ok(h.find('#file-input').accept.includes('.pptx'));

@@ -4,6 +4,7 @@
   let config;
   const messages = {
     BACKEND_UNAVAILABLE: "The backend could not be reached. Check that it is running, then refresh the workspace.",
+    BACKEND_TOKEN_UNAVAILABLE: "The backend could not issue a JWT. Check the server's configured client credentials.",
     BACKEND_TIMEOUT: "The backend took too long to respond. Your request may already have been accepted.",
     BACKEND_REDIRECT_BLOCKED: "The backend redirected this request. Check the configured gateway address.",
     BACKEND_RESPONSE_INVALID: "The gateway returned an unexpected response. Check the backend address and authentication.",

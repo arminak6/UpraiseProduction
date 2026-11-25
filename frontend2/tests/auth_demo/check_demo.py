@@ -1,5 +1,6 @@
 """Exercise the disposable login, token issuer and backend over real HTTP and TLS."""
 
+from unittest.mock import patch
 from uuid import uuid4
 
 import httpx
@@ -13,6 +14,8 @@ def check(browser, issuer, directory, passwords):
         assert client.get("/").status_code == 200
         assert client.get("/styles.css").status_code == 200
         assert client.get("/demo.js").status_code == 200
+        assert client.get("/upraise-logo.png").headers["Content-Type"] == "image/png"
+        assert client.get("/upraise-icon.png").headers["Content-Type"] == "image/png"
         assert client.get("/users.json").status_code == 404
         assert client.get("/demo/documents").status_code == 401
         assert client.post("/demo/login", json={"username": "teacher", "password": "wrong"}).status_code == 401
@@ -69,19 +72,28 @@ def check_workspace(browser, passwords):
     with httpx.Client(base_url=f"http://127.0.0.1:{browser.server_port}", trust_env=False) as client:
         response = client.get("/")
         assert response.status_code == 303 and response.headers["location"] == "/login"
-        assert "Sign in" in client.get("/login").text
+        login_page = client.get("/login").text
+        assert "Sign in" in login_page and "/upraise-logo.png" in login_page
+        assert client.get("/upraise-logo.png").headers["Content-Type"] == "image/png"
+        assert client.get("/upraise-icon.png").headers["Content-Type"] == "image/png"
         assert client.get("/api/config").status_code == 401
         assert client.get("/api/v1/documents").status_code == 401
         form = {"username": "teacher", "password": "wrong"}
         assert client.post("/demo/login", json=form).status_code == 401
         assert client.post("/demo/login", json={**form, "password": passwords["teacher"]}).status_code == 200
-        assert "Teacher review" in client.get("/").text
+        workspace_page = client.get("/").text
+        assert "Teacher review" in workspace_page and "./upraise-logo.png" in workspace_page
         config = client.get("/api/config").json()
         assert config["demo_user"] == "Teacher" and config["demo_course"] == COURSE
         headers = {"X-UPRAISE-UI": config["ui_nonce"]}
         for path in ("documents", "lesson-jobs", "lesson-reviews"):
             result = client.get(f"/api/v1/{path}", headers=headers)
             assert result.status_code == 200 and isinstance(result.json(), list), result.text
+        documents = f"/api/v1/documents?course_id={COURSE}"
+        with patch.object(browser, "client_secret", "invalid-test-credential"):
+            result = client.get(documents, headers=headers)
+            assert result.status_code == 502 and result.json()["detail"] == "BACKEND_UNAVAILABLE", result.text
+        assert client.get(documents, headers=headers).status_code == 200
         bad_course = client.get("/api/v1/documents", params={"course_id": "other"}, headers=headers)
         assert bad_course.status_code == 403 and bad_course.json()["detail"] == "COURSE_SCOPE_DENIED"
 
@@ -104,4 +116,4 @@ def check_workspace(browser, passwords):
         assert client.post("/demo/login", json={"username": "operator", "password": passwords["operator"]}).status_code == 200
         result = try_upload()
         assert result.status_code == 403 and result.json()["detail"] == "DEMO_ACCESS_DENIED", result.text
-    print("PASS: same-port login, main workspace, production API routes, course permissions and sign-out", flush=True)
+    print("PASS: branded login and workspace, JWT issuance and recovery, API permissions and sign-out", flush=True)

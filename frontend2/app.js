@@ -197,8 +197,12 @@
     try {
       if (!state.config) {
         state.config = await api.initialize(); state.activityId = state.config.activity_id;
+        const courseField = document.querySelector("#upload-course");
+        if (courseField && state.config.demo_course) {
+          courseField.value = state.config.demo_course;
+          courseField.readOnly = true;
+        }
         if (state.config.demo_user) {
-          state.uploadName ||= state.config.demo_course;
           document.querySelector("#demo-user").textContent = `Signed in as ${state.config.demo_user}`;
           document.querySelector("#demo-account").hidden = false;
         }
@@ -241,12 +245,13 @@
   }
 
   function renderMaterials() {
+    const fixedCourse = state.config?.demo_course;
     main.innerHTML = `${intro("01", "SOURCE MATERIAL", "Upload material<br>for <em>a draft course.</em>", "Upload a document to try course generation<br class=\"desktop-break\"> with your own material.", true)}
       <div class="grid-upload"><section class="card card-padding" aria-labelledby="upload-title"><div class="card-title-row"><h2 id="upload-title">Add a document</h2>${icon("upload")}</div>
       <form id="upload-form"><fieldset class="plain-fieldset" ${state.uploadBusy ? "disabled" : ""}><div class="drop-zone" id="drop-zone"><span class="upload-symbol">${icon("upload")}</span><strong id="file-heading">${state.selectedFile ? escape(state.selectedFile.name) : "Drag your document here"}</strong><p>or <label class="file-label" for="file-input" tabindex="0">browse files</label> to get started</p><span class="file-note" id="file-note">${state.selectedFile ? `${escape(formatSize(state.selectedFile.size))} · Ready to upload` : "PDF, Word, PowerPoint or CSV · Up to 100 MB"}</span><input type="file" class="sr-only" id="file-input" accept=".pdf,.docx,.doc,.csv,.pptx" aria-label="Choose a PDF, Word, PowerPoint or CSV document"></div>
-      <div class="form-grid"><div class="field"><label for="upload-course">Course name or reference</label><input id="upload-course" name="course" maxlength="120" placeholder="e.g. Introduction to artificial intelligence" value="${escape(state.uploadName)}" required></div><div class="field"><label for="upload-language">Document language</label><select id="upload-language" name="language">${languageOptions(state.uploadLanguage)}</select></div></div>
+      <div class="form-grid"><div class="field"><label for="upload-course">Course name or reference</label><input id="upload-course" name="course" maxlength="120" placeholder="e.g. Introduction to artificial intelligence" value="${escape(fixedCourse || state.uploadName)}" ${fixedCourse ? "readonly" : "required"}></div><div class="field"><label for="upload-language">Document language</label><select id="upload-language" name="language">${languageOptions(state.uploadLanguage)}</select></div></div>
       <details class="advanced upload-advanced"><summary>Course settings</summary><div class="field"><label for="upload-activity">Activity reference</label><input id="upload-activity" name="activity" maxlength="120" value="${escape(state.activityId)}" required><small>For an existing Moodle course, enter its authorized course reference above and the matching activity here.</small></div></details>
-      <div class="form-bottom"><span>${icon("lock")}Uploads are sent to the demo backend</span><button class="button" type="submit">${icon(state.uploadBusy ? "loader" : "upload", state.uploadBusy ? "spinner" : "")}${state.uploadBusy ? "Uploading…" : state.uploadAttempt?.failed ? "Retry upload" : "Upload material"}</button></div></fieldset><p class="inline-error" id="upload-error" role="alert" ${state.uploadError ? "" : "hidden"}>${escape(state.uploadError)}</p></form></section>
+      <div class="form-bottom"><span>${icon("lock")}Uploads are sent to the backend</span><button class="button" type="submit">${icon(state.uploadBusy ? "loader" : "upload", state.uploadBusy ? "spinner" : "")}${state.uploadBusy ? "Uploading…" : state.uploadAttempt?.failed ? "Retry upload" : "Upload material"}</button></div></fieldset><p class="inline-error" id="upload-error" role="alert" ${state.uploadError ? "" : "hidden"}>${escape(state.uploadError)}</p></form></section>
       <aside class="journey-card" aria-label="How UPRAISE works"><p class="eyebrow">DEMO FLOW</p><div class="journey-step"><span class="journey-icon">${icon("document")}</span><div><h3>Upload a source</h3><p>Choose a document for the demo.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("sparkles")}</span><div><h3>Generate a draft</h3><p>Generate text and narration at selected levels.</p></div></div><div class="journey-step"><span class="journey-icon">${icon("headphones")}</span><div><h3>Preview a lesson</h3><p>Try playback and ask a question.</p></div></div><p class="journey-footnote">${icon("leaf")}AI-generated drafts require human review.</p></aside></div>
       <section class="library" aria-labelledby="library-title"><div class="section-heading"><div><h2 id="library-title">Your material <span class="count-pill" id="material-count">${state.materials.length}</span></h2><p>Documents uploaded for draft generation.</p></div><label class="search-field">${icon("search")}<span class="sr-only">Search material</span><input id="material-search" type="search" placeholder="Search material…" value="${escape(state.search)}"></label></div><div id="material-results">${materialTable()}</div><p class="tip-line">${icon("info")}PDF, Word, PowerPoint (.pptx) and UTF-8 CSV are supported. Processing completion does not establish source accuracy.</p></section>`;
     updatePowerPointOptions();
@@ -311,7 +316,7 @@
     document.querySelector("#file-heading").textContent = error ? "Drag your document here" : file.name;
     document.querySelector("#file-note").textContent = error ? "PDF, Word, PowerPoint or CSV · Up to 100 MB" : `${formatSize(file.size)} · Ready to upload`;
     if (error) { document.querySelector("#file-input").value = ""; showUploadError(error); return; }
-    if (!state.uploadName) {
+    if (!state.uploadName && !state.config?.demo_course) {
       state.uploadName = file.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ").slice(0, 120);
       document.querySelector("#upload-course").value = state.uploadName;
     }
@@ -336,7 +341,7 @@
   async function uploadMaterial(form) {
     if (state.uploadBusy) return;
     if (!state.selectedFile) { showUploadError("Choose a document before uploading."); return; }
-    const fields = { course_id: form.elements.course.value.trim(), activity_id: form.elements.activity.value.trim(), language: form.elements.language.value, source_ref: state.selectedFile.name.slice(0, 200) };
+    const fields = { course_id: state.config?.demo_course || form.elements.course.value.trim(), activity_id: form.elements.activity.value.trim(), language: form.elements.language.value, source_ref: state.selectedFile.name.slice(0, 200) };
     if (!fields.course_id || !fields.activity_id) { showUploadError("Enter the course name and activity reference."); return; }
     const file = state.selectedFile;
     if (/\.pptx$/i.test(file.name)) Object.assign(fields, { include_speaker_notes: String(state.includeSpeakerNotes), include_hidden_slides: String(state.includeHiddenSlides) });
@@ -1176,7 +1181,7 @@
     }
   }
   function connectionInfo() {
-    openModal(`${modalHeader("Demo connection", "CONNECTION SETTINGS")}<p class="modal-copy">${state.connected ? "Connected to your backend." : "Your backend connection needs attention."}<br>${state.local ? "Local development draft preview is active." : "This demo uses gateway authentication and signed lesson sessions."}</p><div class="field"><label>Backend address</label><p class="preview-text">${escape(state.config?.backend_url || "Not connected")}</p></div><p class="small-copy">Connection credentials are configured on the UPRAISE server. Browser requests stay on this address; service tokens and TLS private keys are not sent to the page.</p><p class="small-copy">Course text and narration use the backend’s existing retention policy. Generated material remains a draft requiring human review.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button><button class="button" data-action="refresh-connection">Refresh connection ${icon("replay")}</button></div>`);
+    openModal(`${modalHeader("Demo connection", "CONNECTION SETTINGS")}<p class="modal-copy">${state.connected ? "Connected to your backend." : "Your backend connection needs attention."}<br>${state.local ? "Local development draft preview is active." : "The server uses a service JWT. Playback requires a signed lesson session token."}</p><div class="field"><label>Backend address</label><p class="preview-text">${escape(state.config?.backend_url || "Not connected")}</p></div><p class="small-copy">Connection credentials are configured on the UPRAISE server. Browser requests stay on this address; service tokens and TLS private keys are not sent to the page.</p><p class="small-copy">Course text and narration use the backend’s existing retention policy. Generated material remains a draft requiring human review.</p><div class="modal-actions"><button class="button button-secondary" data-action="close-modal">Close</button><button class="button" data-action="refresh-connection">Refresh connection ${icon("replay")}</button></div>`);
   }
   async function runAction(action, control) {
     const id = control?.dataset.id;

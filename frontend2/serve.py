@@ -1,6 +1,7 @@
 """Serve UPRAISE and a same-origin bridge to its existing HTTP backend."""
 
 import argparse
+import base64
 import hmac
 import json
 import os
@@ -17,7 +18,10 @@ from urllib.parse import parse_qsl, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
-ASSETS = {"/", "/index.html", "/styles.css", "/app.js", "/api.js", "/ui.js", "/voice.js", "/voice-capture-worklet.js", "/favicon.svg"}
+ASSETS = {
+    "/", "/index.html", "/styles.css", "/app.js", "/api.js", "/ui.js", "/voice.js",
+    "/voice-capture-worklet.js", "/upraise-logo.png", "/upraise-icon.png",
+}
 UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 ROUTES = [
     ("GET", r"/health", set()),
@@ -41,9 +45,12 @@ ROUTES = [
 ]
 MAX_UPLOAD = 100 * 1024 * 1024 + 256 * 1024
 MAX_JSON = 128 * 1024
+MAX_TOKEN_RESPONSE = 16 * 1024
 MAX_VOICE_UPLOAD = 6_000_000 + 65536  # B4 audio bytes plus bounded multipart metadata.
 MAX_RESPONSE = 128 * 1024 * 1024
 DEFAULT_LEVELS = ["beginner", "intermediate", "advanced"]
+LOCAL_JWT_CLIENT_ID = "auth-demo-middleware"
+LOCAL_JWT_COURSE = "demo-course"
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -55,6 +62,7 @@ class NoRedirect(HTTPRedirectHandler):
 class Settings:
     backend_url: str = "http://127.0.0.1:8000"
     token: str = field(default="", repr=False)
+    jwt_test_client_secret: str = field(default="", repr=False)
     certificate: str = ""
     private_key: str = field(default="", repr=False)
     key_password: str = field(default="", repr=False)
@@ -168,11 +176,37 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
 
     def configuration(self):
         settings = self.server.settings
-        return {"backend_url": settings.backend_url, "ui_nonce": settings.ui_nonce,
-                "activity_id": settings.activity_id, "levels": settings.levels}
+        config = {"backend_url": settings.backend_url, "ui_nonce": settings.ui_nonce,
+                  "activity_id": settings.activity_id, "levels": settings.levels}
+        if settings.jwt_test_client_secret:
+            config["demo_course"] = LOCAL_JWT_COURSE
+        return config
 
     def bearer_token(self):
-        return self.server.settings.token
+        settings = self.server.settings
+        if not settings.jwt_test_client_secret:
+            return settings.token
+        credentials = f"{LOCAL_JWT_CLIENT_ID}:{settings.jwt_test_client_secret}".encode("utf-8")
+        request = Request(
+            settings.backend_url + "/oauth/token",
+            data=b"grant_type=client_credentials",
+            headers={"Authorization": "Basic " + base64.b64encode(credentials).decode("ascii"),
+                     "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        )
+        with self.server.upstream.open(request, timeout=10) as response:
+            if response.code != 200:
+                raise URLError("Unexpected token endpoint status")
+            payload = response.read(MAX_TOKEN_RESPONSE + 1)
+        if len(payload) > MAX_TOKEN_RESPONSE:
+            raise URLError("Token endpoint response is too large")
+        try:
+            data = json.loads(payload)
+        except ValueError:
+            raise URLError("Invalid token endpoint response") from None
+        token = data.get("access_token") if isinstance(data, dict) else None
+        if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
+            raise URLError("Token endpoint returned an invalid access token")
+        return token
 
     def proxy(self):
         if not self.trusted_request(nonce=True):
@@ -236,7 +270,8 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
         try:
             token = self.bearer_token().strip()
         except (URLError, OSError):
-            self.json_response(502, {"detail": "BACKEND_UNAVAILABLE"})
+            detail = "BACKEND_TOKEN_UNAVAILABLE" if self.server.settings.jwt_test_client_secret else "BACKEND_UNAVAILABLE"
+            self.json_response(502, {"detail": detail})
             return
         if token:
             if token.lower().startswith("bearer "):
@@ -294,9 +329,14 @@ def main():
     levels = list(profiles) or DEFAULT_LEVELS.copy()
     if not 1 <= len(levels) <= 8 or not all(re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name) for name in levels):
         parser.error("UPRAISE_LESSON_LEVEL_PROFILES must contain one to eight valid level names.")
+    local_jwt = os.environ.get("UPRAISE_LOCAL_JWT_TEST_MODE", "").strip().lower() in {"1", "on", "t", "true", "y", "yes"}
+    jwt_test_client_secret = os.environ.get("UPRAISE_JWT_TEST_CLIENT_SECRET", "") if local_jwt else ""
+    if local_jwt and not jwt_test_client_secret:
+        parser.error("Set UPRAISE_JWT_TEST_CLIENT_SECRET when UPRAISE_LOCAL_JWT_TEST_MODE is enabled.")
     settings = Settings(
         backend_url=args.backend,
         token=os.environ.get("FRONTEND2_BACKEND_TOKEN", ""),
+        jwt_test_client_secret=jwt_test_client_secret,
         certificate=os.environ.get("FRONTEND2_CLIENT_CERT", ""),
         private_key=os.environ.get("FRONTEND2_CLIENT_KEY", ""),
         key_password=os.environ.get("FRONTEND2_KEY_PASSWORD", ""),

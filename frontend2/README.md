@@ -2,8 +2,7 @@
 
 The client-facing UPRAISE interface has four sections: **Upload material**,
 **Generate course**, **Teacher review**, and **Start learning**. It connects to the existing backend
-through a small Python HTTP bridge. The original Streamlit `frontend/` remains
-available independently.
+through a small Python HTTP bridge.
 
 **Version 2.9** is an opt-in teaching/narration choice. It runs writer, reviewer,
 one judge/editing pass and a fresh final review. Unresolved final findings keep
@@ -170,6 +169,8 @@ Production uses the existing OAuth/mTLS gateway. Set credentials on the server:
 | --- | --- |
 | `BACKEND_BASE_URL` | HTTP backend or HTTPS gateway URL |
 | `FRONTEND2_BACKEND_TOKEN` | Service OAuth bearer token |
+| `UPRAISE_LOCAL_JWT_TEST_MODE` | Use the built-in token endpoint on the regular development backend |
+| `UPRAISE_JWT_TEST_CLIENT_SECRET` | Shared client secret for the built-in token endpoint |
 | `FRONTEND2_CLIENT_CERT` | PEM client certificate file path |
 | `FRONTEND2_CLIENT_KEY` | PEM private-key file path |
 | `FRONTEND2_KEY_PASSWORD` | Optional private-key password |
@@ -195,9 +196,16 @@ the bridge checks Host/Origin and a per-server UI nonce, restricts endpoint and
 header forwarding, and exposes only the static UI assets. It is not a public
 multi-user authentication gateway.
 
-The [local authentication workspace](tests/auth_demo/README.md) adds sign-in
-before the same UI on port 8502 and exercises production JWT and mTLS checks
-with two test users. Its Compose project has its own database and test course.
+In local JWT mode, regular Frontend2 uses the same database and workers as
+the backend. The UI server posts `grant_type=client_credentials` to
+`/oauth/token` before forwarding each allowed backend API request with the
+returned JWT. Set `UPRAISE_LOCAL_JWT_TEST_MODE=true` and
+`UPRAISE_JWT_TEST_CLIENT_SECRET` in the root `.env` for both services.
+The issued JWT grants access to `demo-course`, which the upload form selects.
+See [backend local JWT setup](../backend/docs/local-testing.md#direct-curl-with-a-jwt).
+
+The [isolated authentication test fixture](tests/auth_demo/README.md) is used
+for sign-in and mTLS integration checks.
 
 ## Verification
 
@@ -224,7 +232,7 @@ Markdown/LaTeX typesetter is not included in this frontend.
 - `api.js`: same-origin client, request errors, file/audio hashing.
 - `ui.js`: local SVG presentation helpers and text escaping.
 - `app.js`: authoring, progress, revision, learner session and playback views.
-- `styles.css` / `index.html` / `favicon.svg`: approved UPRAISE visual design.
+- `styles.css`, `index.html`, `upraise-logo.png`, and `upraise-icon.png`: shared visual design.
 - `tests/`: maintained bridge and DOM interaction regressions.
 
 Backend contracts: [A3 v2](../backend/docs/a3-v2.md),

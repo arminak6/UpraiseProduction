@@ -1,5 +1,6 @@
 """Exercise the real local bridge against a disposable HTTP backend."""
 
+import base64
 import hashlib
 import http.client
 import json
@@ -8,6 +9,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from serve import MAX_JSON, MAX_VOICE_UPLOAD, Settings, UpraiseServer  # noqa: E402
@@ -28,6 +30,9 @@ class FakeBackend(BaseHTTPRequestHandler):
         status = self.server.status
         headers = self.server.response_headers.copy()
         data = self.server.data
+        if self.path == "/oauth/token":
+            status = self.server.token_status
+            data = b'{"access_token":"test.jwt.signature"}'
         self.send_response(status)
         for name, value in headers.items():
             self.send_header(name, value)
@@ -62,6 +67,7 @@ class BridgeTests(unittest.TestCase):
     def setUp(self):
         self.backend.calls = []
         self.backend.status = 200
+        self.backend.token_status = 200
         self.backend.response_headers = {"Content-Type": "application/json", "X-UPRAISE-Auth-Mode": "local-test"}
         self.backend.data = b"[]"
 
@@ -77,7 +83,8 @@ class BridgeTests(unittest.TestCase):
             connection.close()
 
     def test_static_assets_and_hidden_project_files(self):
-        for path in ("/", "/index.html", "/app.js", "/api.js", "/ui.js", "/voice.js", "/voice-capture-worklet.js", "/styles.css", "/favicon.svg"):
+        for path in ("/", "/index.html", "/app.js", "/api.js", "/ui.js", "/voice.js",
+                     "/voice-capture-worklet.js", "/styles.css", "/upraise-logo.png", "/upraise-icon.png"):
             with self.subTest(path=path):
                 status, headers, body = self.request(path, nonce=False)
                 self.assertEqual(status, 200)
@@ -94,6 +101,31 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(config["ui_nonce"], self.settings.ui_nonce)
         self.assertEqual(config["levels"], ["beginner", "intermediate", "advanced"])
         self.assertNotIn(b"test-service-token", body)
+
+    def test_local_jwt_bridge_fetches_and_forwards_token_server_side(self):
+        with patch.object(self.settings, "jwt_test_client_secret", "middleware-secret"):
+            status, _, config = self.request("/api/config", nonce=False)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(config)["demo_course"], "demo-course")
+            self.assertNotIn(b"middleware-secret", config)
+            self.assertEqual(self.request("/api/oauth/token", method="POST")[0], 404)
+            status, _, response = self.request("/api/v1/documents?course_id=demo-course")
+            self.assertEqual(status, 200)
+            self.assertNotIn(b"test.jwt.signature", response)
+            issuer_call, documents_call = self.backend.calls
+            self.assertEqual(issuer_call[:2], ("POST", "/oauth/token"))
+            basic = base64.b64encode(b"auth-demo-middleware:middleware-secret").decode()
+            self.assertEqual(issuer_call[2]["Authorization"], "Basic " + basic)
+            self.assertEqual(issuer_call[3], b"grant_type=client_credentials")
+            self.assertEqual(documents_call[:2], ("GET", "/v1/documents?course_id=demo-course"))
+            self.assertEqual(documents_call[2]["Authorization"], "Bearer test.jwt.signature")
+
+            self.backend.calls.clear()
+            self.backend.token_status = 401
+            status, _, response = self.request("/api/v1/documents")
+            self.assertEqual(status, 502)
+            self.assertEqual(json.loads(response), {"detail": "BACKEND_TOKEN_UNAVAILABLE"})
+            self.assertEqual([call[1] for call in self.backend.calls], ["/oauth/token"])
 
     def test_nonce_host_and_origin_checks(self):
         self.assertEqual(self.request("/api/v1/documents", nonce=False)[0], 403)

@@ -13,3 +13,5 @@ services:
       - .:/demo:ro
       - ../../../backend/src:/app/src:ro
       - ../../styles.css:/ui/styles.css:ro
+      - ../../upraise-logo.png:/ui/upraise-logo.png:ro
+      - ../../upraise-icon.png:/ui/upraise-icon.png:ro

@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#147d70">
+    <meta name="theme-color" content="#ab007a">
     <meta name="description" content="UPRAISE proof of concept for draft course generation, review, and playback.">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>UPRAISE · Proof of concept</title>
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link rel="icon" type="image/png" href="./upraise-icon.png">
     <link rel="stylesheet" href="./styles.css">
     <script src="./api.js" defer></script>
     <script src="./ui.js" defer></script>
@@ -19,8 +19,7 @@
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="#materials" aria-label="UPRAISE home">
-          <svg class="brand-symbol" viewBox="0 0 36 36" fill="none" aria-hidden="true"><rect width="36" height="36" rx="11" fill="currentColor"/><path d="M10 24V16L17 9V24M19 24V17L26 10V24" stroke="white" stroke-width="3" stroke-linejoin="round"/></svg>
-          <span>UPRAISE<span class="brand-dot">.</span></span>
+          <img class="brand-logo" src="./upraise-logo.png" alt="" width="1772" height="554">
         </a>
         <nav class="main-nav" aria-label="Main navigation">
           <a href="#materials" data-nav="materials"><span class="nav-number">1</span>Upload material</a>
@@ -31,7 +30,7 @@
         <button class="workspace-button" data-action="connection-info" aria-label="Connection settings"><span class="workspace-avatar">U</span><span>Proof of concept<span class="workspace-subtitle">Connection settings</span></span></button>
       </div>
     </header>
-    <div class="preview-strip"><div class="page-width"><span class="preview-dot" id="connection-dot"></span><strong id="connection-label">Connecting…</strong><span class="preview-divider">/</span><span id="connection-description">Connecting to the demo backend.</span><button data-action="refresh-workspace">Refresh demo <span aria-hidden="true">↻</span></button></div></div>
+    <div class="preview-strip"><div class="page-width"><span class="preview-dot" id="connection-dot"></span><strong id="connection-label">Connecting…</strong><span class="preview-divider">/</span><span id="connection-description">Connecting to the backend.</span><button data-action="refresh-workspace">Refresh workspace <span aria-hidden="true">↻</span></button></div></div>
     <div class="preview-strip" id="demo-account" hidden><div class="page-width"><strong id="demo-user"></strong><button id="demo-sign-out" type="button">Sign out</button></div></div>
     <main id="main" class="page-width" tabindex="-1"></main>
     <footer class="site-footer page-width"><span><span class="footer-mark">↑</span> UPRAISE <span class="footer-divider">/</span> Internal demo</span><span>AI-generated learning <span class="footer-dot">·</span> Human review required</span></footer>

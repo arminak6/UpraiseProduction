@@ -25,6 +25,16 @@ Generate draft, Teacher review and Preview courses. The Teacher can submit
 authoring requests for `demo-course`. The Operator can read the workspace but
 receives `403` when submitting an upload. **Sign out** returns to the login page.
 
+1. The browser sends the demo username and password to the UI server and
+   receives an HTTP-only session cookie when sign-in succeeds.
+2. When the browser loads documents, it calls `GET /api/v1/documents` on
+   the UI server with that cookie.
+3. The UI server checks the session and sends `POST /oauth/token` to the local
+   issuer using its own client ID, client secret, and `grant_type=client_credentials`.
+4. The UI server calls `GET /v1/documents` through the gateway with
+   `Authorization: Bearer <JWT>`. The backend verifies the JWT and returns
+   the documents. The service credentials and JWT stay on the server.
+
 This Compose project starts a clean PostgreSQL and Qdrant workspace with the real
 backend routes. This authentication setup starts no processing workers. Uploads
 and generation requests can be tested for authorization and acceptance. Jobs

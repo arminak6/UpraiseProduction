@@ -7,8 +7,7 @@ PG DRAFT text/plans and Qdrant sources persist; A5 staging TTL24h, completed pac
 saved in course_archive/. Moodle owns approval. No stage/commit without request.
 ../Uprise/v2 reference-only; semantic findings/evidence in codex_helper/.
 frontend2/ is the proof-of-concept UI on localhost:8502 via stdlib HTTP bridge.
-Its copy presents draft generation, review and playback. frontend/ remains a
-separate Streamlit testbench/player. C3 schema exists.
+It presents draft generation, review and playback. C3 schema exists.
 
 ## Architecture and data flow
 
@@ -98,12 +97,16 @@ separate Streamlit testbench/player. C3 schema exists.
 - backend/docs/api-reference.md catalogs all 25 backend HTTP operations and their schemas.
   Other backend/docs/ files cover teaching versions, ingestion, lifecycle and operations.
 - frontend2/tests/auth_demo/ runs Frontend2 with sign-in on 8502 via workspace.compose.yaml.
-  Separate PG/Qdrant, demo-course, production JWT/mTLS; processing workers are absent.
+  The UI bridge checks the browser session, requests a client-credentials JWT, and
+  calls the production-mode backend through mTLS. Separate PG/Qdrant for demo-course;
+  processing workers are absent. Login and Frontend2 share the magenta logo and styles.
   Standalone browser (8513) and curl (8514) demos use a sample document. See its README.
   Normal Compose serves one-hour test JWTs at POST /oauth/token alongside /v1 APIs on port 8000 in development JWT mode.
-  Local token requests use client credentials and grant_type only. Test JWTs cover demo-course.
+  Regular Frontend2 posts client credentials and grant_type to that endpoint before each
+  backend request. It uses the main stack's data and workers. Its upload form selects
+  demo-course, the course authorized by local JWTs. The UI keeps credentials server-side.
   Production calls use the configured OAuth issuer and mTLS. See backend/docs/local-testing.md.
-- frontend/ Streamlit; frontend2/{app,api,ui,voice,voice-capture-worklet}.js,serve.py,index.html,styles.css,
+- frontend2/{app,api,ui,voice,voice-capture-worklet}.js,serve.py,index.html,styles.css,
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
 - Archive: storage/lesson_archive.py, services/lesson_replacement.py,
   workflows/archive_lessons.py. Matching integration tests cover erasure/TTL/A7.
@@ -119,8 +122,8 @@ separate Streamlit testbench/player. C3 schema exists.
 
 ## Commands
 
-- Docker Desktop Linux; API8000/Streamlit8501/frontend2 8502. Build:
-  docker compose build backend frontend frontend2. Migrate:
+- Docker Desktop Linux; API8000/frontend2 8502. Build:
+  docker compose build backend frontend2. Migrate:
   docker compose run --rm --no-deps migrate. Refresh changed shared backend services:
   docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
 - Drain jobs before pipeline/config changes; restart clears RAM sessions. Never
@@ -128,7 +131,7 @@ separate Streamlit testbench/player. C3 schema exists.
 - codex_helper/validate-a3v2.ps1 -Selection 'not codex_nonexistent_sentinel': full
   suite; empty -k breaks PS. Disposable PG/Qdrant/fake providers, no live data;
   image upraise-word-validation (codex_helper/word-ingestion/Validation.Dockerfile).
-- UI run/auth: frontend{,2}/README.md; local python frontend2/serve.py (3.10+stdlib).
+- UI run/auth: frontend2/README.md; local python frontend2/serve.py (3.10+stdlib).
   Docker static assets are copied, not mounted; rebuild/recreate frontend2 after
   UI changes. New runtime assets must be allowed by frontend2/.dockerignore.
 - UI tests: python -m unittest discover -s frontend2/tests -p test_server.py -v;
@@ -137,12 +140,12 @@ separate Streamlit testbench/player. C3 schema exists.
   START-UBUNTU.md in that directory and ZIP explains local test configuration,
   separate AWS credentials, UID10001 bind-mount permissions and tools-profile startup.
   Source-only; existing course_archive and Docker volumes are not migrated.
-- Ruff backend config backend/pyproject.toml; frontend scoped E4,E7,E9,F with test
+- Ruff backend config backend/pyproject.toml; Frontend2 scoped E4,E7,E9,F with test
   E402 excluded. git diff --check. One-off logs/evidence under codex_helper/.
 
 ## Dependencies and environment
 
-Python3.12/uv,Docling/OCR/CPU Torch,PG17/Qdrant,Streamlit/httpx,LangGraph/Transcribe;
+Python3.12/uv,Docling/OCR/CPU Torch,PG17/Qdrant,httpx,LangGraph/Transcribe;
 EU Bedrock GPTOSS/Qwen,Nova/Titan1024D,eu-central-1. Word/Impress LibreOffice/fonts180s;
 python-pptx1.0.2 locked. PPTX100MiB/1000slides/1000MiB expanded/10000ZIPentries.
 Polly default neural (V2.9 Light standard),16kHz mono16bit,PCM visemes,
@@ -183,6 +186,17 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 ## User notes (preserve verbatim)
 
 ## Last verified
+
+2026-11-25: Removed the standalone Streamlit source and Compose service. Main Compose
+publishes only the backend on 8000 and Frontend2 on 8502 with the tools profile.
+
+2026-11-25: Regular Frontend2 on 8502 uses the main backend's JWT endpoint.
+Confirmed direct unauthenticated documents request returns 401 and the UI bridge
+returns the existing document and lesson with 200. 19 bridge and 81 UI tests passed.
+
+2026-11-25: Matched Frontend2 branding to the transfer template. Verified Docker build,
+18 bridge tests, 80 UI tests, and isolated login, JWT issuance/rejection, API permissions
+and sign-out through the auth demos.
 
 2026-11-25: Verified one-hour JWT issuance without a scope claim on port 8000, regular API
 access, foreign-course denial and the admin check. Both Docker auth demos passed, including

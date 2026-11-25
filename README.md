@@ -104,7 +104,6 @@ overrides for passwords that need URI encoding.
   [C5](backend/docs/c5.md) reports model IDs, prompt hashes, pipelines and B2 policy.
 - Runtime administration: `PUT /v1/admin/kill-switch` requires `admin:operations`;
   [C3](backend/docs/c3.md) documents shared controls, audit, B2 bypass and rollout.
-- Optional Streamlit Learning and API Testbench: http://localhost:8501
 - UPRAISE client interface: http://localhost:8502. With the backend running, use
   `docker compose up --build -d --no-deps --wait frontend2` or
   `python frontend2/serve.py`. Three sections connect real material ingestion,
@@ -112,43 +111,10 @@ overrides for passwords that need URI encoding.
   [frontend2/README.md](frontend2/README.md) for setup, gateway authentication,
   draft/session behavior and verification.
 
-Streamlit is a testing tool in frontend/, separate from the final product.
-Start it with docker compose --profile tools up --build -d --wait.
-Its default Ingestion workspace simulates the orchestrator through A1–A8: PDF/URL
-submission with suggested IDs, a two-part A2 library for listing all accessible
-material or removing it, source selection with progress percentages, draft generation, job tracking,
-review/revision, complete JSON/WAV collection and explicit receipt/cancellation.
-Accepted document/job IDs are carried between steps; request sequences are
-available for inspection. Learning lists ready lessons through A8 with separate
-lesson/difficulty selectors. **Start lesson** creates B1 and displays the first
-chunk's generated text and voice; **Next chunk** advances through the lesson.
-**User interruption** pauses audio and captures its exact position, then opens
-a text question box. **Send question** uses B4 in the same session and shows
-the answer's text and voice. **Back to course** resumes the interrupted chunk
-at that position. **Finish lesson** and **End lesson** close B1 through B5 and
-clear temporary replies. **End session (B5)** also offers explicit API tests.
-All lessons remain drafts requiring human review. Temporary files expire after
-the configured A5 TTL (24 hours by default); saved course packages remain playable.
-Qdrant sources and PostgreSQL lesson text have no automatic expiry. Explicit
-A2 document deletion removes dependent lesson text across levels/languages;
-`DELETE /v1/courses/{course_id}` removes all the caller's source vectors and
-generated lesson content for that course. The Manage material removal panel
-provides this course-wide operation. See [A2](backend/docs/a2.md).
-It also provides A1 PDF/URL submission, A2 course lists/deletion, A3 generation,
-A4 status polling, A5 downloads, A6 job actions, health and a general API
-request panel. Enter the real OAuth token and HTTPS mTLS gateway credentials
-in its sidebar for authenticated requests. See [frontend/README.md](frontend/README.md).
-**Start session (B1)** lets you choose a prepared lesson, open/retry its backend
-session and inspect its session ID, AI notice, language/level and expiry. Local
-preview works without a JWT; signed mode has a separate Middleware session JWT
-field. The Learning page remains the text/voice player.
+For direct API calls, see the [local JWT and curl setup](backend/docs/local-testing.md).
+Production deployment uses the OAuth and mTLS settings in the
+[A1 integration guide](backend/docs/a1.md).
 
-Local Streamlit testing is enabled on this workstation through the ignored root
-.env (environment=development, local_test_mode=true). Leave token/certificate
-fields empty. [Local testing setup](backend/docs/local-testing.md) explains the
-testing identity and how to switch back. Code/Compose defaults remain production
-with local mode disabled; real deployment requires the OAuth/mTLS settings in
-[the A1 integration guide](backend/docs/a1.md).
 First conversion downloads Docling/EasyOCR models into the persistent cache;
 allow extra time and prewarm that cache before deployment.
 
@@ -291,14 +257,13 @@ UpraiseProduction/
       storage/{jobs.py,audit.py,files.py,vectors.py,migrate.py}
       workflows/{submission.py,documents.py,jobs.py}
       workers/{ingestion.py,supervision.py,budgets.py}
-  frontend/
+  frontend2/
     Dockerfile
     .dockerignore
-    .env.example
-    app.py
-    api_client.py
+    index.html
+    app.js
+    serve.py
     tests/
-    requirements.txt
     README.md
 ```
 

@@ -1,12 +1,11 @@
 # Local API testing
 
-On 2026-10-02 the user explicitly approved a local testing mode so the Streamlit
-interface can exercise A1/A2 before Moodle OAuth/mTLS integration is configured.
-This is a deployment setting, not a new API or a change to the document pipeline.
+The development backend can run in JWT-free local test mode or issue local test
+JWTs for Frontend2 and direct API calls.
 
-## Local Streamlit mode
+## JWT-free local test mode
 
-For JWT-free Streamlit testing, set these values in the ignored root `.env`.
+For JWT-free API testing, set these values in the ignored root `.env`.
 
 ```dotenv
 UPRAISE_ENVIRONMENT=development
@@ -20,20 +19,16 @@ Start/rebuild from the project root:
 docker compose --profile tools up --build -d --wait --wait-timeout 180
 ```
 
-Open http://localhost:8501. Leave bearer token and mTLS inputs empty, use
-**Ingest material** for A1, **Processing status** for A4, and **Manage material**
-for A2 list/delete. **Generate lesson** provides A3; Processing status offers
-A5 DRAFT result/audio and A6 cancellation/receipt. Submit known A1 document IDs;
-no re-ingestion is required. Leave callback_url empty for pull-only tests.
-Outbound callbacks still require mTLS/OAuth deployment configuration in local mode.
-Course/activity/source metadata and PDF support limits still
-apply. AWS/PDF extraction, PostgreSQL, Qdrant and audit run normally.
+Open Frontend2 at http://localhost:8502 for upload, generation, review and
+playback. For direct calls, use the [API reference](api-reference.md).
+Leave `callback_url` empty for pull-only tests. Outbound callbacks require
+their mTLS/OAuth deployment configuration.
 
 The backend assigns the fixed `local-test-client` identity, allows any course ID
 entered for these tests, and enforces client ownership. Requests must arrive
-from a loopback/private network peer (including the Compose frontend container),
-using the actual socket address, not forwarded headers. The existing API and
-Streamlit port mappings bind to 127.0.0.1.
+from a loopback or private network peer, including the Frontend2 container.
+The backend checks the socket peer address. The published API and Frontend2
+ports bind to 127.0.0.1.
 
 C3 administration needs an additional explicit development-only opt-in:
 `UPRAISE_OPERATIONS_LOCAL_ADMIN=true`. Its default is false, so ordinary local
@@ -41,19 +36,15 @@ testing does not grant `admin:operations`. See [C3](c3.md) for the runtime-contr
 contract, additive migration and rollout. This option is rejected outside
 development local test mode; production uses an operator OAuth scope.
 
-Streamlit displays a local testing notice for its configured backend. Actual
-backend responses include `X-UPRAISE-Auth-Mode: local-test`; the interface also
-displays that confirmation with each response. Health JSON stays unchanged.
-Changing the Streamlit backend URL does not enable local mode on that server.
+Backend responses include `X-UPRAISE-Auth-Mode: local-test`. Frontend2 uses that
+header to detect local draft-preview mode.
 
 B1 `POST /v1/sessions` also supports JWT-free local DRAFT previews, with optional
 body session UUID/consent simulation. Its response omits capabilities;
 cognitive-load and streaming APIs remain reserved. See
 [B1's one-line curl and lifecycle](b1.md). B4 additionally requires Questions
-consent on that session and an exact chunk ID from A5; the dedicated frontend
-page tests text/WAV interruptions. Learning also offers **Interrupt / ask teacher**
-with automatic current-chunk selection and an integrated B1/B4 question panel.
-See [B4](b4.md).
+consent on that session and an exact chunk ID from A5. Frontend2's course
+preview supports text and WAV questions in the current chunk. See [B4](b4.md).
 
 ## Direct curl with a JWT
 
@@ -90,8 +81,8 @@ Each JWT lasts one hour, and a backend restart invalidates existing test
 tokens. Send only `grant_type=client_credentials` in the form. Regular APIs
 use the authenticated client identity and course access.
 The test client can access its own resources in `demo-course`. Materials from
-JWT-free Streamlit testing belong to the separate `local-test-client` identity.
-The Streamlit test UI accepts a JWT in its **Bearer token** field.
+JWT-free testing belong to the separate `local-test-client` identity.
+Frontend2 requests its service JWT automatically in local JWT mode.
 
 For production, use the deployment's OAuth provider and connect through the
 configured mTLS gateway. [Ingress configuration](a1.md#ingress-configuration)
@@ -114,7 +105,7 @@ and trusted mTLS-gateway enforcement are unchanged.
 
 To return this workstation to production authentication, set these production
 values in its ignored `.env`, configure actual OAuth/mTLS settings, and recreate
-backend/frontend. Local test documents keep their testing client identity; they
+the backend and Frontend2. Local test documents keep their testing client identity; they
 are not silently reassigned to a real Moodle integration. Do not deploy this
 workstation's ignored development `.env` to a production environment.
 

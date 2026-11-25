@@ -122,9 +122,8 @@ Its issuer/audience, trusted caller scope and certificate/TLS termination
 configuration must be supplied. The approved local testing exception is recorded
 in local-testing.md (explicit development mode only; production remains the
 default). The real Moodle delivery/signing setup and operational
-retention still require integration decisions. Streamlit is a separate API
-Testbench with A1, A2, A4 and A6 forms plus health/API explorer. See a6.md for
-durable cancellation and receipt cleanup. The Word file
+retention still require integration decisions. See a6.md for durable
+cancellation and receipt cleanup. The Word file
 is still absent from the workspace; its preserved draft inventory remains the
 baseline until the authority is restored or the earlier draft is confirmed.
 

@@ -237,29 +237,6 @@ services:
       retries: 3
       start_period: 20s
 
-  frontend:
-    profiles: ["tools"]
-    build:
-      context: ./frontend
-    ports:
-      - "127.0.0.1:${FRONTEND_PORT:-8501}:8501"
-    environment:
-      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://backend:8000}
-      UPRAISE_LOCAL_TEST_MODE: ${UPRAISE_LOCAL_TEST_MODE:-false}
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3); assert response.status == 200"
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
   frontend2:
     profiles: ["tools"]
     build:
@@ -271,6 +248,8 @@ services:
       FRONTEND2_PUBLIC_PORT: ${FRONTEND2_PORT:-8502}
       FRONTEND2_ACTIVITY_ID: ${FRONTEND2_ACTIVITY_ID:-upraise-learning}
       FRONTEND2_BACKEND_TOKEN: ${FRONTEND2_BACKEND_TOKEN:-}
+      UPRAISE_LOCAL_JWT_TEST_MODE: ${UPRAISE_LOCAL_JWT_TEST_MODE:-false}
+      UPRAISE_JWT_TEST_CLIENT_SECRET: ${UPRAISE_JWT_TEST_CLIENT_SECRET:-}
       FRONTEND2_CLIENT_CERT: ${FRONTEND2_CLIENT_CERT:-}
       FRONTEND2_CLIENT_KEY: ${FRONTEND2_CLIENT_KEY:-}
       FRONTEND2_KEY_PASSWORD: ${FRONTEND2_KEY_PASSWORD:-}

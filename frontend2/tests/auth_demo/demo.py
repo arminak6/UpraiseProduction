@@ -32,13 +32,16 @@ from transport import (
 )
 
 HERE = Path(__file__).resolve().parent
+UI_ROOT = Path("/ui") if Path("/ui").is_dir() else HERE.parent.parent
 COOKIE = "upraise_auth_demo"
 SESSION_TTL = 1200
 ASSETS = {
     "/": (HERE / "index.html", "text/html; charset=utf-8"),
     "/demo.css": (HERE / "demo.css", "text/css; charset=utf-8"),
     "/demo.js": (HERE / "demo.js", "application/javascript; charset=utf-8"),
-    "/styles.css": (Path("/ui/styles.css"), "text/css; charset=utf-8"),
+    "/styles.css": (UI_ROOT / "styles.css", "text/css; charset=utf-8"),
+    "/upraise-logo.png": (UI_ROOT / "upraise-logo.png", "image/png"),
+    "/upraise-icon.png": (UI_ROOT / "upraise-icon.png", "image/png"),
 }
 CALLS = {"/demo/documents": "/v1/documents", "/demo/version": "/v1/version"}
 

@@ -5,6 +5,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FRONTEND2_HOST=0.0.0.0
 
 WORKDIR /app
-COPY serve.py index.html styles.css api.js ui.js voice.js voice-capture-worklet.js app.js favicon.svg ./
+COPY serve.py index.html styles.css api.js ui.js voice.js voice-capture-worklet.js app.js upraise-logo.png upraise-icon.png ./
 EXPOSE 8502
 CMD ["python", "serve.py"]

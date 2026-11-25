@@ -25,9 +25,9 @@ artifact cleanup and audit. Source PDFs and acknowledged active vectors remain.
 Busy workers return recoverable 503 until output cleanup is complete; see docs/a6.md.
 Generated lesson text is stored in PostgreSQL. Active learner session state
 is held in memory.
-The separate Streamlit Testbench has A1, A2, A4 and A6 forms plus health/API explorer.
-The user-approved local mode is enabled through ignored root .env on this
-workstation. Production authentication is the default; see docs/local-testing.md.
+Frontend2 exercises authoring and learning through the backend APIs.
+Production authentication is the default. [Local API testing](docs/local-testing.md)
+describes the development settings and curl commands.
 
 Dependency authority is pyproject.toml plus generated uv.lock. Python 3.12,
 CPU PyTorch and Docling 2.115.0 are installed with uv sync --locked --no-dev.
