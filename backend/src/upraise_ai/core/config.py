@@ -11,11 +11,16 @@ class Settings(BaseSettings):
 
     environment: Literal["production", "development"] = "production"
     local_test_mode: bool = False
+    local_jwt_test_mode: bool = False
 
     @model_validator(mode="after")
     def local_mode_requires_development(self):
         if self.local_test_mode and self.environment != "development":
             raise ValueError("local_test_mode requires environment=development")
+        if self.local_jwt_test_mode and self.environment != "development":
+            raise ValueError("local_jwt_test_mode requires environment=development")
+        if self.local_test_mode and self.local_jwt_test_mode:
+            raise ValueError("local_test_mode and local_jwt_test_mode are mutually exclusive")
         return self
 
     jobs_dsn: SecretStr = SecretStr("")

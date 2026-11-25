@@ -1,0 +1,4 @@
+{
+  "teacher": {"label": "Teacher", "scope": "documents:read"},
+  "operator": {"label": "Operator", "scope": "jobs:read"}
+}

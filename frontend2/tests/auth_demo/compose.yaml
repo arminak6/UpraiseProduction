@@ -1,0 +1,15 @@
+name: upraise-auth-demo
+
+services:
+  auth-demo:
+    image: upraise-backend:latest
+    pull_policy: never
+    init: true
+    working_dir: /demo
+    command: ["python", "demo.py", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:8513:8513"
+    volumes:
+      - .:/demo:ro
+      - ../../../backend/src:/app/src:ro
+      - ../../styles.css:/ui/styles.css:ro

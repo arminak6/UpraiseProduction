@@ -1,0 +1,70 @@
+name: upraise-auth-workspace
+
+x-workspace-databases: &workspace-databases
+  UPRAISE_JOBS_DSN: postgresql://upraise_jobs:upraise_demo_jobs@postgres:5432/upraise_jobs
+  UPRAISE_AUDIT_DSN: postgresql://upraise_audit_app:upraise_demo_audit@postgres:5432/upraise_audit
+  UPRAISE_QDRANT_URL: http://qdrant:6333
+  UPRAISE_DATA_DIR: /data/ingestion
+
+services:
+  workspace:
+    image: upraise-backend:latest
+    pull_policy: never
+    init: true
+    working_dir: /demo
+    command: ["python", "demo.py", "--workspace", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:8502:8502"
+    environment:
+      <<: *workspace-databases
+      PYTHONPATH: /app/src:/ui
+    volumes:
+      - .:/demo:ro
+      - ../../:/ui:ro
+      - ../../../backend/src:/app/src:ro
+      - ingestion_data:/data/ingestion
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8502/demo/session', timeout=3).status == 200"]
+      interval: 5s
+      timeout: 4s
+      retries: 8
+
+  postgres:
+    extends:
+      file: ../../../compose.yaml
+      service: postgres
+    environment:
+      POSTGRES_DB: upraise_audit
+      POSTGRES_USER: upraise_dev
+      POSTGRES_PASSWORD: upraise_demo_postgres
+
+  qdrant:
+    extends:
+      file: ../../../compose.yaml
+      service: qdrant
+
+  migrate:
+    extends:
+      file: ../../../compose.yaml
+      service: migrate
+    pull_policy: never
+    environment:
+      PGHOST: postgres
+      PGUSER: upraise_dev
+      PGPASSWORD: upraise_demo_postgres
+      JOBS_DB: upraise_jobs
+      JOBS_USER: upraise_jobs
+      JOBS_PASSWORD: upraise_demo_jobs
+      AUDIT_DB: upraise_audit
+      AUDIT_USER: upraise_audit_app
+      AUDIT_PASSWORD: upraise_demo_audit
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  ingestion_data:

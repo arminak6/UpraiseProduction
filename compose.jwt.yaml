@@ -1,0 +1,56 @@
+name: upraise-jwt
+
+services:
+  backend:
+    image: upraise-backend:latest
+    build:
+      context: ./backend
+    pull_policy: never
+    init: true
+    command: ["python", "/jwt-demo/jwt_backend.py"]
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8001:8001"
+    env_file:
+      - path: ./codex_helper/jwt-test/client.env
+        required: false
+    environment:
+      UPRAISE_ENVIRONMENT: development
+      UPRAISE_LOCAL_TEST_MODE: "false"
+      UPRAISE_LOCAL_JWT_TEST_MODE: "true"
+      UPRAISE_JOBS_DSN: postgresql://upraise_jobs:upraise_demo_jobs@postgres:5432/upraise_jobs
+      UPRAISE_AUDIT_DSN: postgresql://upraise_audit_app:upraise_demo_audit@postgres:5432/upraise_audit
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./frontend2/tests/auth_demo:/jwt-demo:ro
+      - ingestion_data:/data/ingestion
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200"]
+      interval: 5s
+      timeout: 4s
+      retries: 8
+
+  postgres:
+    extends:
+      file: frontend2/tests/auth_demo/workspace.compose.yaml
+      service: postgres
+
+  qdrant:
+    extends:
+      file: frontend2/tests/auth_demo/workspace.compose.yaml
+      service: qdrant
+
+  migrate:
+    extends:
+      file: frontend2/tests/auth_demo/workspace.compose.yaml
+      service: migrate
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  ingestion_data:

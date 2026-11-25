@@ -1,9 +1,8 @@
 # UPRAISE backend
 
-FastAPI preserves A/B/C grouping. Implemented routes are GET /health,
-POST /v1/documents (A1), GET /v1/documents and DELETE /v1/documents/{document_id}
-(A2), GET /v1/jobs/{job_id} (A4), and DELETE /v1/jobs/{job_id} (A6).
-Run through root Compose; see ../README.md and docs/{a1,a2,a6}.md.
+FastAPI exposes authoring, job, learning-session, and operations APIs. The
+[API reference](docs/api-reference.md) lists the inputs, outputs, and permissions
+for every operation. [Project setup](../README.md#start) covers running Compose.
 The user explicitly removed the A1 Ingestion Guard on 2026-10-02. On 2026-10-06
 the user restored job_id in the A1 body: A1 returns 202 with document_id and
 job_id; Location supplies the A4 polling URL for that job. Internal PostgreSQL jobs remain.
@@ -24,7 +23,8 @@ Deletion fences workers, removes all attempts and audits before returning 204.
 workflows/jobs coordinates A6's CANCEL/RECEIVED reasons, durable worker fencing,
 artifact cleanup and audit. Source PDFs and acknowledged active vectors remain.
 Busy workers return recoverable 503 until output cleanup is complete; see docs/a6.md.
-No lesson storage or learner-session persistence is added.
+Generated lesson text is stored in PostgreSQL. Active learner session state
+is held in memory.
 The separate Streamlit Testbench has A1, A2, A4 and A6 forms plus health/API explorer.
 The user-approved local mode is enabled through ignored root .env on this
 workstation. Production authentication is the default; see docs/local-testing.md.

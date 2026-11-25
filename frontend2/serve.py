@@ -84,10 +84,10 @@ class Settings:
 class UpraiseServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, settings):
+    def __init__(self, address, settings, handler=None):
         self.settings = settings
         self.upstream = settings.opener()
-        super().__init__(address, UpraiseHandler)
+        super().__init__(address, handler or UpraiseHandler)
 
 
 class UpraiseHandler(SimpleHTTPRequestHandler):
@@ -108,11 +108,13 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
         # Never log tokens, query parameters, uploaded filenames, or response bodies.
         pass
 
-    def json_response(self, status, body):
+    def json_response(self, status, body, *, cookie=None):
         data = json.dumps(body).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(data)
@@ -142,9 +144,7 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/api/config":
-            settings = self.server.settings
-            self.json_response(200, {"backend_url": settings.backend_url, "ui_nonce": settings.ui_nonce,
-                                     "activity_id": settings.activity_id, "levels": settings.levels})
+            self.json_response(200, self.configuration())
         elif path.startswith("/api/"):
             self.proxy()
         elif path in ASSETS:
@@ -165,6 +165,14 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         self.proxy()
+
+    def configuration(self):
+        settings = self.server.settings
+        return {"backend_url": settings.backend_url, "ui_nonce": settings.ui_nonce,
+                "activity_id": settings.activity_id, "levels": settings.levels}
+
+    def bearer_token(self):
+        return self.server.settings.token
 
     def proxy(self):
         if not self.trusted_request(nonce=True):
@@ -225,7 +233,11 @@ class UpraiseHandler(SimpleHTTPRequestHandler):
             value = self.headers.get(name)
             if value:
                 headers[name] = value
-        token = self.server.settings.token.strip()
+        try:
+            token = self.bearer_token().strip()
+        except (URLError, OSError):
+            self.json_response(502, {"detail": "BACKEND_UNAVAILABLE"})
+            return
         if token:
             if token.lower().startswith("bearer "):
                 token = token[7:].strip()

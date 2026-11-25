@@ -56,6 +56,43 @@ page tests text/WAV interruptions. Learning also offers **Interrupt / ask teache
 with automatic current-chunk selection and an integrated B1/B4 question panel.
 See [B4](b4.md).
 
+## Direct curl with a JWT
+
+Create a test client secret from the project root before starting the JWT test
+stack. This generates a random secret if the file is absent. It prints the
+secret for the person setting up this local test.
+
+```powershell
+New-Item -ItemType Directory -Force codex_helper/jwt-test | Out-Null
+if (-not (Test-Path codex_helper/jwt-test/client.env)) {
+    "UPRAISE_JWT_TEST_CLIENT_SECRET=$([guid]::NewGuid().ToString('N'))" | Set-Content -Encoding Ascii codex_helper/jwt-test/client.env
+}
+Get-Content codex_helper/jwt-test/client.env
+docker compose -f compose.jwt.yaml up -d --wait
+```
+
+Both Compose setups use port 8000. Stop the regular Compose backend before
+starting the JWT stack if it is already running. The optional file enables
+the local token endpoint on port 8001. `auth-demo-middleware` is the test client
+ID. Use the generated value after `=` as its secret.
+
+```powershell
+$secret = Read-Host "Test client secret"
+$jwt = (curl.exe -fsS -u "auth-demo-middleware:$secret" -d "grant_type=client_credentials&scope=documents:read" http://127.0.0.1:8001/oauth/token | ConvertFrom-Json).access_token
+curl.exe -i -H "Authorization: Bearer $jwt" http://127.0.0.1:8000/v1/documents
+```
+
+These curl commands need only the URLs and test client credentials. The issuer
+returns a JWT valid for five minutes. For local administrators, the JWT stack
+also maintains a token inside the backend at `/tmp/upraise-access-token`.
+
+A valid token returns `200`. A missing or invalid token returns `401`. Request a
+fresh token if the current one expires. Use `demo-course` for authoring requests.
+The stack has its own PostgreSQL and Qdrant databases and runs without processing
+workers. It publishes only to localhost. This test mode requires development and
+verifies the bearer JWT, scopes, and course access. It accepts curl directly over
+HTTP. Production calls continue to use the configured mTLS gateway.
+
 ## Production/default authentication
 
 Both code and committed Compose/example defaults are:

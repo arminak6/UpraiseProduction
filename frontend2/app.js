@@ -195,7 +195,14 @@
     state.refreshing = true;
     const epoch = ++workspaceEpoch;
     try {
-      if (!state.config) { state.config = await api.initialize(); state.activityId = state.config.activity_id; }
+      if (!state.config) {
+        state.config = await api.initialize(); state.activityId = state.config.activity_id;
+        if (state.config.demo_user) {
+          state.uploadName ||= state.config.demo_course;
+          document.querySelector("#demo-user").textContent = `Signed in as ${state.config.demo_user}`;
+          document.querySelector("#demo-account").hidden = false;
+        }
+      }
       const results = await Promise.allSettled([loadMaterials(), loadCourses(), loadReviews()]);
       if (epoch !== workspaceEpoch) return;
       state.connected = results.every(result => result.status === "fulfilled" && result.value);
@@ -1372,6 +1379,15 @@
     if (player && !player.complete) { player.closed = true; player.invalid = "This page was left and its learning session was closed. Start a fresh session to continue."; player.token = ""; player.endPending = null; }
   });
   window.addEventListener("pageshow", event => { if (event.persisted) render(); });
+  document.querySelector("#demo-sign-out").addEventListener("click", async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const response = await fetch("/demo/logout", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+      if (!response.ok) throw new Error();
+      window.location.replace("/login");
+    } catch { toast("Could not sign out. Try again."); button.disabled = false; }
+  });
   render();
   void refreshWorkspace();
 })();

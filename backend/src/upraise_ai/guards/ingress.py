@@ -36,36 +36,21 @@ def jwks_client(url: str) -> jwt.PyJWKClient:
 bearer = HTTPBearer(auto_error=False)
 
 
-def ingress(
-    request: Request, settings: Settings = Depends(get_settings), token_info=Depends(bearer)
-) -> Principal:
-    if settings.local_test_mode:
-        # Explicit development opt-in only; never use forwarded client headers.
-        try:
-            peer = ipaddress.ip_address(request.client.host if request.client else "")
-            local = (peer.is_loopback or peer.is_private) and not (
-                peer.is_unspecified or peer.is_multicast or peer.is_link_local
-            )
-        except ValueError:
-            local = False
-        if not local:
-            raise HTTPException(403, "LOCAL_TEST_NETWORK_REQUIRED")
-        request.state.auth_mode = "local-test"
-        scopes = {"documents:write", "documents:read", "lessons:write", "jobs:read", "jobs:write", "sessions:write"}
-        if settings.operations_local_admin:
-            scopes.add("admin:operations")
-        return Principal(
-            "local-test-client", (), frozenset(scopes),
-            local_test=True,
+def require_local_peer(request: Request) -> None:
+    # Use the actual socket peer for both development modes.
+    try:
+        peer = ipaddress.ip_address(request.client.host if request.client else "")
+        local = (peer.is_loopback or peer.is_private) and not (
+            peer.is_unspecified or peer.is_multicast or peer.is_link_local
         )
-    if not (
-        settings.oauth_issuer
-        and settings.oauth_audience
-        and settings.oauth_jwks_url.startswith("https://")
-        and settings.oauth_clients
-        and settings.trusted_proxy_cidrs
-        and settings.mtls_allowed_fingerprints
-    ):
+    except ValueError:
+        local = False
+    if not local:
+        raise HTTPException(403, "LOCAL_TEST_NETWORK_REQUIRED")
+
+
+def require_mtls_gateway(request: Request, settings: Settings) -> None:
+    if not (settings.trusted_proxy_cidrs and settings.mtls_allowed_fingerprints):
         raise HTTPException(503, "INGRESS_NOT_CONFIGURED")
     # Uvicorn proxy-header processing is disabled: client is the actual gateway.
     try:
@@ -80,6 +65,31 @@ def ingress(
         f.lower() for f in settings.mtls_allowed_fingerprints
     }:
         raise HTTPException(403, "MTLS_REQUIRED")
+
+
+def ingress(
+    request: Request, settings: Settings = Depends(get_settings), token_info=Depends(bearer)
+) -> Principal:
+    if settings.local_test_mode or settings.local_jwt_test_mode:
+        require_local_peer(request)
+    if settings.local_test_mode:
+        request.state.auth_mode = "local-test"
+        scopes = {"documents:write", "documents:read", "lessons:write", "jobs:read", "jobs:write", "sessions:write"}
+        if settings.operations_local_admin:
+            scopes.add("admin:operations")
+        return Principal(
+            "local-test-client", (), frozenset(scopes),
+            local_test=True,
+        )
+    if not (
+        settings.oauth_issuer
+        and settings.oauth_audience
+        and settings.oauth_jwks_url.startswith("https://")
+        and settings.oauth_clients
+    ):
+        raise HTTPException(503, "INGRESS_NOT_CONFIGURED")
+    if not settings.local_jwt_test_mode:
+        require_mtls_gateway(request, settings)
     authorization = request.headers.get("authorization", "")
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "BEARER_TOKEN_REQUIRED", headers={"WWW-Authenticate": "Bearer"})
@@ -92,7 +102,7 @@ def ingress(
             algorithms=["RS256", "ES256"],
             issuer=settings.oauth_issuer,
             audience=settings.oauth_audience,
-            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+            options={"require": ["exp", "iss", "aud"]},
         )
     except jwt.PyJWKClientConnectionError:
         raise HTTPException(503, "IDENTITY_PROVIDER_UNAVAILABLE") from None

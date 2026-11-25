@@ -95,8 +95,13 @@ separate Streamlit testbench/player. C3 schema exists.
   aligned_* and revision_* lifecycle; pdf/,csv_processor.py,word_processor.py,
   powerpoint_{processor,layout,vision}.py,source_readiness.py ingestion/admission;
   storage/ persistence; guards/session_jwt.py session assertions.
-- backend/docs/ contains lifecycle/contracts, teaching-v{2,29,3,31}.md,
-  a7.md, powerpoint-ingestion.md, lesson-review.md, lesson-archive.md, b1-b5, b7.md and c3.md.
+- backend/docs/api-reference.md catalogs all 25 backend HTTP operations and their schemas.
+  Other backend/docs/ files cover teaching versions, ingestion, lifecycle and operations.
+- frontend2/tests/auth_demo/ runs Frontend2 with sign-in on 8502 via workspace.compose.yaml.
+  Separate PG/Qdrant, demo-course, production JWT/mTLS; processing workers are absent.
+  Standalone tester on 8513 uses an in-memory document fixture. Run steps in its README.
+  compose.jwt.yaml serves direct JWT curl on 8000 with isolated storage. Optional ignored client.env
+  enables loopback OAuth on 8001. Verified token/API curl 200, wrong secret/missing token 401.
 - frontend/ Streamlit; frontend2/{app,api,ui,voice,voice-capture-worklet}.js,serve.py,index.html,styles.css,
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
 - Archive: storage/lesson_archive.py, services/lesson_replacement.py,
@@ -178,6 +183,13 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 ## User notes (preserve verbatim)
 
 ## Last verified
+
+2026-11-24: Local auth demo exercised login, OAuth issuance, HTTPS signing-key
+lookup, mTLS, JWT validation and API permissions in a disposable Compose container.
+Port 8502 workspace authenticated real read/upload routes in isolated storage;
+Chrome verified sign-in, all four sections and sign-out. 80 UI and 18 bridge tests passed.
+Service JWT `iat`/`sub` are optional with an allowlisted identity. Ingress unit and
+both Compose auth checks passed with the shorter token. Direct JWT Compose curl returned 200/401/403 as expected.
 
 2026-11-18: Synced frontend2 proof-of-concept copy and sidebar changes. Checked
 frontend2/index.html, app.js and UI assertions against the transfer checkout.

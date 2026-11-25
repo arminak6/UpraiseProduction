@@ -195,6 +195,10 @@ the bridge checks Host/Origin and a per-server UI nonce, restricts endpoint and
 header forwarding, and exposes only the static UI assets. It is not a public
 multi-user authentication gateway.
 
+The [local authentication workspace](tests/auth_demo/README.md) adds sign-in
+before the same UI on port 8502 and exercises production JWT and mTLS checks
+with two test users. Its Compose project has its own database and test course.
+
 ## Verification
 
 ```powershell

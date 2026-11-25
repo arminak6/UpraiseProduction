@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UPRAISE Authentication Demo</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/demo.css">
+  <script src="/demo.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="demo-header"><span class="brand">UPRAISE</span><span>Authentication demo</span></div>
+  </header>
+  <main class="demo-main">
+    <section id="sign-in" class="card card-padding" hidden>
+      <h1>Sign in</h1>
+      <p class="intro-copy">Use the teacher or operator credentials printed when the demo starts.</p>
+      <form id="login" method="post" action="/demo/login">
+        <div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" maxlength="128" required></div>
+        <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required></div>
+        <button class="button button-wide" type="submit">Sign in</button>
+      </form>
+    </section>
+    <section id="workspace" class="card card-padding" hidden>
+      <div class="card-title-row"><h1>Test backend access</h1><button class="button button-secondary" id="logout" type="button">Sign out</button></div>
+      <p class="intro-copy" id="identity"></p>
+      <p class="intro-copy">Teachers can list sample documents. Operators can read backend version information.</p>
+      <div class="demo-actions">
+        <button class="button" id="documents" type="button">List documents</button>
+        <button class="button button-secondary" id="version" type="button">Read backend version</button>
+      </div>
+      <section id="result" aria-labelledby="result-title" hidden>
+        <h2 id="result-title">API response</h2>
+        <p id="result-status" role="status"></p>
+        <pre id="result-body" tabindex="0"></pre>
+      </section>
+    </section>
+    <p id="error" class="inline-error" role="alert"></p>
+    <noscript>Enable JavaScript to use the demo.</noscript>
+  </main>
+</body>
+</html>

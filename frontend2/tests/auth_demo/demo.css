@@ -1,0 +1,15 @@
+.demo-header, .demo-main { width: min(720px, calc(100% - 32px)); margin-inline: auto; }
+.demo-header { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--teal-dark); }
+.demo-main { min-height: auto; padding-top: clamp(28px, 8vw, 88px); }
+#sign-in { max-width: 440px; margin-inline: auto; }
+#login { display: grid; gap: 16px; margin-top: 24px; }
+.demo-main .card-title-row { margin-bottom: 12px; align-items: start; }
+.demo-main .card-title-row h1 { margin-bottom: 0; }
+.demo-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0; }
+#result { border-top: 1px solid var(--line); padding-top: 18px; }
+#result h2 { font-size: 16px; }
+#result-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; background: var(--canvas); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+@media (max-width: 480px) {
+  .demo-main .card-padding { padding: 22px; }
+  .demo-main .card-title-row { flex-wrap: wrap; }
+}

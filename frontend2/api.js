@@ -74,13 +74,14 @@
     const timer = setTimeout(() => controller.abort(), options.timeout || 195000);
     try {
       const response = await fetch("/api" + path, { method: options.method || "GET", body, headers,
-        credentials: "omit", cache: "no-store", redirect: "error", signal: controller.signal,
+        credentials: "same-origin", cache: "no-store", redirect: "error", signal: controller.signal,
         keepalive: options.keepalive || false });
       const mode = response.headers.get("X-UPRAISE-Auth-Mode");
       if (mode) window.dispatchEvent(new CustomEvent("upraise-auth-mode", { detail: mode }));
       if (!response.ok) {
         let errorBody;
         try { errorBody = await response.json(); } catch { errorBody = {}; }
+        if (response.status === 401 && errorBody?.detail === "DEMO_LOGIN_REQUIRED") window.location.replace("/login");
         throw new APIError(response.status, errorBody);
       }
       if (response.status === 204) return null;
