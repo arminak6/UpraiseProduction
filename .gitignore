@@ -3,7 +3,8 @@
 !.env.example
 aws_credentials.json
 /callback_tls/*
-!/callback_tls/README.md
+[Rr][Ee][Aa][Dd][Mm][Ee]*
+!/README-JWT.md
 node_modules/
 .venv/
 __pycache__/

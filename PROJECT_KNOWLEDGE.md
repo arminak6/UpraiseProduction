@@ -96,6 +96,7 @@ It presents draft generation, review and playback. C3 schema exists.
   storage/ persistence; guards/session_jwt.py session assertions.
 - backend/docs/api-reference.md catalogs all 25 backend HTTP operations and their schemas.
   Other backend/docs/ files cover teaching versions, ingestion, lifecycle and operations.
+- README-JWT.md provides the short local token and curl guide for colleagues.
 - frontend2/tests/auth_demo/ runs Frontend2 with sign-in on 8502 via workspace.compose.yaml.
   The UI bridge checks the browser session, requests a client-credentials JWT, and
   calls the production-mode backend through mTLS. Separate PG/Qdrant for demo-course;
@@ -110,7 +111,7 @@ It presents draft generation, review and playback. C3 schema exists.
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
 - Archive: storage/lesson_archive.py, services/lesson_replacement.py,
   workflows/archive_lessons.py. Matching integration tests cover erasure/TTL/A7.
-- .gitignore excludes dependency and tool caches, codex_helper/ evidence,
+- .gitignore excludes README files except root README-JWT.md, dependency and tool caches, codex_helper/ evidence,
   course_archive/ data and FUTURE_UPDATES.md. Assessment evidence is indexed below.
   Fewer flags alone do not establish teaching quality. No listening assessment performed.
 - codex_helper/aws-cost-report/: measured API costs and PDF generators. Regular
@@ -187,6 +188,11 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 ## User notes (preserve verbatim)
 
 ## Last verified
+
+2026-11-26: Checked README ignore rules and retained root README-JWT.md as an exception.
+
+2026-11-26: Checked README-JWT.md against local_auth.py, guards/ingress.py and
+compose.yaml for client credentials, token expiry, course and loopback binding.
 
 2026-11-25: Built default Compose with fresh disposable volumes. Verified seven
 restart policies, migration exit 0, /ready and Frontend2 JWT HTTP 200. Forced
