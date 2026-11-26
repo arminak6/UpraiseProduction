@@ -30,14 +30,14 @@ are sufficient; there are no runtime pip/npm dependencies. Host-run defaults use
 python frontend2/serve.py --port 8503 --backend http://127.0.0.1:8000
 ```
 
-Or use the optional Docker Compose service:
+Frontend2 starts with `docker compose up`. To rebuild only Frontend2:
 
 ```powershell
 docker compose up --build -d --no-deps --wait frontend2
 ```
 
-The backend must already be running for `--no-deps`. The service is also included
-in the existing `tools` profile. Compose uses `http://backend:8000` by default,
+The backend must already be running for `--no-deps`. Compose uses
+`http://backend:8000` by default,
 binds the host port to loopback, and supports `FRONTEND2_PORT` (default 8502).
 If an older prototype server is listening on that port, stop it first. Directly
 opening `index.html` is no longer supported: the HTTP bridge is required.

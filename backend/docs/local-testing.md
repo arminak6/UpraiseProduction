@@ -16,7 +16,7 @@ UPRAISE_LOCAL_JWT_TEST_MODE=false
 Start/rebuild from the project root:
 
 ```sh
-docker compose --profile tools up --build -d --wait --wait-timeout 180
+docker compose up --build -d --wait --wait-timeout 180
 ```
 
 Open Frontend2 at http://localhost:8502 for upload, generation, review and

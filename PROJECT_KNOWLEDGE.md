@@ -125,7 +125,9 @@ It presents draft generation, review and playback. C3 schema exists.
 - Docker Desktop Linux; API8000/frontend2 8502. Build:
   docker compose build backend frontend2. Migrate:
   docker compose run --rm --no-deps migrate. Refresh changed shared backend services:
-  docker compose --profile tools up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
+  docker compose up -d --no-deps --wait --wait-timeout 180 backend worker lesson-worker lesson-delivery
+  Default Compose starts Frontend2 and uses /ready for backend health. Its seven
+  long-running services have unless-stopped restart policies; migrate is a one-shot.
 - Drain jobs before pipeline/config changes; restart clears RAM sessions. Never
   reset live volumes/re-ingest sources for A3. Runtime pipeline default lesson-v3-a3-12.
 - codex_helper/validate-a3v2.ps1 -Selection 'not codex_nonexistent_sentinel': full
@@ -136,10 +138,9 @@ It presents draft generation, review and playback. C3 schema exists.
   UI changes. New runtime assets must be allowed by frontend2/.dockerignore.
 - UI tests: python -m unittest discover -s frontend2/tests -p test_server.py -v;
   npm --prefix frontend2 ci --ignore-scripts; npm --prefix frontend2 test.
-- Fresh Ubuntu transfer: codex_helper/ubuntu-transfer/UpraiseProduction-ubuntu-test.zip;
-  START-UBUNTU.md in that directory and ZIP explains local test configuration,
-  separate AWS credentials, UID10001 bind-mount permissions and tools-profile startup.
-  Source-only; existing course_archive and Docker volumes are not migrated.
+- Fresh Ubuntu Git clone: README Start covers credentials, archive permissions,
+  Docker startup at boot and Compose readiness. Git carries source and templates.
+  Transfer existing course_archive and Docker data separately when needed.
 - Ruff backend config backend/pyproject.toml; Frontend2 scoped E4,E7,E9,F with test
   E402 excluded. git diff --check. One-off logs/evidence under codex_helper/.
 
@@ -187,8 +188,12 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 
 ## Last verified
 
-2026-11-25: Removed the standalone Streamlit source and Compose service. Main Compose
-publishes only the backend on 8000 and Frontend2 on 8502 with the tools profile.
+2026-11-25: Built default Compose with fresh disposable volumes. Verified seven
+restart policies, migration exit 0, /ready and Frontend2 JWT HTTP 200. Forced
+backend process exit 42, verified Docker restart count rose and JWT calls recovered.
+
+2026-11-25: Removed the standalone Streamlit source and Compose service. Verified its
+port closed and the backend and Frontend2 on ports 8000 and 8502.
 
 2026-11-25: Regular Frontend2 on 8502 uses the main backend's JWT endpoint.
 Confirmed direct unauthenticated documents request returns 401 and the UI bridge

@@ -68,6 +68,7 @@ x-ingestion-environment: &ingestion-environment
 
 services:
   backend:
+    restart: unless-stopped
     build:
       context: ./backend
     ports:
@@ -113,7 +114,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); assert response.status == 200"
+        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3); assert response.status == 200"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -238,7 +239,7 @@ services:
       start_period: 20s
 
   frontend2:
-    profiles: ["tools"]
+    restart: unless-stopped
     build:
       context: ./frontend2
     ports:
@@ -270,6 +271,7 @@ services:
       start_period: 10s
 
   qdrant:
+    restart: unless-stopped
     image: qdrant/qdrant:v1.19.1
     volumes:
       - qdrant_data:/qdrant/storage
@@ -291,6 +293,7 @@ services:
       start_period: 10s
 
   postgres:
+    restart: unless-stopped
     image: postgres:17.11-bookworm
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-upraise_audit}

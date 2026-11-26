@@ -72,28 +72,47 @@ or guaranteed accuracy. See [source fidelity](backend/docs/a1.md#source-fidelity
 
 ## Start
 
-Docker Desktop/Linux containers and Compose are required. The ignored root
-aws_credentials.json is mounted read-only into the backend and workers, never baked into
-images. It already contains the user-provided AWS settings. A normal AWS
-credential chain is supported by the Python adapter when no credential file
-is configured; adjust the deployment mount when using an IAM role.
-Create the ignored `course_archive/` directory before the first start and make
-it writable by container UID 10001. This is the persistent JSON/WAV bind mount;
-see [archive storage](backend/docs/lesson-archive.md).
+Use Docker Engine with the Compose plugin on Ubuntu, or Docker Desktop in Linux
+container mode. On a fresh Ubuntu clone, run the one-time setup from the root:
+
+```sh
+sudo systemctl enable --now docker.service containerd.service
+cp .env.example .env
+chmod 600 .env
+sudo install -d -o 10001 -g 10001 -m 0750 course_archive
+```
+
+Set the PostgreSQL passwords and authentication mode in `.env`. For a server
+using the production backend, supply the [OAuth and mTLS settings](backend/docs/a1.md#ingress-configuration).
+For private local tests, use the [local JWT settings](backend/docs/local-testing.md#direct-curl-with-a-jwt).
+
+Supply `aws_credentials.json` separately. The default Compose configuration
+mounts it read-only and the runtime UID 10001 must be able to read it. The AWS
+adapter also supports the default credential chain with a deployment override
+that omits the file mount. If you configure callbacks, provision credentials
+under [`callback_tls/`](callback_tls/README.md). The archive directory holds the
+[persistent course packages](backend/docs/lesson-archive.md).
+
+Start and check the stack:
 
 ```sh
 docker compose config --quiet
 docker compose up --build -d --wait --wait-timeout 180
 docker compose ps
+curl -fsS http://127.0.0.1:8000/ready
 docker compose logs -f backend worker lesson-worker lesson-delivery
 ```
 
-Startup creates the durable job/audit schemas through a repeatable migrate
-service. Backend/worker use separate non-superuser database roles. The
-bootstrap service alone receives PostgreSQL administrative credentials.
-The Compose password defaults are for local infrastructure; replace them for
-deployment. .env.example describes the settings, including connection-string
-overrides for passwords that need URI encoding.
+The migrate service exits after setting up the database schemas. Compose waits
+for the core dependencies to be healthy. Frontend2 starts with the backend and
+workers. The long-running services use `restart: unless-stopped`, so Docker
+restarts them after an unexpected exit or when the daemon starts after a reboot.
+Health checks report readiness while containers run. [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/)
+
+The clone contains source and configuration templates. Existing PostgreSQL and
+Qdrant data, the archives and credentials need a separate transfer to the
+server. Only ports 8000 and 8502 are published by the default stack, both on the
+server's loopback interface.
 
 - API docs: http://localhost:8000/docs
 - Liveness: http://localhost:8000/health
@@ -104,7 +123,7 @@ overrides for passwords that need URI encoding.
   [C5](backend/docs/c5.md) reports model IDs, prompt hashes, pipelines and B2 policy.
 - Runtime administration: `PUT /v1/admin/kill-switch` requires `admin:operations`;
   [C3](backend/docs/c3.md) documents shared controls, audit, B2 bypass and rollout.
-- UPRAISE client interface: http://localhost:8502. With the backend running, use
+- UPRAISE client interface: http://localhost:8502. To rebuild only the UI, use
   `docker compose up --build -d --no-deps --wait frontend2` or
   `python frontend2/serve.py`. Three sections connect real material ingestion,
   course generation/revision and text/audio learning with AI questions. See
@@ -190,7 +209,7 @@ volume storage supports the current single-host Compose deployment; multiple
 hosts need shared storage or an object-storage adapter.
 
 ```sh
-docker compose --profile tools down
+docker compose down
 docker compose up -d --wait --wait-timeout 180
 ```
 
@@ -237,7 +256,6 @@ UpraiseProduction/
       test_local_testing.py
       test_ingress.py
       test_moodle.py
-    codex_helper/.gitkeep
     src/upraise_ai/
       main.py
       api/

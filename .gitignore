@@ -1,5 +1,6 @@
 .env
-**/.env
+.env.*
+!.env.example
 aws_credentials.json
 /callback_tls/*
 !/callback_tls/README.md
@@ -12,5 +13,4 @@ __pycache__/
 /codex_helper/
 /course_archive/
 /FUTURE_UPDATES.md
-/backend/codex_helper/*
-!/backend/codex_helper/.gitkeep
+/backend/codex_helper/
