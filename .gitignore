@@ -4,6 +4,7 @@
 aws_credentials.json
 /callback_tls/*
 [Rr][Ee][Aa][Dd][Mm][Ee]*
+!/README.md
 !/README-JWT.md
 !/README-API.md
 node_modules/
