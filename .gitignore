@@ -5,6 +5,7 @@ aws_credentials.json
 /callback_tls/*
 [Rr][Ee][Aa][Dd][Mm][Ee]*
 !/README-JWT.md
+!/README-API.md
 node_modules/
 .venv/
 __pycache__/

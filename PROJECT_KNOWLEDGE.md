@@ -97,6 +97,8 @@ It presents draft generation, review and playback. C3 schema exists.
 - backend/docs/api-reference.md catalogs all 25 backend HTTP operations and their schemas.
   Other backend/docs/ files cover teaching versions, ingestion, lifecycle and operations.
 - README-JWT.md provides the short local token and curl guide for colleagues.
+- README-API.md contains a concise 25-endpoint curl guide. The detailed reference
+  remains in backend/docs/api-reference.md.
 - frontend2/tests/auth_demo/ runs Frontend2 with sign-in on 8502 via workspace.compose.yaml.
   The UI bridge checks the browser session, requests a client-credentials JWT, and
   calls the production-mode backend through mTLS. Separate PG/Qdrant for demo-course;
@@ -111,7 +113,7 @@ It presents draft generation, review and playback. C3 schema exists.
   tests/{test_server.py,ui.test.cjs}. README explains auth/run and bridge allowlist.
 - Archive: storage/lesson_archive.py, services/lesson_replacement.py,
   workflows/archive_lessons.py. Matching integration tests cover erasure/TTL/A7.
-- .gitignore excludes README files except root README-JWT.md, dependency and tool caches, codex_helper/ evidence,
+- .gitignore excludes README files except root README-JWT.md and README-API.md, dependency and tool caches, codex_helper/ evidence,
   course_archive/ data and FUTURE_UPDATES.md. Assessment evidence is indexed below.
   Fewer flags alone do not establish teaching quality. No listening assessment performed.
 - codex_helper/aws-cost-report/: measured API costs and PDF generators. Regular
@@ -189,7 +191,11 @@ variant triggers rejection; candidate also duplicates/misaligns the price table.
 
 ## Last verified
 
-2026-11-26: Checked README ignore rules and retained root README-JWT.md as an exception.
+2026-11-26: Matched the 25 curl-guide operations and input fields in README-API.md
+against live /openapi.json and checked input choices against backend schemas.
+
+2026-11-26: Checked README ignore rules and retained root README-JWT.md and
+README-API.md as exceptions.
 
 2026-11-26: Checked README-JWT.md against local_auth.py, guards/ingress.py and
 compose.yaml for client credentials, token expiry, course and loopback binding.
